@@ -1,3 +1,5 @@
+'use client';
+
 import Link from 'next/link';
 import { Package, Users, ArrowRightLeft, LayoutDashboard, LogOut } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
