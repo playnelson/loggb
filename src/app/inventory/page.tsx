@@ -12,8 +12,8 @@ interface Product {
   description: string;
   category: string;
   location: string;
-  quantity: number;
-  min_quantity: number;
+  quantity_current: number;
+  quantity_min: number;
   unit: string;
 }
 
@@ -25,7 +25,7 @@ export default function InventoryPage() {
   const fetchProducts = async () => {
     setLoading(true);
     const { data, error } = await supabase
-      .from('products')
+      .from('items')
       .select('*')
       .order('code', { ascending: true });
 
@@ -33,9 +33,9 @@ export default function InventoryPage() {
       console.error('Error fetching products:', error);
       // Fallback data for preview if Supabase is not connected
       setProducts([
-        { id: '1', code: 'MAT-161', description: 'Chave Inglesa 10"', category: 'Ferramenta', location: 'Prateleira A1', quantity: 5, min_quantity: 10, unit: 'un' },
-        { id: '2', code: 'MAT-162', description: 'Luva de Raspa', category: 'EPI', location: 'Gaveta B2', quantity: 50, min_quantity: 20, unit: 'par' },
-        { id: '3', code: 'MAT-163', description: 'Tubo PVC 20mm', category: 'Tubulação', location: 'Pátio 4', quantity: 15, min_quantity: 30, unit: 'm' },
+        { id: '1', code: 'MAT-161', description: 'Chave Inglesa 10"', category: 'Ferramenta', location: 'Prateleira A1', quantity_current: 5, quantity_min: 10, unit: 'un' },
+        { id: '2', code: 'MAT-162', description: 'Luva de Raspa', category: 'EPI', location: 'Gaveta B2', quantity_current: 50, quantity_min: 20, unit: 'par' },
+        { id: '3', code: 'MAT-163', description: 'Tubo PVC 20mm', category: 'Tubulação', location: 'Pátio 4', quantity_current: 15, quantity_min: 30, unit: 'm' },
       ]);
     } else {
       setProducts(data || []);
@@ -112,7 +112,7 @@ export default function InventoryPage() {
                 </tr>
               ) : (
                 filteredProducts.map((p) => {
-                  const isLowStock = p.quantity <= p.min_quantity;
+                  const isLowStock = p.quantity_current <= p.quantity_min;
                   return (
                     <tr key={p.id} className="hover:bg-slate-50 transition-colors group">
                       <td className="px-6 py-4 font-mono text-sm font-bold text-primary">{p.code}</td>
@@ -129,12 +129,12 @@ export default function InventoryPage() {
                       <td className="px-6 py-4">
                         <div className="flex flex-col items-center">
                           <span className={`text-sm font-bold ${isLowStock ? 'text-red-500' : 'text-primary'}`}>
-                            {p.quantity}
+                            {p.quantity_current}
                           </span>
                           {isLowStock && (
                             <div className="flex items-center gap-1 text-[10px] text-red-400 mt-0.5">
                               <AlertCircle size={10} />
-                              Crítico ({p.min_quantity})
+                              Crítico ({p.quantity_min})
                             </div>
                           )}
                         </div>

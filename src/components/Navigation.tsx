@@ -1,13 +1,22 @@
 import Link from 'next/link';
-import { Package, Users, ArrowRightLeft, LayoutDashboard } from 'lucide-react';
+import { Package, Users, ArrowRightLeft, LayoutDashboard, LogOut } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
+import { useRouter } from 'next/navigation';
 
 export function Sidebar() {
+  const router = useRouter();
   const menuItems = [
     { name: 'Dashboard', icon: <LayoutDashboard size={20} />, href: '/' },
     { name: 'Almoxarifado', icon: <Package size={20} />, href: '/inventory' },
     { name: 'Colaboradores', icon: <Users size={20} />, href: '/staff' },
     { name: 'Movimentação', icon: <ArrowRightLeft size={20} />, href: '/movement' },
   ];
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    router.push('/login');
+    router.refresh();
+  };
 
   return (
     <aside className="w-64 bg-primary text-white h-screen flex flex-col fixed left-0 top-0 pt-16">
@@ -22,6 +31,13 @@ export function Sidebar() {
             <span className="font-medium">{item.name}</span>
           </Link>
         ))}
+        <button
+          onClick={handleSignOut}
+          className="w-full flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-red-500/10 text-red-400 transition-colors mt-8"
+        >
+          <LogOut size={20} />
+          <span className="font-medium">Sair</span>
+        </button>
       </nav>
       <div className="p-4 border-t border-slate-800">
         <p className="text-xs text-slate-400">© 2026 LOGG-B System</p>

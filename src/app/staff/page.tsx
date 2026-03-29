@@ -8,7 +8,7 @@ import { Search, UserPlus, Mail, Phone, ExternalLink } from 'lucide-react';
 
 interface Employee {
   id: string;
-  name: string;
+  full_name: string;
   role: string | null;
   status: string;
   active_assets_count: number;
@@ -31,10 +31,10 @@ export default function StaffPage() {
       console.error('Error fetching employees:', error);
       // Fallback data for preview
       setEmployees([
-        { id: '1', name: 'Ricardo Silva', role: 'Soldador Especialista', status: 'Ativo', active_assets_count: 5 },
-        { id: '2', name: 'Ana Oliveira', role: 'Segurança do Trabalho', status: 'Ativo', active_assets_count: 2 },
-        { id: '3', name: 'Carlos Santos', role: 'Almoxarife Sênior', status: 'Em Férias', active_assets_count: 0 },
-        { id: '4', name: 'Mariana Lima', role: 'Téc. Tubulação', status: 'Ativo', active_assets_count: 8 },
+        { id: '1', full_name: 'Ricardo Silva', role: 'Soldador Especialista', status: 'Ativo', active_assets_count: 5 },
+        { id: '2', full_name: 'Ana Oliveira', role: 'Segurança do Trabalho', status: 'Ativo', active_assets_count: 2 },
+        { id: '3', full_name: 'Carlos Santos', role: 'Almoxarife Sênior', status: 'Em Férias', active_assets_count: 0 },
+        { id: '4', full_name: 'Mariana Lima', role: 'Téc. Tubulação', status: 'Ativo', active_assets_count: 8 },
       ]);
     } else {
       setEmployees(data || []);
@@ -48,7 +48,7 @@ export default function StaffPage() {
   }, []);
 
   const filteredEmployees = employees.filter(e => 
-    e.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    e.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (e.role && e.role.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
@@ -89,10 +89,10 @@ export default function StaffPage() {
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 bg-slate-100 rounded-lg flex items-center justify-center text-primary font-bold text-xl uppercase">
-                    {e.name.charAt(0)}
+                    {e.full_name.charAt(0)}
                   </div>
                   <div>
-                    <h3 className="font-bold text-primary group-hover:text-secondary transition-colors">{e.name}</h3>
+                    <h3 className="font-bold text-primary group-hover:text-secondary transition-colors">{e.full_name}</h3>
                     <p className="text-sm text-slate-500">{e.role || 'Cargo não definido'}</p>
                     <div className="flex items-center gap-1 mt-1">
                       <div className={`w-2 h-2 rounded-full ${e.status === 'Ativo' ? 'bg-green-500' : 'bg-slate-300'}`}></div>

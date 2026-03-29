@@ -10,12 +10,12 @@ interface Product {
   id: string;
   code: string;
   description: string;
-  quantity: number;
+  quantity_current: number;
 }
 
 interface Employee {
   id: string;
-  name: string;
+  full_name: string;
 }
 
 export default function MovementPage() {
@@ -30,17 +30,17 @@ export default function MovementPage() {
   const fetchData = async () => {
     // Fallback data if Supabase is not connected
     const productsData = [
-      { id: '1', code: 'MAT-161', description: 'Chave Inglesa 10"', quantity: 5 },
-      { id: '2', code: 'MAT-162', description: 'Luva de Raspa', quantity: 50 },
-      { id: '3', code: 'MAT-163', description: 'Tubo PVC 20mm', quantity: 15 },
+      { id: '1', code: 'MAT-161', description: 'Chave Inglesa 10"', quantity_current: 5 },
+      { id: '2', code: 'MAT-162', description: 'Luva de Raspa', quantity_current: 50 },
+      { id: '3', code: 'MAT-163', description: 'Tubo PVC 20mm', quantity_current: 15 },
     ];
     const employeesData = [
-      { id: '1', name: 'Ricardo Silva' },
-      { id: '2', name: 'Ana Oliveira' },
-      { id: '3', name: 'Carlos Santos' },
+      { id: '1', full_name: 'Ricardo Silva' },
+      { id: '2', full_name: 'Ana Oliveira' },
+      { id: '3', full_name: 'Carlos Santos' },
     ];
 
-    const { data: pData } = await supabase.from('products').select('*');
+    const { data: pData } = await supabase.from('items').select('*');
     const { data: eData } = await supabase.from('employees').select('*');
 
     setProducts(pData && pData.length > 0 ? pData : productsData);
@@ -121,7 +121,7 @@ export default function MovementPage() {
                   <option value="">Buscar material no estoque...</option>
                   {products.map(p => (
                     <option key={p.id} value={p.id}>
-                      {p.code} - {p.description} ({p.quantity} disponíveis)
+                      {p.code} - {p.description} ({p.quantity_current} disponíveis)
                     </option>
                   ))}
                 </select>
@@ -140,7 +140,7 @@ export default function MovementPage() {
                 >
                   <option value="">Quem está retirando o material?</option>
                   {employees.map(e => (
-                    <option key={e.id} value={e.id}>{e.name}</option>
+                    <option key={e.id} value={e.id}>{e.full_name}</option>
                   ))}
                 </select>
               </div>
@@ -194,7 +194,7 @@ export default function MovementPage() {
               <div className="flex justify-between text-sm py-2 border-b border-slate-50">
                 <span className="text-slate-400">Funcionário</span>
                 <span className="text-primary font-bold">
-                  {employees.find(e => e.id === selectedEmployee)?.name || '--'}
+                  {employees.find(e => e.id === selectedEmployee)?.full_name || '--'}
                 </span>
               </div>
               <div className="flex justify-between text-sm py-2 border-b border-slate-50">
