@@ -27,8 +27,10 @@ export default function LoginPage() {
       setError(`Erro no login: ${loginError.message}`);
       setLoading(false);
     } else {
-      // Use window.location.href to ensure a full page reload and cookie cleanup on fresh login
-      window.location.href = '/';
+      // Force a tiny delay for cookies to settle on client before hitting the edge proxy
+      setTimeout(() => {
+        window.location.replace('/');
+      }, 500);
     }
   };
 
