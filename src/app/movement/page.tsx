@@ -4,7 +4,8 @@ export const dynamic = 'force-dynamic';
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { ShoppingCart, User, Package, ArrowRight, CheckCircle2, History } from 'lucide-react';
+import { ShoppingCart, User, Package, ArrowRight, CheckCircle2, History, FileUp } from 'lucide-react';
+import ImportSpreadsheet from '@/components/ImportSpreadsheet';
 
 interface Product {
   id: string;
@@ -26,6 +27,7 @@ export default function MovementPage() {
   const [quantity, setQuantity] = useState<number>(1);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
 
   const fetchData = async () => {
     // Fallback data if Supabase is not connected

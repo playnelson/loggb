@@ -2,9 +2,11 @@
 
 export const dynamic = 'force-dynamic';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { Search, Plus, Filter, AlertCircle, MoreHorizontal } from 'lucide-react';
+import { Search, Plus, Filter, AlertCircle, MoreHorizontal, X, FileUp } from 'lucide-react';
+import ImportSpreadsheet from '@/components/ImportSpreadsheet';
 
 interface Product {
   id: string;
@@ -17,10 +19,26 @@ interface Product {
   unit: string;
 }
 
-export default function InventoryPage() {
+function InventoryContent() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Form states
+  const [formData, setFormData] = useState({
+    code: '',
+    description: '',
+    category: 'Ferramenta',
+    location: '',
+    quantity_current: 0,
+    quantity_min: 0,
+    unit: 'un'
+  });
 
   const fetchProducts = async () => {
     setLoading(true);
@@ -31,7 +49,7 @@ export default function InventoryPage() {
 
     if (error) {
       console.error('Error fetching products:', error);
-      // Fallback data for preview if Supabase is not connected
+      // Fallback data for preview
       setProducts([
         { id: '1', code: 'MAT-161', description: 'Chave Inglesa 10"', category: 'Ferramenta', location: 'Prateleira A1', quantity_current: 5, quantity_min: 10, unit: 'un' },
         { id: '2', code: 'MAT-162', description: 'Luva de Raspa', category: 'EPI', location: 'Gaveta B2', quantity_current: 50, quantity_min: 20, unit: 'par' },
@@ -44,9 +62,45 @@ export default function InventoryPage() {
   };
 
   useEffect(() => {
-    // eslint-disable-next-line @typescript-eslint/no-floating-promises, react-hooks/set-state-in-effect
+    // eslint-disable-next-line @typescript-eslint/no-floating-promises
     fetchProducts();
   }, []);
+
+  useEffect(() => {
+    if (searchParams?.get('new') === 'true') {
+      setIsModalOpen(true);
+      // Clear the param without full refresh
+      router.replace('/inventory', { scroll: false });
+    }
+  }, [searchParams, router]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSubmitting(true);
+
+    const { error } = await supabase
+      .from('items')
+      .insert([formData]);
+
+    if (error) {
+      console.error('Error adding item:', error);
+      alert('Erro ao cadastrar item. Verifique o console.');
+    } else {
+      setIsModalOpen(false);
+      setFormData({
+        code: '',
+        description: '',
+        category: 'Ferramenta',
+        location: '',
+        quantity_current: 0,
+        quantity_min: 0,
+        unit: 'un'
+      });
+      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+      fetchProducts();
+    }
+    setIsSubmitting(false);
+  };
 
   const filteredProducts = products.filter(p => 
     p.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -60,11 +114,34 @@ export default function InventoryPage() {
           <h1 className="text-2xl font-bold text-primary">Almoxarifado LoggB</h1>
           <p className="text-slate-500">Gestão de materiais, EPIs e ferramentas.</p>
         </div>
-        <button className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-slate-800 transition-all font-medium">
-          <Plus size={18} />
-          Cadastrar Material
-        </button>
+        <div className="flex gap-2">
+          <button 
+            onClick={() => setIsImportModalOpen(true)}
+            className="flex items-center gap-2 bg-slate-100 text-primary border border-slate-200 px-4 py-2 rounded-lg hover:bg-slate-200 transition-all font-medium"
+          >
+            <FileUp size={18} className="text-secondary" />
+            Importar Inventário
+          </button>
+          <button 
+            onClick={() => setIsModalOpen(true)}
+            className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-slate-800 transition-all font-medium"
+          >
+            <Plus size={18} />
+            Cadastrar Material
+          </button>
+        </div>
       </div>
+
+      {isImportModalOpen && (
+        <div className="fixed inset-0 bg-primary/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <ImportSpreadsheet 
+            onComplete={() => {
+              setIsImportModalOpen(false);
+              fetchProducts();
+            }} 
+          />
+        </div>
+      )}
 
       {/* Filters & Search */}
       <div className="bg-white p-4 rounded-xl border border-border shadow-sm flex flex-col md:flex-row gap-4">
@@ -153,6 +230,137 @@ export default function InventoryPage() {
           </table>
         </div>
       </div>
+
+      {/* Modal Cadastro */}
+      {isModalOpen && (
+        <div className="fixed inset-0 bg-primary/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in duration-300">
+            <div className="p-6 border-b border-border flex items-center justify-between bg-slate-50">
+              <h2 className="text-xl font-bold text-primary">Novo Material</h2>
+              <button 
+                onClick={() => setIsModalOpen(false)}
+                className="p-1 hover:bg-slate-200 rounded-full transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            
+            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold uppercase text-slate-500">Código</label>
+                  <input 
+                    required
+                    type="text" 
+                    placeholder="Ex: MAT-101"
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-secondary/20 outline-none"
+                    value={formData.code}
+                    onChange={(e) => setFormData({...formData, code: e.target.value})}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold uppercase text-slate-500">Unidade</label>
+                  <select 
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none"
+                    value={formData.unit}
+                    onChange={(e) => setFormData({...formData, unit: e.target.value})}
+                  >
+                    <option value="un">Unidade (un)</option>
+                    <option value="par">Par</option>
+                    <option value="m">Metros (m)</option>
+                    <option value="kg">Quilos (kg)</option>
+                    <option value="cx">Caixa (cx)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold uppercase text-slate-500">Descrição</label>
+                <input 
+                  required
+                  type="text" 
+                  placeholder="Nome do material..."
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none"
+                  value={formData.description}
+                  onChange={(e) => setFormData({...formData, description: e.target.value})}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold uppercase text-slate-500">Categoria</label>
+                  <select 
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none"
+                    value={formData.category}
+                    onChange={(e) => setFormData({...formData, category: e.target.value})}
+                  >
+                    <option value="Ferramenta">Ferramenta</option>
+                    <option value="EPI">EPI</option>
+                    <option value="Tubulação">Tubulação</option>
+                    <option value="Consumível">Consumível</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold uppercase text-slate-500">Localização</label>
+                  <input 
+                    type="text" 
+                    placeholder="Ex: Prateleira A1"
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none"
+                    value={formData.location}
+                    onChange={(e) => setFormData({...formData, location: e.target.value})}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 pt-2">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold uppercase text-slate-500 text-secondary">Qtd. Atual</label>
+                  <input 
+                    type="number" 
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none"
+                    value={formData.quantity_current}
+                    onChange={(e) => setFormData({...formData, quantity_current: Number(e.target.value)})}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold uppercase text-slate-500 text-red-500">Qtd. Mínima</label>
+                  <input 
+                    type="number" 
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none"
+                    value={formData.quantity_min}
+                    onChange={(e) => setFormData({...formData, quantity_min: Number(e.target.value)})}
+                  />
+                </div>
+              </div>
+
+              <div className="pt-4 flex gap-3">
+                <button 
+                  type="button"
+                  onClick={() => setIsModalOpen(false)}
+                  className="flex-1 p-3 border border-slate-200 rounded-xl font-bold text-slate-500 hover:bg-slate-50 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="flex-1 p-3 bg-secondary text-white rounded-xl font-bold hover:bg-secondary/90 transition-all shadow-lg shadow-secondary/20 disabled:opacity-50"
+                >
+                  {isSubmitting ? 'Salvando...' : 'Cadastrar Item'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
+  );
+}
+
+export default function InventoryPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-center text-slate-500">Carregando almoxarifado...</div>}>
+      <InventoryContent />
+    </Suspense>
   );
 }

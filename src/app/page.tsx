@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { Package, Users, ArrowUpRight, AlertTriangle } from 'lucide-react';
 
 export default function Home() {
@@ -39,18 +40,24 @@ export default function Home() {
         <div className="bg-white p-6 rounded-xl border border-border shadow-sm">
           <h2 className="text-lg font-bold text-primary mb-4">Ações Rápidas</h2>
           <div className="grid grid-cols-2 gap-4">
-            <button className="flex flex-col items-center justify-center p-6 bg-slate-50 border border-slate-100 rounded-lg hover:border-secondary transition-all group">
+            <Link 
+              href="/inventory?new=true"
+              className="flex flex-col items-center justify-center p-6 bg-slate-50 border border-slate-100 rounded-lg hover:border-secondary transition-all group"
+            >
               <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm group-hover:bg-secondary transition-colors mb-3">
                 <Package className="text-primary group-hover:text-white" />
               </div>
               <span className="font-semibold text-primary">Novo Item</span>
-            </button>
-            <button className="flex flex-col items-center justify-center p-6 bg-slate-50 border border-slate-100 rounded-lg hover:border-secondary transition-all group">
+            </Link>
+            <Link 
+              href="/movement"
+              className="flex flex-col items-center justify-center p-6 bg-slate-50 border border-slate-100 rounded-lg hover:border-secondary transition-all group"
+            >
               <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm group-hover:bg-secondary transition-colors mb-3">
                 <ArrowUpRight className="text-primary group-hover:text-white" />
               </div>
               <span className="font-semibold text-primary">Nova Saída</span>
-            </button>
+            </Link>
           </div>
         </div>
       </div>

@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Search, UserPlus, Mail, Phone, ExternalLink } from 'lucide-react';
+import { Search, UserPlus, Mail, Phone, ExternalLink, X } from 'lucide-react';
 
 interface Employee {
   id: string;
@@ -18,14 +18,22 @@ export default function StaffPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Form states
+  const [formData, setFormData] = useState({
+    full_name: '',
+    role: '',
+    status: 'Ativo'
+  });
 
   const fetchEmployees = async () => {
     setLoading(true);
-    // In a real app, you would join with movements to calculate assets
     const { data, error } = await supabase
       .from('employees')
       .select('*')
-      .order('name', { ascending: true });
+      .order('full_name', { ascending: true });
 
     if (error) {
       console.error('Error fetching employees:', error);
@@ -43,9 +51,29 @@ export default function StaffPage() {
   };
 
   useEffect(() => {
-    // eslint-disable-next-line @typescript-eslint/no-floating-promises, react-hooks/set-state-in-effect
+    // eslint-disable-next-line @typescript-eslint/no-floating-promises
     fetchEmployees();
   }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSubmitting(true);
+
+    const { error } = await supabase
+      .from('employees')
+      .insert([formData]);
+
+    if (error) {
+      console.error('Error adding employee:', error);
+      alert('Erro ao cadastrar colaborador.');
+    } else {
+      setIsModalOpen(false);
+      setFormData({ full_name: '', role: '', status: 'Ativo' });
+      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+      fetchEmployees();
+    }
+    setIsSubmitting(false);
+  };
 
   const filteredEmployees = employees.filter(e => 
     e.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -56,10 +84,13 @@ export default function StaffPage() {
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-primary text-navy-800">Quadro de Funcionários</h1>
+          <h1 className="text-2xl font-bold text-primary">Quadro de Funcionários</h1>
           <p className="text-slate-500">Gestão de colaboradores e ativos em posse.</p>
         </div>
-        <button className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-slate-800 transition-all font-medium">
+        <button 
+          onClick={() => setIsModalOpen(true)}
+          className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-slate-800 transition-all font-medium"
+        >
           <UserPlus size={18} />
           Novo Colaborador
         </button>
@@ -85,14 +116,14 @@ export default function StaffPage() {
           <div className="col-span-full py-12 text-center text-slate-400">Nenhum colaborador encontrado.</div>
         ) : (
           filteredEmployees.map((e) => (
-            <div key={e.id} className="bg-white rounded-xl border border-border p-6 hover:shadow-md transition-shadow">
+            <div key={e.id} className="bg-white rounded-xl border border-border p-6 hover:shadow-md transition-shadow group">
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-slate-100 rounded-lg flex items-center justify-center text-primary font-bold text-xl uppercase">
+                  <div className="w-12 h-12 bg-slate-100 rounded-lg flex items-center justify-center text-primary font-bold text-xl uppercase group-hover:bg-secondary group-hover:text-white transition-colors">
                     {e.full_name.charAt(0)}
                   </div>
                   <div>
-                    <h3 className="font-bold text-primary group-hover:text-secondary transition-colors">{e.full_name}</h3>
+                    <h3 className="font-bold text-primary transition-colors">{e.full_name}</h3>
                     <p className="text-sm text-slate-500">{e.role || 'Cargo não definido'}</p>
                     <div className="flex items-center gap-1 mt-1">
                       <div className={`w-2 h-2 rounded-full ${e.status === 'Ativo' ? 'bg-green-500' : 'bg-slate-300'}`}></div>
@@ -109,12 +140,18 @@ export default function StaffPage() {
 
               <div className="mt-6 flex items-center justify-between border-t border-slate-50 pt-4">
                 <div className="flex gap-2">
-                  <button className="p-2 bg-slate-50 hover:bg-slate-100 border border-slate-100 rounded-lg transition-colors text-slate-500">
+                  <a 
+                    href={`mailto:${e.full_name.toLowerCase().replace(' ', '.')}@empresa.com.br`}
+                    className="p-2 bg-slate-50 hover:bg-slate-100 border border-slate-100 rounded-lg transition-colors text-slate-500"
+                  >
                     <Mail size={16} />
-                  </button>
-                  <button className="p-2 bg-slate-50 hover:bg-slate-100 border border-slate-100 rounded-lg transition-colors text-slate-500">
+                  </a>
+                  <a 
+                    href="tel:+5511999999999"
+                    className="p-2 bg-slate-50 hover:bg-slate-100 border border-slate-100 rounded-lg transition-colors text-slate-500"
+                  >
                     <Phone size={16} />
-                  </button>
+                  </a>
                 </div>
                 <button className="flex items-center gap-2 text-sm font-bold text-primary hover:text-secondary transition-colors">
                   Ver Ficha de Ativos <ExternalLink size={14} />
@@ -124,6 +161,80 @@ export default function StaffPage() {
           ))
         )}
       </div>
+
+      {/* Modal Cadastro Colaborador */}
+      {isModalOpen && (
+        <div className="fixed inset-0 bg-primary/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in duration-300">
+            <div className="p-6 border-b border-border flex items-center justify-between bg-slate-50">
+              <h2 className="text-xl font-bold text-primary">Novo Colaborador</h2>
+              <button 
+                onClick={() => setIsModalOpen(false)}
+                className="p-1 hover:bg-slate-200 rounded-full transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            
+            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+              <div className="space-y-1">
+                <label className="text-xs font-bold uppercase text-slate-500">Nome Completo</label>
+                <input 
+                  required
+                  type="text" 
+                  placeholder="Nome do colaborador..."
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-secondary/20"
+                  value={formData.full_name}
+                  onChange={(e) => setFormData({...formData, full_name: e.target.value})}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold uppercase text-slate-500">Cargo / Função</label>
+                <input 
+                  required
+                  type="text" 
+                  placeholder="Ex: Téc. Eletricista"
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none"
+                  value={formData.role}
+                  onChange={(e) => setFormData({...formData, role: e.target.value})}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold uppercase text-slate-500">Status Inicial</label>
+                <select 
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none"
+                  value={formData.status}
+                  onChange={(e) => setFormData({...formData, status: e.target.value})}
+                >
+                  <option value="Ativo">Ativo</option>
+                  <option value="Em Férias">Em Férias</option>
+                  <option value="Afastado">Afastado</option>
+                  <option value="Desligado">Desligado</option>
+                </select>
+              </div>
+
+              <div className="pt-4 flex gap-3">
+                <button 
+                  type="button"
+                  onClick={() => setIsModalOpen(false)}
+                  className="flex-1 p-3 border border-slate-200 rounded-xl font-bold text-slate-500 hover:bg-slate-50 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="flex-1 p-3 bg-primary text-white rounded-xl font-bold hover:bg-slate-800 transition-all shadow-lg shadow-primary/20 disabled:opacity-50"
+                >
+                  {isSubmitting ? 'Salvando...' : 'Cadastrar'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
