@@ -23,7 +23,8 @@ export default function LoginPage() {
     });
 
     if (loginError) {
-      setError('Credenciais inválidas. Tente novamente.');
+      console.error('Login error details:', loginError);
+      setError(`Erro no login: ${loginError.message}`);
       setLoading(false);
     } else {
       // Use window.location.href to ensure a full page reload and cookie cleanup on fresh login
