@@ -21,8 +21,15 @@ export default function ImportSpreadsheet({ onComplete }: { onComplete: () => vo
   });
 
   const getCol = (row: any, keys: string[]) => {
+    // Busca insensitiva a maiúsculas/minúsculas e variações
+    const rowKeys = Object.keys(row);
     for (const key of keys) {
-      if (row[key] !== undefined) return row[key];
+      const foundKey = rowKeys.find(rk => 
+        rk.toLowerCase().trim() === key.toLowerCase().trim() ||
+        rk.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim() === 
+        key.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim()
+      );
+      if (foundKey !== undefined) return row[foundKey];
     }
     return null;
   };
@@ -55,18 +62,18 @@ export default function ImportSpreadsheet({ onComplete }: { onComplete: () => vo
           const row = rows[i];
           
           // Helper to get columns with different names
-          const colCode = getCol(row, ['Codigo', 'Código', 'Codigo do Item', 'Código do Item']);
-          const colDesc = getCol(row, ['Descricao', 'Descrição', 'Descricao do Item', 'Descrição do Item']);
-          const colCat = getCol(row, ['Categoria']);
-          const colUnit = getCol(row, ['Unidade']);
-          const colLoc = getCol(row, ['Local', 'Localizacao', 'Localização']);
-          const colQty = getCol(row, ['Qtd Atual', 'Quantidade Atual']);
-          const colMin = getCol(row, ['Qtd Minima', 'Qtd Mínima', 'Qtd Min', 'Qtd Mín']);
-          const colEmployee = getCol(row, ['Funcionario', 'Funcionário']);
-          const colCPF = getCol(row, ['CPF']);
-          const colRole = getCol(row, ['Cargo']);
-          const colWithdrawn = getCol(row, ['Total Retirado', 'Retirado', 'Saida']);
-          const colReturned = getCol(row, ['Total Devolvido', 'Devolvido', 'Entrada']);
+          const colCode = getCol(row, ['Codigo', 'Código', 'Codigo do Item', 'Código do Item', 'Item Code', 'ID Item']);
+          const colDesc = getCol(row, ['Descricao', 'Descrição', 'Descricao do Item', 'Descrição do Item', 'Nome do Item']);
+          const colCat = getCol(row, ['Categoria', 'Category', 'Grupo']);
+          const colUnit = getCol(row, ['Unidade', 'Unit', 'UN']);
+          const colLoc = getCol(row, ['Local', 'Localizacao', 'Localização', 'Pátio', 'Prateleira', 'Departamento']);
+          const colQty = getCol(row, ['Qtd Atual', 'Quantidade Atual', 'Saldo', 'Estoque', 'Saldo Atual', 'Saldo Atual (em Posse)', 'Quantidade']);
+          const colMin = getCol(row, ['Qtd Minima', 'Qtd Mínima', 'Qtd Min', 'Qtd Mín', 'Estoque Mínimo', 'Estoque Minimo']);
+          const colEmployee = getCol(row, ['Funcionario', 'Funcionário', 'Nome', 'Colaborador']);
+          const colCPF = getCol(row, ['CPF', 'Documento']);
+          const colRole = getCol(row, ['Cargo', 'Função', 'Funcao']);
+          const colWithdrawn = getCol(row, ['Total Retirado', 'Retirado', 'Saida', 'Quantidade Retirada', 'Qtd Retirada']);
+          const colReturned = getCol(row, ['Total Devolvido', 'Devolvido', 'Entrada', 'Quantidade Devolvida', 'Qtd Devolvida']);
 
           // 1. Upsert Item (Shared across both modes)
           let itemId = null;
