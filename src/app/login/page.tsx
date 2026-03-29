@@ -26,8 +26,8 @@ export default function LoginPage() {
       setError('Credenciais inválidas. Tente novamente.');
       setLoading(false);
     } else {
-      router.push('/');
-      router.refresh();
+      // Use window.location.href to ensure a full page reload and cookie cleanup on fresh login
+      window.location.href = '/';
     }
   };
 
