@@ -5,8 +5,16 @@ export const dynamic = 'force-dynamic';
 import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { Search, Plus, Filter, AlertCircle, MoreHorizontal, X, FileUp } from 'lucide-react';
+import { Search, Plus, Filter, AlertCircle, MoreHorizontal, X, FileUp, Users, History, Edit, Trash2, Loader2, Package } from 'lucide-react';
 import ImportSpreadsheet from '@/components/ImportSpreadsheet';
+
+interface PossessionDetail {
+  id: string;
+  quantity: number;
+  employees?: {
+    full_name: string;
+  };
+}
 
 interface Product {
   id: string;
@@ -18,6 +26,7 @@ interface Product {
   quantity_min: number;
   unit: string;
   updated_at?: string;
+  possession?: PossessionDetail[];
 }
 
 function InventoryContent() {
@@ -29,8 +38,14 @@ function InventoryContent() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  // Modals for actions
+  const [editingItem, setEditingItem] = useState<Product | null>(null);
+  const [historyItem, setHistoryItem] = useState<Product | null>(null);
+  const [itemMovements, setItemMovements] = useState<any[]>([]);
+  const [activePopover, setActivePopover] = useState<string | null>(null);
 
-  // Form states
+  // Form states for NEW/EDIT
   const [formData, setFormData] = useState({
     code: '',
     description: '',
@@ -45,8 +60,8 @@ function InventoryContent() {
     setLoading(true);
     const { data, error } = await supabase
       .from('items')
-      .select('*')
-      .order('code', { ascending: true });
+      .select('*, possession (id, quantity, employees (full_name))')
+      .order('description', { ascending: true });
 
     if (error) {
       console.error('Error fetching products:', error);
@@ -62,13 +77,43 @@ function InventoryContent() {
     fetchProducts();
   }, []);
 
-  useEffect(() => {
-    if (searchParams?.get('new') === 'true') {
-      setIsModalOpen(true);
-      // Clear the param without full refresh
-      router.replace('/inventory', { scroll: false });
+  const openHistory = async (item: Product) => {
+    setHistoryItem(item);
+    const { data } = await supabase
+      .from('movements')
+      .select('*, employees(full_name)')
+      .eq('item_id', item.id)
+      .order('created_at', { ascending: false })
+      .limit(30);
+    setItemMovements(data || []);
+  };
+
+  const handleDelete = async (id: string, name: string) => {
+    if (confirm(`Tem certeza que deseja excluir "${name}"? Esta ação é irreversível.`)) {
+      const { error } = await supabase.from('items').delete().eq('id', id);
+      if (error) alert('Erro ao excluir: ' + error.message);
+      else fetchProducts();
     }
-  }, [searchParams, router]);
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingItem) return;
+    setIsSubmitting(true);
+
+    const { error } = await supabase
+      .from('items')
+      .update(formData)
+      .eq('id', editingItem.id);
+
+    if (error) {
+      alert('Erro ao atualizar: ' + error.message);
+    } else {
+      setEditingItem(null);
+      fetchProducts();
+    }
+    setIsSubmitting(false);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -104,11 +149,11 @@ function InventoryContent() {
   );
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-primary">Almoxarifado LoggB</h1>
-          <p className="text-slate-500">Gestão de materiais, EPIs e ferramentas.</p>
+          <p className="text-slate-500">Gestão de materiais, EPIs e ferramentas por descrição.</p>
         </div>
         <div className="flex gap-2">
           <button 
@@ -116,14 +161,14 @@ function InventoryContent() {
             className="flex items-center gap-2 bg-slate-100 text-primary border border-slate-200 px-4 py-2 rounded-lg hover:bg-slate-200 transition-all font-medium"
           >
             <FileUp size={18} className="text-secondary" />
-            Importar Inventário
+            Importar
           </button>
           <button 
             onClick={() => setIsModalOpen(true)}
             className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-slate-800 transition-all font-medium"
           >
             <Plus size={18} />
-            Cadastrar Material
+            Novo Material
           </button>
         </div>
       </div>
@@ -146,17 +191,11 @@ function InventoryContent() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
           <input 
             type="text" 
-            placeholder="Buscar por código ou descrição..." 
+            placeholder="Buscar por descrição ou código..." 
             className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary/50 focus:border-secondary transition-all"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
-        </div>
-        <div className="flex gap-2">
-          <button className="flex items-center gap-2 px-4 py-2 border border-slate-200 rounded-lg hover:bg-slate-50 transition-all text-slate-600 font-medium whitespace-nowrap">
-            <Filter size={18} />
-            Categorias
-          </button>
         </div>
       </div>
 
@@ -166,62 +205,120 @@ function InventoryContent() {
           <table className="w-full text-left border-collapse">
             <thead className="bg-slate-50 border-b border-border">
               <tr>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Código</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Descrição</th>
+                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Código</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Categoria</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Local</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Quantidade</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Última At.</th>
+                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Posse</th>
+                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Estoque</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Unidade</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Ações</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-border">
+            <tbody className="divide-y divide-border text-sm">
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="px-6 py-12 text-center text-slate-400">Carregando inventário...</td>
+                  <td colSpan={7} className="px-6 py-12 text-center text-slate-400">
+                    <Loader2 className="animate-spin inline mr-2" size={20} />
+                    Carregando inventário...
+                  </td>
                 </tr>
               ) : filteredProducts.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-6 py-12 text-center text-slate-400">Nenhum item encontrado.</td>
+                  <td colSpan={7} className="px-6 py-12 text-center text-slate-400">Nenhum item encontrado.</td>
                 </tr>
               ) : (
                 filteredProducts.map((p) => {
                   const isLowStock = p.quantity_current <= p.quantity_min;
+                  const totalInPossession = p.possession?.reduce((acc, curr) => acc + curr.quantity, 0) || 0;
+                  
                   return (
                     <tr key={p.id} className="hover:bg-slate-50 transition-colors group">
-                      <td className="px-6 py-4 font-mono text-sm font-bold text-primary">{p.code}</td>
-                      <td className="px-6 py-4 text-slate-700">{p.description}</td>
                       <td className="px-6 py-4">
-                        <span className={`px-2 py-1 rounded-md text-[10px] uppercase font-bold ${
-                          p.category === 'Ferramenta' ? 'bg-blue-100 text-blue-700' :
-                          p.category === 'EPI' ? 'bg-purple-100 text-purple-700' : 'bg-orange-100 text-orange-700'
+                        <div className="font-bold text-primary">{p.description}</div>
+                        <div className="text-[10px] text-slate-400 uppercase font-mono">{p.location || 'Sem local'}</div>
+                      </td>
+                      <td className="px-6 py-4 font-mono text-xs text-slate-500">{p.code}</td>
+                      <td className="px-6 py-4 text-xs">
+                        <span className={`px-2 py-1 rounded-md uppercase font-bold ${
+                          p.category === 'Ferramenta' ? 'bg-blue-50 text-blue-600' :
+                          p.category === 'EPI' ? 'bg-purple-50 text-purple-600' : 'bg-orange-50 text-orange-600'
                         }`}>
                           {p.category}
                         </span>
                       </td>
-                      <td className="px-6 py-4 text-sm text-slate-500">{p.location || '---'}</td>
+                      <td className="px-6 py-4 text-center">
+                        {totalInPossession > 0 ? (
+                          <div className="relative inline-block">
+                            <button 
+                              onClick={() => setActivePopover(activePopover === p.id ? null : p.id)}
+                              className="flex items-center gap-1 mx-auto bg-slate-100 px-3 py-1 rounded-full text-primary font-bold hover:bg-slate-200 transition-colors"
+                            >
+                              <Users size={14} className="text-secondary" />
+                              {totalInPossession}
+                            </button>
+                            
+                            {activePopover === p.id && (
+                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 bg-white border border-border rounded-xl shadow-xl z-30 p-3 animate-in fade-in slide-in-from-bottom-2 duration-200">
+                                <h4 className="text-[10px] font-bold uppercase text-slate-400 mb-2 border-b pb-1">Em posse de:</h4>
+                                <div className="space-y-2">
+                                  {p.possession?.map(pos => (
+                                    <div key={pos.id} className="flex justify-between text-xs">
+                                      <span className="text-slate-600 truncate mr-2">{pos.employees?.full_name}</span>
+                                      <span className="font-bold text-primary">{pos.quantity}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-slate-300 text-xs">Ninguém</span>
+                        )}
+                      </td>
                       <td className="px-6 py-4">
                         <div className="flex flex-col items-center">
-                          <span className={`text-sm font-bold ${isLowStock ? 'text-red-500' : 'text-primary'}`}>
+                          <span className={`font-bold ${isLowStock ? 'text-red-500' : 'text-primary'}`}>
                             {p.quantity_current}
                           </span>
-                          {isLowStock && (
-                            <div className="flex items-center gap-1 text-[10px] text-red-400 mt-0.5">
-                              <AlertCircle size={10} />
-                              Crítico ({p.quantity_min})
-                            </div>
-                          )}
+                          {isLowStock && <AlertCircle size={12} className="text-red-400 mt-1 animate-pulse" />}
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-xs text-slate-400 text-center">
-                        {p.updated_at ? new Date(p.updated_at).toLocaleDateString() : '---'}
-                      </td>
-                      <td className="px-6 py-4 text-sm text-slate-500">{p.unit}</td>
+                      <td className="px-6 py-4 text-slate-500">{p.unit}</td>
                       <td className="px-6 py-4 text-right">
-                        <button className="p-2 hover:bg-slate-100 rounded-full transition-all text-slate-400 hover:text-primary">
-                          <MoreHorizontal size={18} />
-                        </button>
+                        <div className="flex justify-end gap-1">
+                          <button 
+                            onClick={() => openHistory(p)}
+                            className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-secondary group/btn relative"
+                            title="Histórico"
+                          >
+                            <History size={16} />
+                          </button>
+                          <button 
+                            onClick={() => {
+                              setEditingItem(p);
+                              setFormData({
+                                code: p.code,
+                                description: p.description,
+                                category: p.category,
+                                location: p.location,
+                                quantity_current: p.quantity_current,
+                                quantity_min: p.quantity_min,
+                                unit: p.unit
+                              });
+                            }}
+                            className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-blue-500"
+                            title="Editar"
+                          >
+                            <Edit size={16} />
+                          </button>
+                          <button 
+                            onClick={() => handleDelete(p.id, p.description)}
+                            className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-red-500"
+                            title="Excluir"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -232,37 +329,82 @@ function InventoryContent() {
         </div>
       </div>
 
-      {/* Modal Cadastro */}
-      {isModalOpen && (
+      {/* Modal Histórico do Item */}
+      {historyItem && (
+        <div className="fixed inset-0 bg-primary/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden animate-in zoom-in duration-300">
+            <div className="p-6 border-b bg-slate-50 flex items-center justify-between">
+              <div>
+                <h3 className="text-xl font-bold text-primary">{historyItem.description}</h3>
+                <p className="text-xs text-slate-500 font-mono mt-1">LOG DE MOVIMENTAÇÕES • {historyItem.code}</p>
+              </div>
+              <button onClick={() => setHistoryItem(null)} className="p-2 hover:bg-slate-200 rounded-full">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6">
+              <div className="space-y-4">
+                {itemMovements.length === 0 ? (
+                  <p className="text-center text-slate-400 py-8 italic">Nenhuma movimentação registrada.</p>
+                ) : (
+                  itemMovements.map((move) => (
+                    <div key={move.id} className="flex gap-4 items-start p-4 bg-slate-50 rounded-xl border border-slate-100">
+                      <div className={`mt-1 p-2 rounded-lg ${move.type === 'IN' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
+                        {move.type === 'IN' ? <Plus size={16} /> : <Trash2 size={16} />}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex justify-between items-start">
+                          <p className="font-bold text-primary">{move.employees?.full_name}</p>
+                          <span className="text-[10px] bg-white px-2 py-1 rounded-md border text-slate-400 font-mono">
+                            {new Date(move.created_at).toLocaleString()}
+                          </span>
+                        </div>
+                        <p className="text-sm text-slate-600">
+                          {move.type === 'IN' ? 'Devolveu' : 'Retirou'} <span className="font-bold">{move.quantity}</span> {historyItem.unit}
+                        </p>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Cadastro/Edição */}
+      {(isModalOpen || editingItem) && (
         <div className="fixed inset-0 bg-primary/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in duration-300">
             <div className="p-6 border-b border-border flex items-center justify-between bg-slate-50">
-              <h2 className="text-xl font-bold text-primary">Novo Material</h2>
+              <h2 className="text-xl font-bold text-primary">
+                {editingItem ? 'Editar Material' : 'Novo Material'}
+              </h2>
               <button 
-                onClick={() => setIsModalOpen(false)}
+                onClick={() => { setIsModalOpen(false); setEditingItem(null); }}
                 className="p-1 hover:bg-slate-200 rounded-full transition-colors"
               >
                 <X size={20} />
               </button>
             </div>
             
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+            <form onSubmit={editingItem ? handleEditSubmit : handleSubmit} className="p-6 space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <label className="text-xs font-bold uppercase text-slate-500">Código</label>
+                  <label className="text-xs font-bold uppercase text-slate-400">Código</label>
                   <input 
                     required
                     type="text" 
                     placeholder="Ex: MAT-101"
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-secondary/20 outline-none"
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-secondary/20 outline-none font-mono"
                     value={formData.code}
                     onChange={(e) => setFormData({...formData, code: e.target.value})}
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-bold uppercase text-slate-500">Unidade</label>
+                  <label className="text-xs font-bold uppercase text-slate-400">Unidade</label>
                   <select 
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none"
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none font-medium"
                     value={formData.unit}
                     onChange={(e) => setFormData({...formData, unit: e.target.value})}
                   >
@@ -276,12 +418,12 @@ function InventoryContent() {
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs font-bold uppercase text-slate-500">Descrição</label>
+                <label className="text-xs font-bold uppercase text-slate-400">Descrição do Produto</label>
                 <input 
                   required
                   type="text" 
-                  placeholder="Nome do material..."
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none"
+                  placeholder="Nome detalhado do item..."
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none font-bold"
                   value={formData.description}
                   onChange={(e) => setFormData({...formData, description: e.target.value})}
                 />
@@ -289,7 +431,7 @@ function InventoryContent() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <label className="text-xs font-bold uppercase text-slate-500">Categoria</label>
+                  <label className="text-xs font-bold uppercase text-slate-400">Categoria</label>
                   <select 
                     className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none"
                     value={formData.category}
@@ -302,11 +444,11 @@ function InventoryContent() {
                   </select>
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-bold uppercase text-slate-500">Localização</label>
+                  <label className="text-xs font-bold uppercase text-slate-400">Local de Armazenamento</label>
                   <input 
                     type="text" 
                     placeholder="Ex: Prateleira A1"
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none"
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none text-xs"
                     value={formData.location}
                     onChange={(e) => setFormData({...formData, location: e.target.value})}
                   />
@@ -315,19 +457,19 @@ function InventoryContent() {
 
               <div className="grid grid-cols-2 gap-4 pt-2">
                 <div className="space-y-1">
-                  <label className="text-xs font-bold uppercase text-slate-500 text-secondary">Qtd. Atual</label>
+                  <label className="text-xs font-bold uppercase text-secondary">Qtd. em Estoque</label>
                   <input 
                     type="number" 
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none"
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none font-bold"
                     value={formData.quantity_current}
                     onChange={(e) => setFormData({...formData, quantity_current: Number(e.target.value)})}
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-bold uppercase text-slate-500 text-red-500">Qtd. Mínima</label>
+                  <label className="text-xs font-bold uppercase text-red-500">Alerta Mínimo</label>
                   <input 
                     type="number" 
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none"
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none font-bold"
                     value={formData.quantity_min}
                     onChange={(e) => setFormData({...formData, quantity_min: Number(e.target.value)})}
                   />
@@ -337,7 +479,7 @@ function InventoryContent() {
               <div className="pt-4 flex gap-3">
                 <button 
                   type="button"
-                  onClick={() => setIsModalOpen(false)}
+                  onClick={() => { setIsModalOpen(false); setEditingItem(null); }}
                   className="flex-1 p-3 border border-slate-200 rounded-xl font-bold text-slate-500 hover:bg-slate-50 transition-colors"
                 >
                   Cancelar
@@ -345,9 +487,9 @@ function InventoryContent() {
                 <button 
                   type="submit"
                   disabled={isSubmitting}
-                  className="flex-1 p-3 bg-secondary text-white rounded-xl font-bold hover:bg-secondary/90 transition-all shadow-lg shadow-secondary/20 disabled:opacity-50"
+                  className="flex-1 p-3 bg-primary text-white rounded-xl font-bold hover:bg-slate-800 transition-all shadow-lg shadow-primary/20 disabled:opacity-50"
                 >
-                  {isSubmitting ? 'Salvando...' : 'Cadastrar Item'}
+                  {isSubmitting ? 'Salvando...' : (editingItem ? 'Salvar Edição' : 'Cadastrar Item')}
                 </button>
               </div>
             </form>

@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Search, UserPlus, Mail, Phone, ExternalLink, X, FileUp, Filter, Package, AlertCircle } from 'lucide-react';
+import { Search, UserPlus, Mail, Phone, ExternalLink, X, FileUp, Filter, Package, AlertCircle, History, RotateCcw, Download, Loader2, ArrowLeft } from 'lucide-react';
 import ImportSpreadsheet from '@/components/ImportSpreadsheet';
 
 interface Possession {
@@ -14,6 +14,7 @@ interface Possession {
     code: string;
     description: string;
     category: string;
+    unit: string;
   };
 }
 
@@ -35,6 +36,12 @@ export default function StaffPage() {
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Modals for actions
+  const [timelineEmployee, setTimelineEmployee] = useState<Employee | null>(null);
+  const [movements, setMovements] = useState<any[]>([]);
+  const [returnItem, setReturnItem] = useState<{employeeId: string, item: Possession} | null>(null);
+  const [returnQty, setReturnQty] = useState<number>(0);
+
   // Form states
   const [formData, setFormData] = useState({
     full_name: '',
@@ -44,7 +51,6 @@ export default function StaffPage() {
 
   const fetchEmployees = async () => {
     setLoading(true);
-    // Fetch employees with their possession items joined
     const { data, error } = await supabase
       .from('employees')
       .select(`
@@ -55,7 +61,8 @@ export default function StaffPage() {
           items (
             code,
             description,
-            category
+            category,
+            unit
           )
         )
       `)
@@ -74,6 +81,85 @@ export default function StaffPage() {
     // eslint-disable-next-line @typescript-eslint/no-floating-promises
     fetchEmployees();
   }, []);
+
+  const openTimeline = async (employee: Employee) => {
+    setTimelineEmployee(employee);
+    const { data } = await supabase
+      .from('movements')
+      .select('*, items(description, unit, code)')
+      .eq('employee_id', employee.id)
+      .order('created_at', { ascending: false })
+      .limit(30);
+    setMovements(data || []);
+  };
+
+  const downloadFullHistory = async (employee: Employee) => {
+    const { data } = await supabase
+      .from('movements')
+      .select('*, items(description, code)')
+      .eq('employee_id', employee.id)
+      .order('created_at', { ascending: false });
+
+    if (!data) return;
+
+    const content = `HISTÓRICO DE MOVIMENTAÇÕES - ${employee.full_name}\n` +
+      `Gerado em: ${new Date().toLocaleString()}\n` +
+      `--------------------------------------------------\n\n` +
+      data.map(m => {
+        const date = new Date(m.created_at).toLocaleString();
+        const type = m.type === 'IN' ? '[DEVOLUÇÃO]' : '[RETIRADA] ';
+        return `${date} | ${type} | ${m.quantity}x ${m.items?.description} (${m.items?.code})`;
+      }).join('\n');
+
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `historico_${employee.full_name.toLowerCase().replace(/ /g, '_')}.txt`;
+    a.click();
+  };
+
+  const handleReturn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!returnItem || returnQty <= 0) return;
+    setIsSubmitting(true);
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    // 1. Process Return Movement
+    await supabase.from('movements').insert([{
+      item_id: returnItem.item.item_id,
+      employee_id: returnItem.employeeId,
+      quantity: returnQty,
+      type: 'IN',
+      performed_by: user.id
+    }]);
+
+    // 2. Update Possession
+    const newQty = returnItem.item.quantity - returnQty;
+    if (newQty <= 0) {
+      await supabase.from('possession').delete().match({ 
+        employee_id: returnItem.employeeId, 
+        item_id: returnItem.item.item_id 
+      });
+    } else {
+      await supabase.from('possession').update({ quantity: newQty }).match({ 
+        employee_id: returnItem.employeeId, 
+        item_id: returnItem.item.item_id 
+      });
+    }
+
+    // 3. Update Inventory
+    await supabase.rpc('update_stock', { 
+      p_item_id: returnItem.item.item_id, 
+      p_quantity: returnQty 
+    });
+
+    setReturnItem(null);
+    setIsSubmitting(false);
+    fetchEmployees();
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -106,11 +192,11 @@ export default function StaffPage() {
   });
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-primary">Quadro de Funcionários</h1>
-          <p className="text-slate-500 text-sm">Monitoramento de ativos e gestão de pessoal.</p>
+          <p className="text-slate-500 text-sm">Monitoramento de ativos e histórico por colaborador.</p>
         </div>
         <div className="flex gap-2">
           <button 
@@ -131,7 +217,7 @@ export default function StaffPage() {
       </div>
 
       {isImportModalOpen && (
-        <div className="fixed inset-0 bg-primary/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+        <div className="fixed inset-0 bg-primary/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <ImportSpreadsheet 
             mode="movement"
             onComplete={() => {
@@ -193,14 +279,17 @@ export default function StaffPage() {
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Colaborador</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Cargo</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Status</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Equipamentos em Posse</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Equipamentos em Posse (Descrição)</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {loading ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-12 text-center text-slate-400">Carregando quadro de funcionários...</td>
+                  <td colSpan={5} className="px-6 py-12 text-center text-slate-400">
+                    <Loader2 className="animate-spin inline mr-2 text-secondary" size={20} />
+                    Carregando quadro...
+                  </td>
                 </tr>
               ) : filteredEmployees.length === 0 ? (
                 <tr>
@@ -229,22 +318,33 @@ export default function StaffPage() {
                         </div>
                       </td>
                       <td className="px-6 py-4">
-                        <div className="flex flex-wrap gap-2 max-w-md">
+                        <div className="flex flex-wrap gap-2 max-w-sm">
                           {activePossessions.length > 0 ? (
                             activePossessions.map((p, idx) => (
-                              <div key={idx} className="flex items-center gap-1.5 bg-secondary/5 border border-secondary/10 px-2 py-1 rounded text-[10px] font-bold text-secondary">
-                                <Package size={10} />
-                                {p.items?.code} ({p.quantity})
+                              <div key={idx} className="flex items-center gap-2 bg-secondary/5 border border-secondary/10 px-2 py-1 rounded text-[10px] font-bold text-secondary group/p">
+                                <span className="truncate max-w-[120px]">{p.items?.description}</span>
+                                <span className="bg-secondary/20 px-1 rounded">x{p.quantity}</span>
+                                <button 
+                                  onClick={() => { setReturnItem({employeeId: e.id, item: p}); setReturnQty(p.quantity); }}
+                                  className="hover:text-red-500 transition-colors ml-1" 
+                                  title="Devolver Item"
+                                >
+                                  <RotateCcw size={10} />
+                                </button>
                               </div>
                             ))
                           ) : (
-                            <span className="text-[10px] text-slate-300 font-semibold italic">Nenhum item pendente</span>
+                            <span className="text-[10px] text-slate-300 font-semibold italic">Nenhum item em posse</span>
                           )}
                         </div>
                       </td>
                       <td className="px-6 py-4 text-right">
-                        <button className="text-secondary hover:text-primary p-2 bg-secondary/5 border border-secondary/10 rounded-lg transition-all">
-                          <ExternalLink size={16} />
+                        <button 
+                          onClick={() => openTimeline(e)}
+                          className="text-slate-400 hover:text-secondary p-2 bg-slate-50 border border-slate-200 rounded-lg transition-all"
+                          title="Ver Histórico"
+                        >
+                          <History size={16} />
                         </button>
                       </td>
                     </tr>
@@ -255,6 +355,103 @@ export default function StaffPage() {
           </table>
         </div>
       </div>
+
+      {/* Modal Histórico do Colaborador (Timeline) */}
+      {timelineEmployee && (
+        <div className="fixed inset-0 bg-primary/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden animate-in zoom-in duration-300">
+            <div className="p-6 border-b bg-slate-50 flex items-center justify-between">
+              <div>
+                <h3 className="text-xl font-bold text-primary">{timelineEmployee.full_name}</h3>
+                <p className="text-xs text-slate-500 mt-1 uppercase font-bold tracking-wider">Histórico de Movimentações (Últimas 30)</p>
+              </div>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => downloadFullHistory(timelineEmployee)}
+                  className="flex items-center gap-2 text-primary bg-white border border-border px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-slate-100 transition-colors"
+                >
+                  <Download size={14} />
+                  Baixar TXT
+                </button>
+                <button onClick={() => setTimelineEmployee(null)} className="p-2 hover:bg-slate-200 rounded-full">
+                  <X size={20} />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6 bg-slate-50/30">
+              <div className="relative border-l-2 border-slate-100 ml-3 space-y-6">
+                {movements.length === 0 ? (
+                  <p className="text-center text-slate-400 py-8 italic ml-[-12px]">Nenhuma movimentação para este colaborador.</p>
+                ) : (
+                  movements.map((m) => (
+                    <div key={m.id} className="relative pl-6">
+                      <div className={`absolute left-[-9px] top-1 w-4 h-4 rounded-full border-2 border-white shadow-sm ${m.type === 'IN' ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                      <div className="bg-white p-4 rounded-xl border border-border shadow-sm">
+                        <div className="flex justify-between items-start mb-1">
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${m.type === 'IN' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>
+                            {m.type === 'IN' ? 'DEVOLUÇÃO' : 'RETIRADA'}
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-mono">{new Date(m.created_at).toLocaleString()}</span>
+                        </div>
+                        <h4 className="font-bold text-primary text-sm">{m.items?.description}</h4>
+                        <div className="flex items-center justify-between mt-2">
+                          <span className="text-xs text-slate-500 uppercase font-bold">Código: {m.items?.code}</span>
+                          <span className="text-sm font-bold text-primary">{m.quantity} {m.items?.unit}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Devolução */}
+      {returnItem && (
+        <div className="fixed inset-0 bg-primary/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in duration-300">
+            <div className="p-6 border-b border-border bg-slate-50">
+              <h3 className="text-xl font-bold text-primary">Processar Devolução</h3>
+              <p className="text-xs text-slate-500 mt-1">{returnItem.item.items?.description}</p>
+            </div>
+            <form onSubmit={handleReturn} className="p-6 space-y-4">
+              <div className="space-y-1">
+                <label className="text-xs font-bold uppercase text-slate-400">Quantidade a Devolver</label>
+                <div className="flex items-center gap-3">
+                  <input 
+                    required
+                    type="number" 
+                    min="1" 
+                    max={returnItem.item.quantity}
+                    className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-lg text-lg font-bold outline-none focus:ring-2 focus:ring-secondary/50"
+                    value={returnQty}
+                    onChange={(e) => setReturnQty(Math.min(returnItem.item.quantity, Math.max(1, Number(e.target.value))))}
+                  />
+                  <span className="text-sm font-bold text-slate-400">de {returnItem.item.quantity}</span>
+                </div>
+              </div>
+              <div className="flex gap-2 pt-4">
+                <button 
+                  type="button"
+                  onClick={() => setReturnItem(null)}
+                  className="flex-1 p-3 border border-slate-200 rounded-xl font-bold text-slate-500 hover:bg-slate-50"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="flex-1 p-3 bg-primary text-white rounded-xl font-bold hover:bg-slate-800 shadow-lg shadow-primary/20 disabled:opacity-50"
+                >
+                  {isSubmitting ? '...' : 'Confirmar'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Modal Cadastro Colaborador */}
       {isModalOpen && (
@@ -277,7 +474,7 @@ export default function StaffPage() {
                   required
                   type="text" 
                   placeholder="Nome do colaborador..."
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-secondary/20"
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-secondary/20 font-bold"
                   value={formData.full_name}
                   onChange={(e) => setFormData({...formData, full_name: e.target.value})}
                 />
@@ -298,7 +495,7 @@ export default function StaffPage() {
               <div className="space-y-1">
                 <label className="text-xs font-bold uppercase text-slate-500">Status Inicial</label>
                 <select 
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none"
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none font-medium"
                   value={formData.status}
                   onChange={(e) => setFormData({...formData, status: e.target.value})}
                 >

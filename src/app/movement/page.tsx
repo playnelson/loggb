@@ -23,7 +23,7 @@ interface RecentMovement {
   created_at: string;
   quantity: number;
   type: string;
-  items: { code: string };
+  items: { code: string; description: string };
   employees: { full_name: string };
 }
 
@@ -45,7 +45,7 @@ export default function MovementPage() {
     // Fetch recent movements
     const { data: mData } = await supabase
       .from('movements')
-      .select('id, created_at, quantity, type, items(code), employees(full_name)')
+      .select('id, created_at, quantity, type, items(code, description), employees(full_name)')
       .order('created_at', { ascending: false })
       .limit(5);
 
@@ -178,7 +178,7 @@ export default function MovementPage() {
                   <option value="">Buscar material no estoque...</option>
                   {products.map(p => (
                     <option key={p.id} value={p.id}>
-                      {p.code} - {p.description} ({p.quantity_current} disponíveis)
+                      {p.description} ({p.code}) - {p.quantity_current} un
                     </option>
                   ))}
                 </select>
@@ -244,8 +244,8 @@ export default function MovementPage() {
             <div className="space-y-3">
               <div className="flex justify-between text-sm py-2 border-b border-slate-50">
                 <span className="text-slate-400">Material</span>
-                <span className="text-primary font-bold">
-                  {products.find(p => p.id === selectedProduct)?.code || '--'}
+                <span className="text-primary font-bold text-right truncate max-w-[150px]">
+                  {products.find(p => p.id === selectedProduct)?.description || '--'}
                 </span>
               </div>
               <div className="flex justify-between text-sm py-2 border-b border-slate-50">
@@ -256,7 +256,7 @@ export default function MovementPage() {
               </div>
               <div className="flex justify-between text-sm py-2 border-b border-slate-50">
                 <span className="text-slate-400">Operação</span>
-                <span className="text-red-500 font-bold uppercase">Saída (Empréstimo)</span>
+                <span className="text-red-500 font-bold uppercase text-[10px] bg-red-50 px-2 py-0.5 rounded">Saída (Empréstimo)</span>
               </div>
             </div>
           </div>
@@ -279,10 +279,8 @@ export default function MovementPage() {
                       <CheckCircle2 size={14} className="text-green-400" />
                     </div>
                     <div>
-                      <p className="font-bold">{m.items?.code} - {m.employees?.full_name}</p>
-                      <p className="text-slate-400">
-                        {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </p>
+                      <p className="font-bold truncate max-w-[150px]">{m.items?.description}</p>
+                      <p className="text-[10px] text-slate-400">{m.employees?.full_name}</p>
                     </div>
                   </div>
                 ))
