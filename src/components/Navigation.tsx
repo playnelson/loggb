@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Package, Users, ArrowRightLeft, LayoutDashboard, LogOut } from 'lucide-react';
+import { Package, Users, ArrowRightLeft, LayoutDashboard, LogOut, Settings } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useRouter, usePathname } from 'next/navigation';
 
@@ -13,6 +13,7 @@ export function Sidebar() {
     { name: 'Almoxarifado', icon: <Package size={20} />, href: '/inventory' },
     { name: 'Colaboradores', icon: <Users size={20} />, href: '/staff' },
     { name: 'Movimentação', icon: <ArrowRightLeft size={20} />, href: '/movement' },
+    { name: 'Configurações', icon: <Settings size={20} />, href: '/settings' },
   ];
 
   const handleSignOut = async () => {
