@@ -5,8 +5,9 @@ export const dynamic = 'force-dynamic';
 import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { Search, Plus, Filter, AlertCircle, MoreHorizontal, X, FileUp, Users, History, Edit, Trash2, Loader2, Package } from 'lucide-react';
+import { Search, Plus, Filter, AlertCircle, MoreHorizontal, X, FileUp, Users, History, Edit, Trash2, Loader2, Package, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
 import ImportSpreadsheet from '@/components/ImportSpreadsheet';
+import QuickMovementModal from '@/components/QuickMovementModal';
 
 interface PossessionDetail {
   id: string;
@@ -45,6 +46,11 @@ function InventoryContent() {
   const [historyItem, setHistoryItem] = useState<Product | null>(null);
   const [itemMovements, setItemMovements] = useState<any[]>([]);
   const [activePopover, setActivePopover] = useState<string | null>(null);
+
+  // Quick Movement State
+  const [isQuickMovementOpen, setIsQuickMovementOpen] = useState(false);
+  const [quickMovementItem, setQuickMovementItem] = useState<Product | null>(null);
+  const [quickMovementMode, setQuickMovementMode] = useState<'IN' | 'OUT'>('OUT');
 
   // Form states for NEW/EDIT
   const [formData, setFormData] = useState({
@@ -305,6 +311,30 @@ function InventoryContent() {
                       <td className="px-6 py-4 text-right">
                         <div className="flex justify-end gap-1">
                           <button 
+                            onClick={() => {
+                              setQuickMovementItem(p);
+                              setQuickMovementMode('OUT');
+                              setIsQuickMovementOpen(true);
+                            }}
+                            className="p-2 hover:bg-red-50 rounded-lg text-red-400 hover:text-red-600 font-bold text-xs flex items-center gap-1"
+                            title="Saída Rápida"
+                          >
+                            <ArrowUpRight size={16} />
+                            EXT
+                          </button>
+                          <button 
+                            onClick={() => {
+                              setQuickMovementItem(p);
+                              setQuickMovementMode('IN');
+                              setIsQuickMovementOpen(true);
+                            }}
+                            className="p-2 hover:bg-green-50 rounded-lg text-green-400 hover:text-green-600 font-bold text-xs flex items-center gap-1"
+                            title="Entrada Rápida"
+                          >
+                            <ArrowDownLeft size={16} />
+                            ENT
+                          </button>
+                          <button 
                             onClick={() => openHistory(p)}
                             className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-secondary group/btn relative"
                             title="Histórico"
@@ -531,6 +561,16 @@ function InventoryContent() {
           </div>
         </div>
       )}
+      <QuickMovementModal 
+        isOpen={isQuickMovementOpen}
+        item={quickMovementItem}
+        initialMode={quickMovementMode}
+        onClose={() => setIsQuickMovementOpen(false)}
+        onComplete={() => {
+          setIsQuickMovementOpen(false);
+          fetchProducts();
+        }}
+      />
     </div>
   );
 }
