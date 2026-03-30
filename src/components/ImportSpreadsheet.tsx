@@ -84,214 +84,187 @@ export default function ImportSpreadsheet({
           throw new Error('Planilha vazia ou formato inválido.');
         }
 
-        setProgress({ total: rows.length, current: 0, status: 'uploading', message: 'Iniciando processamento...' });
+        setProgress({ total: rows.length, current: 0, status: 'uploading', message: 'Iniciando processamento robusto...' });
         
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) throw new Error('Usuário não autenticado.');
 
-        let successCount = 0;
-        let errorCount = 0;
+        // PASS 1: Deduplicate and Sync Employees
+        setProgress(prev => ({ ...prev, message: 'Fase 1/3: Sincronizando Colaboradores...' }));
+        const employeeMap = new Map<string, string>(); // Key (Name or CPF) -> ID
+        const uniqueEmployees = new Map<string, any>();
 
-        for (let i = 0; i < rows.length; i++) {
-          const row = rows[i];
+        for (const row of rows) {
+          const name = getCol(row, ['Funcionario', 'Funcionário', 'Nome', 'Employee', 'Name', 'Atribuído a', 'Colaborador'])?.toString().trim();
+          let cpf = getCol(row, ['CPF', 'Identificação', 'Identificacao'])?.toString().replace(/\D/g, '') || null;
+          if (cpf && cpf.length > 0 && cpf.length < 11) cpf = cpf.padStart(11, '0');
+          const role = getCol(row, ['Cargo', 'Role', 'Função', 'Função', 'Atividade'])?.toString().trim();
+          const dept = getCol(row, ['Departamento', 'Dept', 'Setor', 'Setor', 'Área', 'Area'])?.toString().trim();
+
+          if (name) {
+            const key = cpf || name.toLowerCase();
+            if (!uniqueEmployees.has(key)) {
+              uniqueEmployees.set(key, { name, cpf, role, dept });
+            }
+          }
+        }
+
+        let empIndex = 0;
+        for (const [key, emp] of uniqueEmployees.entries()) {
+          empIndex++;
+          setProgress(prev => ({ ...prev, message: `Fase 1/3: Cadastrando colaboradores (${empIndex}/${uniqueEmployees.size})...` }));
           
-          try {
-            // Mapeamento de Colunas (mais robusto)
-            const colCode = getCol(row, ['Codigo', 'Código', 'Codigo do Item', 'Código do Item', 'Item Code', 'Item']);
-            const colDesc = getCol(row, ['Descricao', 'Descrição', 'Descricao do Item', 'Descrição do Item', 'Product']);
-            const colQtyStock = getCol(row, ['Qtd. em Estoque', 'Qtd em Estoque', 'Estoque', 'Saldo Estoque', 'Current Stock']);
-            const colQtyTotal = getCol(row, ['Qtd. Total', 'Qtd Total', 'Total', 'Saldo Total', 'Total Qty']);
-            const colQtyMin = getCol(row, ['Qtd. Mínima', 'Qtd Minima', 'Qtd Min', 'Qtd Mín', 'Min Stock']);
-            const colUnit = getCol(row, ['Unidade', 'Unid.', 'Unit']);
-            const colCat = getCol(row, ['Categoria', 'Category']);
-            const colConsumable = getCol(row, ['Consumível?', 'Consumivel?', 'Consumivel', 'Consumable']);
-            
-            const colLoc = getCol(row, ['Local', 'Localizacao', 'Localização', 'Pátio', 'Storage']);
-            const colEmployee = getCol(row, ['Funcionario', 'Funcionário', 'Nome', 'Employee', 'Name']);
-            const colCPF = getCol(row, ['CPF']);
-            const colRole = getCol(row, ['Cargo', 'Role', 'Função', 'Função']);
-            const colDept = getCol(row, ['Departamento', 'Dept', 'Setor', 'Setor']);
-            const colWithdrawn = getCol(row, ['Total Retirado', 'Retirado', 'Quantidade Retirada', 'Saida', 'Withdrawal']);
-            const colReturned = getCol(row, ['Total Devolvido', 'Devolvido', 'Quantidade Devolvida', 'Entrada', 'Return']);
+          let empId = null;
+          // Lookup
+          if (emp.cpf) {
+            const { data } = await supabase.from('employees').select('id').eq('cpf', emp.cpf).limit(1);
+            if (data && data.length > 0) empId = data[0].id;
+          }
+          if (!empId) {
+            const { data } = await supabase.from('employees').select('id').ilike('full_name', emp.name).limit(1);
+            if (data && data.length > 0) empId = data[0].id;
+          }
 
-            // 1. Process Item 
-            let itemId = null;
-            if (colCode) {
-              const codeStr = colCode.toString().trim();
-              if (codeStr) {
-                const itemPayload: any = {
-                  code: codeStr,
-                  description: colDesc?.toString().trim() || 'Sem descrição',
-                  category: colCat?.toString().trim() || (colConsumable?.toString().toLowerCase().includes('sim') ? 'Consumível' : 'Ferramenta'),
-                  unit: colUnit?.toString().trim() || 'un',
-                  location: colLoc?.toString().trim() || (mode === 'movement' ? colDept?.toString().trim() : null),
-                  consumable: colConsumable?.toString().toLowerCase().includes('sim') || false,
-                  user_id: user.id
-                };
+          if (empId) {
+            // Update existing
+            await supabase.from('employees').update({
+              role: emp.role || undefined,
+              department: emp.dept || undefined
+            }).eq('id', empId);
+            employeeMap.set(key, empId);
+          } else {
+            // Insert new
+            const { data, error } = await supabase.from('employees').insert({
+              full_name: emp.name,
+              cpf: emp.cpf,
+              role: emp.role || null,
+              department: emp.dept || null,
+              status: 'Ativo',
+              user_id: user.id
+            }).select('id').single();
+            if (data) employeeMap.set(key, data.id);
+            else if (error) console.error('Erro ao criar funcionário:', emp.name, error);
+          }
+        }
 
-                if (mode === 'inventory') {
-                  const qVal = colQtyStock !== null ? colQtyStock : colQtyTotal;
-                  if (qVal !== null) {
-                    itemPayload.quantity_current = parseNumericValue(qVal);
+        // PASS 2: Deduplicate and Sync Items
+        setProgress(prev => ({ ...prev, message: 'Fase 2/3: Sincronizando Almoxarifado...' }));
+        const itemMap = new Map<string, string>(); // Code -> ID
+        const uniqueItems = new Map<string, any>();
+
+        for (const row of rows) {
+          const code = getCol(row, ['Codigo', 'Código', 'Codigo do Item', 'Código do Item', 'Item Code', 'Item'])?.toString().trim();
+          if (code) {
+            if (!uniqueItems.has(code)) {
+              uniqueItems.set(code, {
+                code,
+                description: getCol(row, ['Descricao', 'Descrição', 'Descricao do Item', 'Descrição do Item', 'Product'])?.toString().trim() || 'Sem descrição',
+                unit: getCol(row, ['Unidade', 'Unid.', 'Unit'])?.toString().trim() || 'un',
+                category: getCol(row, ['Categoria', 'Category'])?.toString().trim(),
+                consumable: getCol(row, ['Consumível?', 'Consumivel?', 'Consumivel', 'Consumable'])?.toString().toLowerCase().includes('sim') || false,
+                location: getCol(row, ['Local', 'Localizacao', 'Localização', 'Pátio', 'Storage', 'Almoxarifado'])?.toString().trim(),
+                qty: parseNumericValue(getCol(row, ['Qtd. em Estoque', 'Qtd em Estoque', 'Estoque', 'Saldo Estoque'])),
+                qtyMin: parseNumericValue(getCol(row, ['Qtd. Mínima', 'Qtd Minima', 'Qtd Min', 'Qtd Mín']))
+              });
+            }
+          }
+        }
+
+        let itemIndex = 0;
+        for (const [code, itm] of uniqueItems.entries()) {
+          itemIndex++;
+          setProgress(prev => ({ ...prev, message: `Fase 2/3: Cadastrando itens (${itemIndex}/${uniqueItems.size})...` }));
+          
+          const itemPayload: any = {
+            code: itm.code,
+            description: itm.description,
+            category: itm.category || (itm.consumable ? 'Consumível' : 'Ferramenta'),
+            unit: itm.unit,
+            location: itm.location || null,
+            consumable: itm.consumable,
+            user_id: user.id
+          };
+
+          if (mode === 'inventory') {
+            itemPayload.quantity_current = itm.qty;
+            itemPayload.quantity_min = itm.qtyMin;
+          }
+
+          const { data, error } = await supabase.from('items').upsert(itemPayload, { onConflict: 'code' }).select('id').single();
+          if (data) itemMap.set(code, data.id);
+          else if (error) console.error('Erro ao sincronizar item:', itm.code, error);
+        }
+
+        // PASS 3: Record Movements (if mode is movement)
+        if (mode === 'movement') {
+          setProgress(prev => ({ ...prev, message: 'Fase 3/3: Registrando históricos...' }));
+          let successCount = 0;
+          let failCount = 0;
+
+          for (let i = 0; i < rows.length; i++) {
+            const row = rows[i];
+            const code = getCol(row, ['Codigo', 'Código', 'Codigo do Item', 'Código do Item', 'Item Code', 'Item'])?.toString().trim();
+            const name = getCol(row, ['Funcionario', 'Funcionário', 'Nome', 'Employee', 'Name', 'Atribuído a', 'Colaborador'])?.toString().trim();
+            let cpf = getCol(row, ['CPF', 'Identificação', 'Identificacao'])?.toString().replace(/\D/g, '') || null;
+            if (cpf && cpf.length > 0 && cpf.length < 11) cpf = cpf.padStart(11, '0');
+
+            const itemId = code ? itemMap.get(code) : null;
+            const empKey = name ? (cpf || name.toLowerCase()) : null;
+            const employeeId = empKey ? employeeMap.get(empKey) : null;
+
+            if (itemId && employeeId) {
+              try {
+                const qWithdrawn = parseNumericValue(getCol(row, ['Total Retirado', 'Retirado', 'Quantidade Retirada', 'Saida', 'Withdrawal', 'Qtd Retirada']));
+                const qReturned = parseNumericValue(getCol(row, ['Total Devolvido', 'Devolvido', 'Quantidade Devolvida', 'Entrada', 'Return', 'Qtd Devolvida']));
+
+                if (qWithdrawn > 0) {
+                  await supabase.from('movements').insert([{
+                    item_id: itemId, employee_id: employeeId, type: 'OUT', quantity: qWithdrawn, performed_by: user.id
+                  }]);
+                  // Aggregated Possession logic...
+                  // For simplicity in import, we'll use a single upsert here.
+                  const { data: itemData } = await supabase.from('items').select('consumable').eq('id', itemId).single();
+                  if (itemData && !itemData.consumable) {
+                    const { data: currPos } = await supabase.from('possession').select('quantity').eq('employee_id', employeeId).eq('item_id', itemId).single();
+                    await supabase.from('possession').upsert({
+                      employee_id: employeeId, item_id: itemId, user_id: user.id,
+                      quantity: (currPos?.quantity || 0) + qWithdrawn
+                    }, { onConflict: 'employee_id,item_id' });
                   }
-                  if (colQtyMin !== null) {
-                    itemPayload.quantity_min = parseNumericValue(colQtyMin);
-                  }
+                  await supabase.rpc('update_stock', { p_item_id: itemId, p_quantity: -qWithdrawn });
                 }
 
-                const { data: itemData, error: itemErr } = await supabase
-                  .from('items')
-                  .upsert(itemPayload, { onConflict: 'code' })
-                  .select('id')
-                  .limit(1);
-
-                if (itemErr) {
-                  console.warn(`Erro no item da linha ${i+1}:`, itemErr);
-                } else if (itemData && itemData.length > 0) {
-                  itemId = itemData[0].id;
+                if (qReturned > 0) {
+                  await supabase.from('movements').insert([{
+                    item_id: itemId, employee_id: employeeId, type: 'IN', quantity: qReturned, performed_by: user.id
+                  }]);
+                  const { data: currPos } = await supabase.from('possession').select('quantity').eq('employee_id', employeeId).eq('item_id', itemId).single();
+                  const newQty = Math.max(0, (currPos?.quantity || 0) - qReturned);
+                  if (newQty <= 0) await supabase.from('possession').delete().match({ employee_id: employeeId, item_id: itemId });
+                  else await supabase.from('possession').update({ quantity: newQty }).match({ employee_id: employeeId, item_id: itemId });
+                  await supabase.rpc('update_stock', { p_item_id: itemId, p_quantity: qReturned });
                 }
+                successCount++;
+              } catch (e) {
+                console.error('Erro na movimentação da linha', i, e);
+                failCount++;
               }
+            } else {
+              failCount++;
             }
 
-            // 2. Process Employee & Movement
-            if (mode === 'movement' && colEmployee) {
-              const employeeName = colEmployee.toString().trim();
-              if (employeeName) {
-                let employeeId = null;
-                
-                // Limpeza CPF: Tratar como string, remover não-números e preencher com zeros (11 dígitos)
-                let cleanedCPF = colCPF?.toString().replace(/\D/g, '') || null;
-                if (cleanedCPF && cleanedCPF.length > 0 && cleanedCPF.length < 11) {
-                  cleanedCPF = cleanedCPF.padStart(11, '0');
-                }
-
-                // Busca robusta de funcionário
-                let empSearchData = null;
-                if (cleanedCPF) {
-                  const { data } = await supabase.from('employees').select('id').eq('cpf', cleanedCPF).limit(1);
-                  if (data && data.length > 0) empSearchData = data[0];
-                }
-
-                if (!empSearchData) {
-                  const { data } = await supabase.from('employees').select('id').ilike('full_name', employeeName).limit(1);
-                  if (data && data.length > 0) empSearchData = data[0];
-                }
-
-                if (!empSearchData) {
-                  // Inserir novo funcionário
-                  const { data: newData, error: newError } = await supabase
-                    .from('employees')
-                    .insert({
-                      full_name: employeeName,
-                      cpf: cleanedCPF,
-                      role: colRole?.toString().trim() || null,
-                      department: colDept?.toString().trim() || null,
-                      status: 'Ativo',
-                      user_id: user.id
-                    })
-                    .select('id')
-                    .limit(1);
-                  
-                  if (!newError && newData && newData.length > 0) {
-                    employeeId = newData[0].id;
-                  } else if (newError) {
-                    console.warn(`Erro ao criar funcionário na linha ${i+1}:`, newError);
-                  }
-                } else {
-                  employeeId = empSearchData.id;
-                  // Atualizar informações se necessário (ex: cargo ou departamento que pode ter mudado)
-                  if (colRole || colDept) {
-                    await supabase.from('employees').update({
-                      role: colRole?.toString().trim() || undefined,
-                      department: colDept?.toString().trim() || undefined
-                    }).eq('id', employeeId);
-                  }
-                }
-
-                // Registrar Movimentações se houver Item e quantidades
-                if (employeeId && itemId) {
-                  const qWithdrawn = parseNumericValue(colWithdrawn);
-                  const qReturned = parseNumericValue(colReturned);
-
-                  if (qWithdrawn > 0) {
-                    await supabase.from('movements').insert([{
-                      item_id: itemId,
-                      employee_id: employeeId,
-                      type: 'OUT',
-                      quantity: qWithdrawn,
-                      performed_by: user.id
-                    }]);
-
-                    // Update Possession - ONLY for non-consumables
-                    const { data: item } = await supabase.from('items').select('consumable').eq('id', itemId).limit(1);
-                    if (item && item.length > 0 && !item[0].consumable) {
-                      const { data: currentPos } = await supabase.from('possession').select('quantity').eq('employee_id', employeeId).eq('item_id', itemId).limit(1);
-                      const currentQty = (currentPos && currentPos.length > 0) ? currentPos[0].quantity : 0;
-                      await supabase.from('possession').upsert({
-                        employee_id: employeeId,
-                        item_id: itemId,
-                        quantity: currentQty + qWithdrawn,
-                        user_id: user.id
-                      }, { onConflict: 'employee_id,item_id' });
-                    }
-
-                    // Update stock
-                    await supabase.rpc('update_stock', { p_item_id: itemId, p_quantity: -qWithdrawn });
-                  }
-
-                  if (qReturned > 0) {
-                    await supabase.from('movements').insert([{
-                      item_id: itemId,
-                      employee_id: employeeId,
-                      type: 'IN',
-                      quantity: qReturned,
-                      performed_by: user.id
-                    }]);
-
-                    // Update Possession
-                    const { data: item } = await supabase.from('items').select('consumable').eq('id', itemId).limit(1);
-                    if (item && item.length > 0 && !item[0].consumable) {
-                      const { data: currentPos } = await supabase.from('possession').select('quantity').eq('employee_id', employeeId).eq('item_id', itemId).limit(1);
-                      const currentQty = (currentPos && currentPos.length > 0) ? currentPos[0].quantity : 0;
-                      const newQty = Math.max(0, currentQty - qReturned);
-                      
-                      if (newQty <= 0) {
-                        await supabase.from('possession').delete().match({ employee_id: employeeId, item_id: itemId });
-                      } else {
-                        await supabase.from('possession').upsert({
-                          employee_id: employeeId,
-                          item_id: itemId,
-                          quantity: newQty,
-                          user_id: user.id
-                        }, { onConflict: 'employee_id,item_id' });
-                      }
-                    }
-
-                    // Update stock
-                    await supabase.rpc('update_stock', { p_item_id: itemId, p_quantity: qReturned });
-                  }
-                }
-              }
-            }
-
-            successCount++;
-          } catch (rowError) {
-            console.error(`Erro processando linha ${i + 1}:`, rowError);
-            errorCount++;
+            setProgress(prev => ({ ...prev, current: i + 1, message: `Fase 3/3: Processando linhas (${i+1}/${rows.length})...` }));
           }
 
           setProgress(prev => ({ 
             ...prev, 
-            current: i + 1, 
-            message: `Processando: ${i + 1} de ${rows.length}${errorCount > 0 ? ` (${errorCount} erros)` : ''}` 
+            status: 'completed', 
+            message: `Importação concluída! ${successCount} linhas processadas, ${failCount} ignoradas/erros.` 
           }));
+        } else {
+          setProgress(prev => ({ ...prev, status: 'completed', message: 'Sincronização de estoque e equipe finalizada!' }));
         }
 
-        setProgress(prev => ({ 
-          ...prev, 
-          status: 'completed', 
-          message: `Importação finalizada! Sucessos: ${successCount}. Falhas: ${errorCount}.` 
-        }));
         setTimeout(onComplete, 3000);
 
       } catch (error: any) {
