@@ -89,9 +89,19 @@ export default function ImportSpreadsheet({
         // Não usar termos ambíguos (ex: "MAT") para evitar colisão com cabeçalhos como "Material".
         // Código no banco continua existindo, mas aqui priorizamos identificar corretamente a coluna de descrição.
         const codeKeywords = ['CODIGO', 'CÓDIGO', 'CODE', 'REF', 'SKU'];
-        const descKeywords = ['DESCRICAO', 'DESCRIÇÃO', 'ITEM', 'MATERIAL', 'PRODUTO'];
+        // Planilha de funcionários pode vir com "Descrição do Item"
+        const descKeywords = [
+          'DESCRICAO',
+          'DESCRIÇÃO',
+          'DESCRICAO DO ITEM',
+          'DESCRIÇÃO DO ITEM',
+          'ITEM',
+          'MATERIAL',
+          'PRODUTO'
+        ];
         const unitKeywords = ['UNIDADE', 'UN', 'UNIT'];
         
+        // Ex: "Saldo Atual (em Posse)"
         const possessionKeywords = ['SALDO ATUAL', 'EM POSSE', 'POSSE', 'SALDO'];
         const stockKeywords = ['ESTOQUE', 'QUANTIDADE', 'QTY', 'STOCK', 'TOTAL'];
         const commonQtyKeywords = ['QTD', 'QUANT'];
