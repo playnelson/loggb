@@ -40,7 +40,7 @@ export default function MovementPage() {
   const [success, setSuccess] = useState(false);
 
   const fetchData = async () => {
-    const { data: pData } = await supabase.from('items').select('*').order('code');
+    const { data: pData } = await supabase.from('items').select('*').order('description');
     const { data: eData } = await supabase.from('employees').select('*').order('full_name');
     
     // Fetch recent movements
@@ -182,7 +182,7 @@ export default function MovementPage() {
                   <option value="">Buscar material no estoque...</option>
                   {products.map(p => (
                     <option key={p.id} value={p.id}>
-                      {p.description} (Cód: {p.code}) — Saldo {p.quantity_current}
+                      {p.description} — Saldo {p.quantity_current}
                     </option>
                   ))}
                 </select>
