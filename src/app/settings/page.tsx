@@ -10,7 +10,8 @@ import {
   ShieldAlert, 
   CheckCircle2, 
   Loader2, 
-  ArrowLeft
+  ArrowLeft,
+  AlertCircle
 } from 'lucide-react';
 import Link from 'next/link';
 
