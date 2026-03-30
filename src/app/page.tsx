@@ -134,8 +134,6 @@ export default function Home() {
                       <div>
                         <p className="font-bold text-primary text-sm leading-tight">{move.items?.description}</p>
                         <div className="flex items-center gap-2 mt-0.5">
-                          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">Cód: {move.items?.code}</p>
-                          <span className="text-[10px] text-slate-300">•</span>
                           <p className="text-[10px] text-slate-500 font-medium">{move.employees?.full_name}</p>
                         </div>
                       </div>
@@ -203,7 +201,7 @@ export default function Home() {
                     <div className="flex justify-between items-start mb-2 gap-3">
                       <div>
                         <p className="font-bold text-sm leading-tight text-white">{item.description}</p>
-                        <p className="text-[9px] text-slate-500 font-bold uppercase mt-1">Cód: {item.code}</p>
+
                       </div>
                       <span className="text-[10px] font-black bg-red-500/20 text-red-500 px-2 py-0.5 rounded shrink-0">CRÍTICO</span>
                     </div>

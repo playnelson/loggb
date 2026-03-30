@@ -159,7 +159,7 @@ export default function QuickMovementModal({
               <h2 className="text-xl font-bold text-primary leading-tight">
                 {mode === 'IN' ? 'Entrada' : 'Saída'} - {item.description}
               </h2>
-              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">CÓDIGO: {item.code} • UNIDADE: {item.unit}</p>
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">UNIDADE: {item.unit}</p>
             </div>
           </div>
           <button onClick={onClose} className="p-1 hover:bg-slate-200 rounded-full transition-colors">

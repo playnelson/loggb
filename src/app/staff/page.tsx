@@ -110,7 +110,7 @@ export default function StaffPage() {
       data.map(m => {
         const date = new Date(m.created_at).toLocaleString();
         const type = m.type === 'IN' ? '[DEVOLUÇÃO]' : '[RETIRADA] ';
-        return `${date} | ${type} | ${m.quantity}x ${m.items?.description} (${m.items?.code})`;
+        return `${date} | ${type} | ${m.quantity}x ${m.items?.description}`;
       }).join('\n');
 
     const blob = new Blob([content], { type: 'text/plain' });
@@ -443,7 +443,6 @@ export default function StaffPage() {
                         <h4 className="font-bold text-primary text-sm leading-tight">{m.items?.description}</h4>
                         <div className="flex items-center justify-between mt-2">
                           <div className="flex flex-col">
-                            <span className="text-[10px] text-slate-400 uppercase font-black tracking-tighter">Código: {m.items?.code}</span>
                             <span className="text-[10px] text-slate-400 font-bold uppercase">{m.items?.unit}</span>
                           </div>
                           <span className="text-sm font-black text-primary">x{m.quantity}</span>

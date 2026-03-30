@@ -81,11 +81,10 @@ export default function HistoryPage() {
   );
 
   const downloadCSV = () => {
-    const headers = ['Data', 'Tipo', 'Código', 'Material', 'Funcionário', 'Quantidade', 'Unidade'];
+    const headers = ['Data', 'Tipo', 'Material', 'Funcionário', 'Quantidade', 'Unidade'];
     const rows = filteredMovements.map(m => [
       new Date(m.created_at).toLocaleString(),
       m.type === 'IN' ? 'Entrada' : 'Saída',
-      m.items?.code,
       m.items?.description,
       m.employees?.full_name || 'N/A',
       m.quantity,
@@ -130,7 +129,7 @@ export default function HistoryPage() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
             <input 
               type="text" 
-              placeholder="Buscar por material, código ou funcionário..." 
+              placeholder="Buscar por material ou funcionário..." 
               className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-secondary/50 outline-none transition-all"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -220,7 +219,7 @@ export default function HistoryPage() {
                         </div>
                         <div className="flex flex-col">
                           <p className="text-sm font-bold text-primary leading-tight">{move.items?.description}</p>
-                          <p className="text-[10px] text-slate-400 mt-0.5 font-mono uppercase tracking-tighter">{move.items?.code}</p>
+
                         </div>
                       </div>
                     </td>

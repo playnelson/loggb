@@ -127,9 +127,15 @@ function InventoryContent() {
     e.preventDefault();
     setIsSubmitting(true);
 
+    // Auto-generate code if empty
+    const finalData = {
+      ...formData,
+      code: formData.code || `REF-${formData.description.toUpperCase().replace(/[^A-Z0-9]/g, '-').slice(0, 10)}`
+    };
+
     const { error } = await supabase
       .from('items')
-      .insert([formData]);
+      .insert([finalData]);
 
     if (error) {
       console.error('Error adding item:', error);
@@ -200,7 +206,7 @@ function InventoryContent() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
           <input 
             type="text" 
-            placeholder="Buscar por descrição ou código..." 
+            placeholder="Buscar por descrição..." 
             className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary/50 focus:border-secondary transition-all"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
@@ -220,7 +226,7 @@ function InventoryContent() {
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Em Posse</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Total</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Mínimo</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Categoria / Cód.</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Categoria</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Ações</th>
               </tr>
             </thead>
@@ -304,7 +310,7 @@ function InventoryContent() {
                           }`}>
                             {p.category}
                           </span>
-                          <span className="text-[10px] font-mono text-slate-400">{p.code}</span>
+
                         </div>
                       </td>
                       <td className="px-6 py-4 text-right">
@@ -384,7 +390,7 @@ function InventoryContent() {
             <div className="p-6 border-b bg-slate-50 flex items-center justify-between">
               <div>
                 <h3 className="text-xl font-bold text-primary">{historyItem.description}</h3>
-                <p className="text-xs text-slate-500 font-mono mt-1">LOG DE MOVIMENTAÇÕES • {historyItem.code}</p>
+                <p className="text-xs text-slate-500 font-mono mt-1 uppercase">Log de movimentações detalhado</p>
               </div>
               <button onClick={() => setHistoryItem(null)} className="p-2 hover:bg-slate-200 rounded-full">
                 <X size={20} />
@@ -438,17 +444,7 @@ function InventoryContent() {
             
             <form onSubmit={editingItem ? handleEditSubmit : handleSubmit} className="p-6 space-y-4">
               <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-xs font-bold uppercase text-slate-400">Código</label>
-                  <input 
-                    required
-                    type="text" 
-                    placeholder="Ex: MAT-101"
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-secondary/20 outline-none font-mono"
-                    value={formData.code}
-                    onChange={(e) => setFormData({...formData, code: e.target.value})}
-                  />
-                </div>
+
                 <div className="space-y-1">
                   <label className="text-xs font-bold uppercase text-slate-400">Unidade</label>
                   <select 
