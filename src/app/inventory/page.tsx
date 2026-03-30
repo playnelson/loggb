@@ -50,12 +50,7 @@ function InventoryContent() {
 
     if (error) {
       console.error('Error fetching products:', error);
-      // Fallback data for preview
-      setProducts([
-        { id: '1', code: 'MAT-161', description: 'Chave Inglesa 10"', category: 'Ferramenta', location: 'Prateleira A1', quantity_current: 5, quantity_min: 10, unit: 'un' },
-        { id: '2', code: 'MAT-162', description: 'Luva de Raspa', category: 'EPI', location: 'Gaveta B2', quantity_current: 50, quantity_min: 20, unit: 'par' },
-        { id: '3', code: 'MAT-163', description: 'Tubo PVC 20mm', category: 'Tubulação', location: 'Pátio 4', quantity_current: 15, quantity_min: 30, unit: 'm' },
-      ]);
+      setProducts([]);
     } else {
       setProducts(data || []);
     }

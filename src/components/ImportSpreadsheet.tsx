@@ -187,23 +187,58 @@ export default function ImportSpreadsheet({
               const qReturned = parseNumericValue(colReturned);
 
               if (qWithdrawn > 0) {
+                // 1. Record Movement
                 await supabase.from('movements').insert([{
                   item_id: itemId,
                   employee_id: employeeId,
-                  type: 'Saida',
+                  type: 'OUT',
                   quantity: qWithdrawn,
                   performed_by: user.id
                 }]);
+
+                // 2. Update Possession (UPSERT)
+                // Fetch current possession first to calculate new quantity
+                const { data: currentPos } = await supabase
+                  .from('possession')
+                  .select('quantity')
+                  .eq('employee_id', employeeId)
+                  .eq('item_id', itemId)
+                  .single();
+                
+                const newQty = (currentPos?.quantity || 0) + qWithdrawn;
+                await supabase.from('possession').upsert({
+                  employee_id: employeeId,
+                  item_id: itemId,
+                  quantity: newQty,
+                  user_id: user.id
+                }, { onConflict: 'employee_id,item_id' });
               }
 
               if (qReturned > 0) {
+                // 1. Record Movement
                 await supabase.from('movements').insert([{
                   item_id: itemId,
                   employee_id: employeeId,
-                  type: 'Entrada',
+                  type: 'IN',
                   quantity: qReturned,
                   performed_by: user.id
                 }]);
+
+                // 2. Update Possession
+                const { data: currentPos } = await supabase
+                   .from('possession')
+                   .select('quantity')
+                   .eq('employee_id', employeeId)
+                   .eq('item_id', itemId)
+                   .single();
+                
+                const newQty = Math.max(0, (currentPos?.quantity || 0) - qReturned);
+                await supabase.from('possession').upsert({
+                  employee_id: employeeId,
+                  item_id: itemId,
+                  quantity: newQty,
+                  user_id: user.id
+                }, { onConflict: 'employee_id,item_id' });
               }
             }
           }
