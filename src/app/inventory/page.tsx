@@ -162,7 +162,7 @@ function InventoryContent() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-primary">Almoxarifado LoggB</h1>
-          <p className="text-slate-500">Gestão de materiais, EPIs e ferramentas por descrição.</p>
+          <p className="text-slate-500 text-sm">Gestão de materiais, EPIs e ferramentas por descrição e categoria.</p>
         </div>
         <div className="flex gap-2">
           <button 
@@ -214,16 +214,14 @@ function InventoryContent() {
           <table className="w-full text-left border-collapse">
             <thead className="bg-slate-50 border-b border-border">
               <tr>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Código</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Descrição</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Categoria</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Consumível?</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Qtd. em Estoque</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Qtd. em Posse</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Qtd. Total</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Qtd. Mínima</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Unidade</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Ações</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Descrição do Material</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Consumível?</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Estoque</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Em Posse</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Total</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Mínimo</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Categoria / Cód.</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border text-sm">
@@ -246,27 +244,18 @@ function InventoryContent() {
                   
                   return (
                     <tr key={p.id} className="hover:bg-slate-50 transition-colors group">
-                      <td className="px-6 py-4 font-mono text-xs text-slate-500">{p.code}</td>
                       <td className="px-6 py-4">
-                        <div className="font-bold text-primary">{p.description}</div>
-                        <div className="text-[10px] text-slate-400 uppercase font-mono">{p.location || 'Sem local'}</div>
+                        <div className="font-bold text-primary text-base">{p.description}</div>
+                        <div className="text-[10px] text-slate-400 uppercase font-bold tracking-tight">{p.location || 'Sem local definido'} • {p.unit}</div>
                       </td>
-                      <td className="px-6 py-4 text-xs">
-                        <span className={`px-2 py-1 rounded-md uppercase font-bold ${
-                          p.category === 'Ferramenta' ? 'bg-blue-50 text-blue-600' :
-                          p.category === 'EPI' ? 'bg-purple-50 text-purple-600' : 'bg-orange-50 text-orange-600'
-                        }`}>
-                          {p.category}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-xs text-center">
-                        <span className={`px-2 py-1 rounded-md font-bold ${p.consumable ? 'bg-green-50 text-green-600' : 'bg-slate-50 text-slate-500'}`}>
+                      <td className="px-6 py-4 text-xs text-center border-x border-slate-50">
+                        <span className={`px-2 py-1 rounded-md font-bold text-[10px] uppercase tracking-tighter ${p.consumable ? 'bg-green-50 text-green-600' : 'bg-slate-50 text-slate-400'}`}>
                           {p.consumable ? 'Sim' : 'Não'}
                         </span>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-6 py-4 bg-slate-50/30">
                         <div className="flex flex-col items-center">
-                          <span className={`font-bold ${isLowStock ? 'text-red-500' : 'text-primary'}`}>
+                          <span className={`font-black text-sm ${isLowStock ? 'text-red-500' : 'text-primary'}`}>
                             {p.quantity_current}
                           </span>
                         </div>
@@ -276,9 +265,9 @@ function InventoryContent() {
                           <div className="relative inline-block">
                             <button 
                               onClick={() => setActivePopover(activePopover === p.id ? null : p.id)}
-                              className="flex items-center gap-1 mx-auto bg-slate-100 px-3 py-1 rounded-full text-primary font-bold hover:bg-slate-200 transition-colors"
+                              className="flex items-center gap-1 mx-auto bg-slate-100 px-3 py-1 rounded-full text-primary font-bold hover:bg-slate-200 transition-colors text-xs"
                             >
-                              <Users size={14} className="text-secondary" />
+                              <Users size={12} className="text-secondary" />
                               {totalInPossession}
                             </button>
                             
@@ -287,7 +276,7 @@ function InventoryContent() {
                                 <h4 className="text-[10px] font-bold uppercase text-slate-400 mb-2 border-b pb-1">Em posse de:</h4>
                                 <div className="space-y-2">
                                   {p.possession?.map(pos => (
-                                    <div key={pos.id} className="flex justify-between text-xs">
+                                    <div key={pos.id} className="flex justify-between text-[10px]">
                                       <span className="text-slate-600 truncate mr-2">{pos.employees?.full_name}</span>
                                       <span className="font-bold text-primary">{pos.quantity}</span>
                                     </div>
@@ -297,17 +286,27 @@ function InventoryContent() {
                             )}
                           </div>
                         ) : (
-                          <span className="text-slate-300 text-xs">0</span>
+                          <span className="text-slate-300 text-[10px] font-bold">0</span>
                         )}
                       </td>
-                      <td className="px-6 py-4 text-center font-bold text-primary">{totalQuantity}</td>
+                      <td className="px-6 py-4 text-center font-black text-primary text-sm bg-slate-50/30 transition-colors group-hover:bg-slate-100/50">{totalQuantity}</td>
                       <td className="px-6 py-4 text-center">
                         <div className="flex flex-col items-center">
-                          <span className="text-slate-500">{p.quantity_min}</span>
-                          {isLowStock && <AlertCircle size={12} className="text-red-400 mt-1 animate-pulse" />}
+                          <span className="text-slate-400 font-bold text-xs">{p.quantity_min}</span>
+                          {isLowStock && <AlertCircle size={10} className="text-red-400 mt-1 animate-pulse" />}
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-slate-500">{p.unit}</td>
+                      <td className="px-6 py-4">
+                        <div className="flex flex-col gap-1">
+                          <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-tighter w-fit ${
+                            p.category === 'Ferramenta' ? 'bg-blue-50 text-blue-600' :
+                            p.category === 'EPI' ? 'bg-purple-50 text-purple-600' : 'bg-orange-50 text-orange-600'
+                          }`}>
+                            {p.category}
+                          </span>
+                          <span className="text-[10px] font-mono text-slate-400">{p.code}</span>
+                        </div>
+                      </td>
                       <td className="px-6 py-4 text-right">
                         <div className="flex justify-end gap-1">
                           <button 

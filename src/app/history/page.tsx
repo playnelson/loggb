@@ -218,9 +218,9 @@ export default function HistoryPage() {
                         <div className="p-2 bg-slate-100 rounded-lg group-hover:bg-white transition-colors">
                           <Package size={14} className="text-slate-400" />
                         </div>
-                        <div>
-                          <p className="text-sm font-bold text-primary leading-none">{move.items?.description}</p>
-                          <p className="text-[10px] text-slate-400 mt-1 font-mono">{move.items?.code}</p>
+                        <div className="flex flex-col">
+                          <p className="text-sm font-bold text-primary leading-tight">{move.items?.description}</p>
+                          <p className="text-[10px] text-slate-400 mt-0.5 font-mono uppercase tracking-tighter">{move.items?.code}</p>
                         </div>
                       </div>
                     </td>

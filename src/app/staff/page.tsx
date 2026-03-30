@@ -15,6 +15,7 @@ interface Possession {
     description: string;
     category: string;
     unit: string;
+    consumable: boolean;
   };
 }
 
@@ -62,7 +63,8 @@ export default function StaffPage() {
             code,
             description,
             category,
-            unit
+            unit,
+            consumable
           )
         )
       `)
@@ -185,7 +187,9 @@ export default function StaffPage() {
     const matchesSearch = e.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          (e.role && e.role.toLowerCase().includes(searchTerm.toLowerCase()));
     const matchesStatus = statusFilter === 'Todos' || e.status === statusFilter;
-    const activePossessions = e.possession?.filter(p => p.quantity > 0) || [];
+    
+    // Only count non-consumable items for the possession filter
+    const activePossessions = e.possession?.filter(p => p.quantity > 0 && !p.items?.consumable) || [];
     const matchesHasItems = !hasItemsFilter || activePossessions.length > 0;
     
     return matchesSearch && matchesStatus && matchesHasItems;
@@ -279,7 +283,7 @@ export default function StaffPage() {
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Colaborador</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Cargo</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Status</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Equipamentos em Posse (Descrição)</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Carteira de Ativos (EPIs / Diversos)</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Ações</th>
               </tr>
             </thead>
@@ -318,24 +322,64 @@ export default function StaffPage() {
                         </div>
                       </td>
                       <td className="px-6 py-4">
-                        <div className="flex flex-wrap gap-2 max-w-sm">
-                          {activePossessions.length > 0 ? (
-                            activePossessions.map((p, idx) => (
-                              <div key={idx} className="flex items-center gap-2 bg-secondary/5 border border-secondary/10 px-2 py-1 rounded text-[10px] font-bold text-secondary group/p">
-                                <span className="truncate max-w-[120px]">{p.items?.description}</span>
-                                <span className="bg-secondary/20 px-1 rounded">x{p.quantity}</span>
-                                <button 
-                                  onClick={() => { setReturnItem({employeeId: e.id, item: p}); setReturnQty(p.quantity); }}
-                                  className="hover:text-red-500 transition-colors ml-1" 
-                                  title="Devolver Item"
-                                >
-                                  <RotateCcw size={10} />
-                                </button>
-                              </div>
-                            ))
-                          ) : (
-                            <span className="text-[10px] text-slate-300 font-semibold italic">Nenhum item em posse</span>
-                          )}
+                        <div className="flex flex-col gap-3 min-w-[200px]">
+                          {/* EPIs Wallet */}
+                          <div>
+                            <div className="flex items-center gap-1.5 mb-1.5">
+                              <div className="w-1 h-3 bg-purple-500 rounded-full"></div>
+                              <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Carteira de EPIs</span>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {e.possession?.filter(p => p.quantity > 0 && !p.items?.consumable && p.items?.category === 'EPI').length ? (
+                                e.possession
+                                  .filter(p => p.quantity > 0 && !p.items?.consumable && p.items?.category === 'EPI')
+                                  .map((p, idx) => (
+                                    <div key={idx} className="flex items-center gap-2 bg-purple-50 border border-purple-100 px-2 py-1 rounded text-[10px] font-bold text-purple-700 group/p">
+                                      <span className="truncate max-w-[150px]">{p.items?.description}</span>
+                                      <span className="bg-purple-200/50 px-1 rounded">x{p.quantity}</span>
+                                      <button 
+                                        onClick={() => { setReturnItem({employeeId: e.id, item: p}); setReturnQty(p.quantity); }}
+                                        className="hover:text-red-500 transition-colors ml-1" 
+                                        title="Devolver Item"
+                                      >
+                                        <RotateCcw size={10} />
+                                      </button>
+                                    </div>
+                                  ))
+                              ) : (
+                                <span className="text-[9px] text-slate-300 italic font-medium ml-2">Vazia</span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Others Wallet */}
+                          <div>
+                            <div className="flex items-center gap-1.5 mb-1.5">
+                              <div className="w-1 h-3 bg-blue-500 rounded-full"></div>
+                              <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Demais Itens</span>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {e.possession?.filter(p => p.quantity > 0 && !p.items?.consumable && p.items?.category !== 'EPI').length ? (
+                                e.possession
+                                  .filter(p => p.quantity > 0 && !p.items?.consumable && p.items?.category !== 'EPI')
+                                  .map((p, idx) => (
+                                    <div key={idx} className="flex items-center gap-2 bg-blue-50 border border-blue-100 px-2 py-1 rounded text-[10px] font-bold text-blue-700 group/p">
+                                      <span className="truncate max-w-[150px]">{p.items?.description}</span>
+                                      <span className="bg-blue-200/50 px-1 rounded">x{p.quantity}</span>
+                                      <button 
+                                        onClick={() => { setReturnItem({employeeId: e.id, item: p}); setReturnQty(p.quantity); }}
+                                        className="hover:text-red-500 transition-colors ml-1" 
+                                        title="Devolver Item"
+                                      >
+                                        <RotateCcw size={10} />
+                                      </button>
+                                    </div>
+                                  ))
+                              ) : (
+                                <span className="text-[9px] text-slate-300 italic font-medium ml-2">Vazia</span>
+                              )}
+                            </div>
+                          </div>
                         </div>
                       </td>
                       <td className="px-6 py-4 text-right">
