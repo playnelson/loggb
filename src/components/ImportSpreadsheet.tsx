@@ -33,17 +33,29 @@ export default function ImportSpreadsheet({
     if (typeof val === 'number') return val;
     
     const str = val.toString().trim();
-    let cleaned = str;
+    if (!str) return 0;
     
+    // Handle Brazilian format: "1.234,56" or "1234,56"
+    let cleaned = str;
     if (str.includes(',') && str.includes('.')) {
+      // "1.234,56" -> "1234.56"
       cleaned = str.replace(/\./g, '').replace(',', '.');
     } else if (str.includes(',')) {
+      // "1234,56" -> "1234.56"
       cleaned = str.replace(',', '.');
     }
     
-    const finalCleaned = cleaned.replace(/(?!^-)[^\d.]/g, '');
+    // Remove any remaining non-numeric characters e.g. "R$ 100,00"
+    const finalCleaned = cleaned.replace(/[^\d.]/g, '');
     const num = parseFloat(finalCleaned);
     return isNaN(num) ? 0 : num;
+  };
+
+  const parseBooleanValue = (val: any) => {
+    if (val === null || val === undefined) return false;
+    if (typeof val === 'boolean') return val;
+    const str = val.toString().trim().toUpperCase();
+    return ['SIM', 'S', 'YES', 'Y', '1', 'TRUE', 'VERDADEIRO'].includes(str);
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -69,19 +81,28 @@ export default function ImportSpreadsheet({
         // Robust Header Detection: Find the first row that contains at least one keyword
         const nameKeywords = ['NOME', 'FUNCIONARIO', 'COLABORADOR', 'USER', 'PESSOA', 'FULL_NAME', 'WORKER', 'CONTRIBUTOR'];
         const cpfKeywords = ['CPF', 'ID', 'IDENTIDADE', 'DOC', 'REGISTRY'];
-        const codeKeywords = ['CODIGO', 'CODE', 'REF', 'ID_ITEM', 'MAT', 'ITEM_CODE', 'REFERENCIA'];
-        const descKeywords = ['DESCRICAO', 'ITEM', 'DESC', 'MATERIAL', 'PRODUCT', 'DESCRIÇÃO', 'ARTICLE'];
+        const codeKeywords = ['CODIGO', 'CODE', 'REF', 'ID_ITEM', 'MAT', 'ITEM_CODE', 'REFERENCIA', 'SKU'];
+        const descKeywords = ['DESCRICAO', 'ITEM', 'DESC', 'MATERIAL', 'PRODUCT', 'DESCRIÇÃO', 'ARTICLE', 'OBJETO'];
         const qtyKeywords = ['QUANTIDADE', 'QTY', 'STOCK', 'ESTOQUE', 'TOTAL', 'SALDO', 'RETIRADO', 'DEVOLVIDO', 'POSSE', 'SALDO ATUAL', 'BALANCE', 'QTD'];
+        const categoryKeywords = ['CATEGORIA', 'CATEGORY', 'GRUPO', 'TIPO'];
+        const originKeywords = ['ORIGEM', 'LOCAL', 'LOCATION', 'DEPÓSITO', 'ALMOXARIFADO'];
+        const consumableKeywords = ['CONSUMÍVEL', 'CONSUMIVEL', 'CONSUMABLE'];
+        const minKeywords = ['MÍNIMO', 'MINIMO', 'MIN', 'LIMIT', 'ALERTA', 'MINIMO_ESTOQUE'];
 
-        const allKeywords = [...nameKeywords, ...cpfKeywords, ...codeKeywords, ...descKeywords, ...qtyKeywords];
+        const allKeywords = [
+          ...nameKeywords, ...cpfKeywords, ...codeKeywords, ...descKeywords, 
+          ...qtyKeywords, ...categoryKeywords, ...originKeywords, 
+          ...consumableKeywords, ...minKeywords
+        ];
 
         let headerRowIndex = 0;
-        for (let i = 0; i < Math.min(rawData.length, 10); i++) {
+        for (let i = 0; i < Math.min(rawData.length, 15); i++) { // Check more rows for safety
           const row = rawData[i];
           if (!row || !Array.isArray(row)) continue;
           
           const rowStr = row.join(' ').toUpperCase();
-          if (allKeywords.some(k => rowStr.includes(k))) {
+          const matchCount = allKeywords.filter(k => rowStr.includes(k)).length;
+          if (matchCount >= 2) { // At least 2 keyword matches to be more confident
             headerRowIndex = i;
             break;
           }
@@ -101,7 +122,11 @@ export default function ImportSpreadsheet({
           cpfIdx: findBestIdx(cpfKeywords),
           codeIdx: findBestIdx(codeKeywords),
           descIdx: findBestIdx(descKeywords),
-          qtyIdx: findBestIdx(qtyKeywords)
+          qtyIdx: findBestIdx(qtyKeywords),
+          categoryIdx: findBestIdx(categoryKeywords),
+          locationIdx: findBestIdx(originKeywords),
+          consumableIdx: findBestIdx(consumableKeywords),
+          minIdx: findBestIdx(minKeywords)
         };
 
         console.log('Detected mapping:', mapping);
@@ -166,14 +191,27 @@ export default function ImportSpreadsheet({
           rows.forEach(row => {
             const code = mapping.codeIdx !== -1 ? row[mapping.codeIdx]?.toString().trim() : '';
             const desc = mapping.descIdx !== -1 ? row[mapping.descIdx]?.toString().trim() : '';
+            
             if (code || desc) {
               const itemKey = code || desc;
               if (!uniqueItems.has(itemKey)) {
                 const qty = mapping.qtyIdx !== -1 ? parseNumericValue(row[mapping.qtyIdx]) : 0;
+                const min = mapping.minIdx !== -1 ? parseNumericValue(row[mapping.minIdx]) : 1;
+                const category = mapping.categoryIdx !== -1 ? row[mapping.categoryIdx]?.toString().trim() : null;
+                const location = mapping.locationIdx !== -1 ? row[mapping.locationIdx]?.toString().trim() : 'Almoxarifado';
+                const consumable = mapping.consumableIdx !== -1 ? parseBooleanValue(row[mapping.consumableIdx]) : false;
+                
+                // Deterministic code if missing: PRE-description-slug
+                const generatedCode = `REF-${desc.toUpperCase().replace(/[^A-Z0-9]/g, '-').slice(0, 10)}-${Math.random().toString(36).substr(2, 3).toUpperCase()}`;
+
                 uniqueItems.set(itemKey, {
-                  code: code || `REF-${Math.random().toString(36).substr(2, 5).toUpperCase()}`,
+                  code: code || generatedCode,
                   description: desc || 'Sem descrição',
-                  qty
+                  qty,
+                  min,
+                  category,
+                  location,
+                  consumable
                 });
               }
             }
@@ -184,13 +222,40 @@ export default function ImportSpreadsheet({
         for (const [key, itm] of uniqueItems.entries()) {
           iCount++;
           setProgress(prev => ({ ...prev, message: `Itens: ${iCount}/${uniqueItems.size}` }));
-          const { data } = await supabase.from('items').upsert({
+          
+          // Check for existing item by code OR description to prevent duplicates
+          let existingId = null;
+          
+          // 1. Try by code
+          if (itm.code && !itm.code.startsWith('REF-')) {
+            const { data: byCode } = await supabase.from('items').select('id').eq('code', itm.code).maybeSingle();
+            if (byCode) existingId = byCode.id;
+          }
+          
+          // 2. Try by description (if not found by code)
+          if (!existingId && itm.description) {
+            const { data: byDesc } = await supabase.from('items').select('id').ilike('description', itm.description).maybeSingle();
+            if (byDesc) existingId = byDesc.id;
+          }
+
+          const itemData = {
             code: itm.code,
             description: itm.description,
+            category: itm.category,
+            location: itm.location,
+            consumable: itm.consumable,
+            quantity_min: itm.min,
             user_id: user.id,
             ...(mode === 'inventory' ? { quantity_current: itm.qty } : {})
-          }, { onConflict: 'code' }).select('id').single();
-          if (data) itemMap.set(key, data.id);
+          };
+
+          if (existingId) {
+            await supabase.from('items').update(itemData).eq('id', existingId);
+            itemMap.set(key, existingId);
+          } else {
+            const { data: newItem } = await supabase.from('items').insert(itemData).select('id').single();
+            if (newItem) itemMap.set(key, newItem.id);
+          }
         }
 
         if (mode === 'movement') {
