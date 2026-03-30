@@ -22,6 +22,7 @@ interface Product {
   description: string;
   category: string;
   location: string;
+  consumable: boolean;
   quantity_current: number;
   quantity_min: number;
   unit: string;
@@ -51,6 +52,7 @@ function InventoryContent() {
     description: '',
     category: 'Ferramenta',
     location: '',
+    consumable: false,
     quantity_current: 0,
     quantity_min: 0,
     unit: 'un'
@@ -133,6 +135,7 @@ function InventoryContent() {
         description: '',
         category: 'Ferramenta',
         location: '',
+        consumable: false,
         quantity_current: 0,
         quantity_min: 0,
         unit: 'un'
@@ -205,11 +208,14 @@ function InventoryContent() {
           <table className="w-full text-left border-collapse">
             <thead className="bg-slate-50 border-b border-border">
               <tr>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Descrição</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Código</th>
+                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Descrição</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Categoria</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Posse</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Estoque</th>
+                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Consumível?</th>
+                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Qtd. em Estoque</th>
+                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Qtd. em Posse</th>
+                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Qtd. Total</th>
+                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Qtd. Mínima</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Unidade</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Ações</th>
               </tr>
@@ -230,14 +236,15 @@ function InventoryContent() {
                 filteredProducts.map((p) => {
                   const isLowStock = p.quantity_current <= p.quantity_min;
                   const totalInPossession = p.possession?.reduce((acc, curr) => acc + curr.quantity, 0) || 0;
+                  const totalQuantity = p.quantity_current + totalInPossession;
                   
                   return (
                     <tr key={p.id} className="hover:bg-slate-50 transition-colors group">
+                      <td className="px-6 py-4 font-mono text-xs text-slate-500">{p.code}</td>
                       <td className="px-6 py-4">
                         <div className="font-bold text-primary">{p.description}</div>
                         <div className="text-[10px] text-slate-400 uppercase font-mono">{p.location || 'Sem local'}</div>
                       </td>
-                      <td className="px-6 py-4 font-mono text-xs text-slate-500">{p.code}</td>
                       <td className="px-6 py-4 text-xs">
                         <span className={`px-2 py-1 rounded-md uppercase font-bold ${
                           p.category === 'Ferramenta' ? 'bg-blue-50 text-blue-600' :
@@ -245,6 +252,18 @@ function InventoryContent() {
                         }`}>
                           {p.category}
                         </span>
+                      </td>
+                      <td className="px-6 py-4 text-xs text-center">
+                        <span className={`px-2 py-1 rounded-md font-bold ${p.consumable ? 'bg-green-50 text-green-600' : 'bg-slate-50 text-slate-500'}`}>
+                          {p.consumable ? 'Sim' : 'Não'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex flex-col items-center">
+                          <span className={`font-bold ${isLowStock ? 'text-red-500' : 'text-primary'}`}>
+                            {p.quantity_current}
+                          </span>
+                        </div>
                       </td>
                       <td className="px-6 py-4 text-center">
                         {totalInPossession > 0 ? (
@@ -272,14 +291,13 @@ function InventoryContent() {
                             )}
                           </div>
                         ) : (
-                          <span className="text-slate-300 text-xs">Ninguém</span>
+                          <span className="text-slate-300 text-xs">0</span>
                         )}
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-6 py-4 text-center font-bold text-primary">{totalQuantity}</td>
+                      <td className="px-6 py-4 text-center">
                         <div className="flex flex-col items-center">
-                          <span className={`font-bold ${isLowStock ? 'text-red-500' : 'text-primary'}`}>
-                            {p.quantity_current}
-                          </span>
+                          <span className="text-slate-500">{p.quantity_min}</span>
                           {isLowStock && <AlertCircle size={12} className="text-red-400 mt-1 animate-pulse" />}
                         </div>
                       </td>
@@ -301,6 +319,7 @@ function InventoryContent() {
                                 description: p.description,
                                 category: p.category,
                                 location: p.location,
+                                consumable: p.consumable || false,
                                 quantity_current: p.quantity_current,
                                 quantity_min: p.quantity_min,
                                 unit: p.unit
@@ -417,16 +436,30 @@ function InventoryContent() {
                 </div>
               </div>
 
-              <div className="space-y-1">
-                <label className="text-xs font-bold uppercase text-slate-400">Descrição do Produto</label>
-                <input 
-                  required
-                  type="text" 
-                  placeholder="Nome detalhado do item..."
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none font-bold"
-                  value={formData.description}
-                  onChange={(e) => setFormData({...formData, description: e.target.value})}
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold uppercase text-slate-400">Descrição do Produto</label>
+                  <input 
+                    required
+                    type="text" 
+                    placeholder="Nome detalhado do item..."
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none font-bold"
+                    value={formData.description}
+                    onChange={(e) => setFormData({...formData, description: e.target.value})}
+                  />
+                </div>
+                <div className="flex items-center gap-3 pt-6">
+                  <input 
+                    type="checkbox" 
+                    id="consumable-toggle"
+                    className="w-5 h-5 accent-secondary rounded border-slate-300 cursor-pointer"
+                    checked={formData.consumable}
+                    onChange={(e) => setFormData({...formData, consumable: e.target.checked})}
+                  />
+                  <label htmlFor="consumable-toggle" className="text-sm font-bold text-primary cursor-pointer">
+                    Consumível?
+                  </label>
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -461,8 +494,9 @@ function InventoryContent() {
                   <input 
                     type="number" 
                     className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none font-bold"
-                    value={formData.quantity_current}
+                    value={formData.quantity_current === 0 ? '' : formData.quantity_current}
                     onChange={(e) => setFormData({...formData, quantity_current: Number(e.target.value)})}
+                    onFocus={(e) => e.target.select()}
                   />
                 </div>
                 <div className="space-y-1">
@@ -470,8 +504,9 @@ function InventoryContent() {
                   <input 
                     type="number" 
                     className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none font-bold"
-                    value={formData.quantity_min}
+                    value={formData.quantity_min === 0 ? '' : formData.quantity_min}
                     onChange={(e) => setFormData({...formData, quantity_min: Number(e.target.value)})}
+                    onFocus={(e) => e.target.select()}
                   />
                 </div>
               </div>

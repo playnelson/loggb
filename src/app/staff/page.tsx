@@ -426,8 +426,9 @@ export default function StaffPage() {
                     min="1" 
                     max={returnItem.item.quantity}
                     className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-lg text-lg font-bold outline-none focus:ring-2 focus:ring-secondary/50"
-                    value={returnQty}
-                    onChange={(e) => setReturnQty(Math.min(returnItem.item.quantity, Math.max(1, Number(e.target.value))))}
+                    value={returnQty === 0 ? '' : returnQty}
+                    onChange={(e) => setReturnQty(Math.min(returnItem.item.quantity, Number(e.target.value)))}
+                    onFocus={(e) => e.target.select()}
                   />
                   <span className="text-sm font-bold text-slate-400">de {returnItem.item.quantity}</span>
                 </div>

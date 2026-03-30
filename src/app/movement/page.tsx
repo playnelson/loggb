@@ -11,6 +11,7 @@ interface Product {
   code: string;
   description: string;
   quantity_current: number;
+  consumable: boolean;
 }
 
 interface Employee {
@@ -95,21 +96,24 @@ export default function MovementPage() {
        return;
     }
 
-    // 2. Update Possession (UPSERT)
-    const { data: currentPos } = await supabase
-      .from('possession')
-      .select('quantity')
-      .eq('employee_id', selectedEmployee)
-      .eq('item_id', selectedProduct)
-      .single();
-    
-    const newQty = (currentPos?.quantity || 0) + quantity;
-    await supabase.from('possession').upsert({
-      employee_id: selectedEmployee,
-      item_id: selectedProduct,
-      quantity: newQty,
-      user_id: user.id
-    }, { onConflict: 'employee_id,item_id' });
+    // 2. Update Possession (UPSERT) - ONLY for non-consumables
+    const product = products.find(p => p.id === selectedProduct);
+    if (product && !product.consumable) {
+      const { data: currentPos } = await supabase
+        .from('possession')
+        .select('quantity')
+        .eq('employee_id', selectedEmployee)
+        .eq('item_id', selectedProduct)
+        .single();
+      
+      const newQty = (currentPos?.quantity || 0) + quantity;
+      await supabase.from('possession').upsert({
+        employee_id: selectedEmployee,
+        item_id: selectedProduct,
+        quantity: newQty,
+        user_id: user.id
+      }, { onConflict: 'employee_id,item_id' });
+    }
 
     // 3. Update stock quantity locally and in DB (RPC should handle DB if set up, elsewhere manual)
     await supabase.rpc('update_stock', { 
@@ -211,8 +215,9 @@ export default function MovementPage() {
                     type="number" 
                     min="1"
                     className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-secondary/50 focus:border-secondary transition-all font-bold"
-                    value={quantity}
+                    value={quantity === 0 ? '' : quantity}
                     onChange={(e) => setQuantity(Number(e.target.value))}
+                    onFocus={(e) => e.target.select()}
                     required
                   />
                 </div>

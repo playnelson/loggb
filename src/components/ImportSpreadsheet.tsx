@@ -117,6 +117,7 @@ export default function ImportSpreadsheet({
               category: colCat || (colConsumable?.toString().toLowerCase().includes('sim') ? 'Consumível' : 'Ferramenta'),
               unit: colUnit || 'un',
               location: colLoc || null,
+              consumable: colConsumable?.toString().toLowerCase().includes('sim') || false,
               user_id: user.id
             };
 
