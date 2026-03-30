@@ -194,8 +194,6 @@ export default function ImportSpreadsheet({
                   quantity: qWithdrawn,
                   performed_by: user.id
                 }]);
-                // Opcional: Atualizar stock atual (decrement) já que não há triggers
-                await supabase.rpc('decrement_stock', { i_id: itemId, qty: qWithdrawn });
               }
 
               if (qReturned > 0) {
@@ -206,7 +204,6 @@ export default function ImportSpreadsheet({
                   quantity: qReturned,
                   performed_by: user.id
                 }]);
-                await supabase.rpc('increment_stock', { i_id: itemId, qty: qReturned });
               }
             }
           }
