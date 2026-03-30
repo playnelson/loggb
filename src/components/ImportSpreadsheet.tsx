@@ -86,7 +86,9 @@ export default function ImportSpreadsheet({
         const deptKeywords = ['DEPARTAMENTO', 'DEP', 'DEPT', 'SETOR', 'AREA'];
         const statusKeywords = ['STATUS', 'SITUAÇÃO', 'ESTADO'];
         
-        const codeKeywords = ['CODIGO', 'CÓDIGO', 'CODE', 'REF', 'MAT', 'SKU'];
+        // Não usar termos ambíguos (ex: "MAT") para evitar colisão com cabeçalhos como "Material".
+        // Código no banco continua existindo, mas aqui priorizamos identificar corretamente a coluna de descrição.
+        const codeKeywords = ['CODIGO', 'CÓDIGO', 'CODE', 'REF', 'SKU'];
         const descKeywords = ['DESCRICAO', 'DESCRIÇÃO', 'ITEM', 'MATERIAL', 'PRODUTO'];
         const unitKeywords = ['UNIDADE', 'UN', 'UNIT'];
         
@@ -97,7 +99,8 @@ export default function ImportSpreadsheet({
         const categoryKeywords = ['CATEGORIA', 'CATEGORY', 'GRUPO', 'TIPO'];
         const originKeywords = ['ORIGEM', 'LOCAL', 'LOCATION', 'DEPÓSITO', 'ALMOXARIFADO'];
         const consumableKeywords = ['CONSUMÍVEL', 'CONSUMIVEL', 'CONSUMABLE'];
-        const minKeywords = ['MÍNIMO', 'MINIMO', 'MIN', 'LIMIT', 'ALERTA'];
+        // A planilha pode vir como "Qtd. Mínimo" OU "Qtd. Mínima"
+        const minKeywords = ['MÍNIMO', 'MINIMO', 'MÍNIMA', 'MINIMA', 'MIN', 'LIMIT', 'ALERTA'];
 
         const allKeywords = [
           ...nameKeywords, ...cpfKeywords, ...roleKeywords, ...deptKeywords,
