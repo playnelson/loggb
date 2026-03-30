@@ -10,12 +10,17 @@ import ImportSpreadsheet from '@/components/ImportSpreadsheet';
 import QuickMovementModal from '@/components/QuickMovementModal';
 import { itemCodeFromDescription } from '@/lib/itemCode';
 
+function possessionEmployeeName(
+  employees: { full_name: string } | { full_name: string }[] | null | undefined
+): string | undefined {
+  if (!employees) return undefined;
+  return Array.isArray(employees) ? employees[0]?.full_name : employees.full_name;
+}
+
 interface PossessionDetail {
   id: string;
   quantity: number;
-  employees?: {
-    full_name: string;
-  };
+  employees?: { full_name: string } | { full_name: string }[] | null;
 }
 
 interface Product {
@@ -284,7 +289,7 @@ function InventoryContent() {
                                 <div className="space-y-2">
                                   {p.possession?.map(pos => (
                                     <div key={pos.id} className="flex justify-between text-[10px]">
-                                      <span className="text-slate-600 truncate mr-2">{pos.employees?.full_name}</span>
+                                      <span className="text-slate-600 truncate mr-2">{possessionEmployeeName(pos.employees)}</span>
                                       <span className="font-bold text-primary">{pos.quantity}</span>
                                     </div>
                                   ))}
