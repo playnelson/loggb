@@ -17,6 +17,7 @@ interface Product {
   quantity_current: number;
   quantity_min: number;
   unit: string;
+  updated_at?: string;
 }
 
 function InventoryContent() {
@@ -135,6 +136,7 @@ function InventoryContent() {
       {isImportModalOpen && (
         <div className="fixed inset-0 bg-primary/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <ImportSpreadsheet 
+            mode="inventory"
             onComplete={() => {
               setIsImportModalOpen(false);
               fetchProducts();
@@ -174,6 +176,7 @@ function InventoryContent() {
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Categoria</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Local</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Quantidade</th>
+                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Última At.</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Unidade</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Ações</th>
               </tr>
@@ -181,11 +184,11 @@ function InventoryContent() {
             <tbody className="divide-y divide-border">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-slate-400">Carregando inventário...</td>
+                  <td colSpan={8} className="px-6 py-12 text-center text-slate-400">Carregando inventário...</td>
                 </tr>
               ) : filteredProducts.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-slate-400">Nenhum item encontrado.</td>
+                  <td colSpan={8} className="px-6 py-12 text-center text-slate-400">Nenhum item encontrado.</td>
                 </tr>
               ) : (
                 filteredProducts.map((p) => {
@@ -202,7 +205,7 @@ function InventoryContent() {
                           {p.category}
                         </span>
                       </td>
-                      <td className="px-6 py-4 text-sm text-slate-500">{p.location}</td>
+                      <td className="px-6 py-4 text-sm text-slate-500">{p.location || '---'}</td>
                       <td className="px-6 py-4">
                         <div className="flex flex-col items-center">
                           <span className={`text-sm font-bold ${isLowStock ? 'text-red-500' : 'text-primary'}`}>
@@ -215,6 +218,9 @@ function InventoryContent() {
                             </div>
                           )}
                         </div>
+                      </td>
+                      <td className="px-6 py-4 text-xs text-slate-400 text-center">
+                        {p.updated_at ? new Date(p.updated_at).toLocaleDateString() : '---'}
                       </td>
                       <td className="px-6 py-4 text-sm text-slate-500">{p.unit}</td>
                       <td className="px-6 py-4 text-right">

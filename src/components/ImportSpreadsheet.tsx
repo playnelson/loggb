@@ -3,7 +3,9 @@
 import React, { useState } from 'react';
 import * as XLSX from 'xlsx';
 import { supabase } from '@/lib/supabase';
-import { FileUp, Loader2, CheckCircle2, AlertCircle, X, Info } from 'lucide-react';
+import { FileUp, Loader2, CheckCircle2, AlertCircle, X, Info, Users, Package } from 'lucide-react';
+
+type ImportMode = 'inventory' | 'movement';
 
 interface ImportProgress {
   total: number;
@@ -12,7 +14,13 @@ interface ImportProgress {
   message: string;
 }
 
-export default function ImportSpreadsheet({ onComplete }: { onComplete: () => void }) {
+export default function ImportSpreadsheet({ 
+  mode = 'inventory', 
+  onComplete 
+}: { 
+  mode?: ImportMode; 
+  onComplete: () => void 
+}) {
   const [progress, setProgress] = useState<ImportProgress>({
     total: 0,
     current: 0,
@@ -21,7 +29,6 @@ export default function ImportSpreadsheet({ onComplete }: { onComplete: () => vo
   });
 
   const getCol = (row: any, keys: string[]) => {
-    // Busca insensitiva a maiúsculas/minúsculas e variações
     const rowKeys = Object.keys(row);
     for (const key of keys) {
       const foundKey = rowKeys.find(rk => 
@@ -32,6 +39,15 @@ export default function ImportSpreadsheet({ onComplete }: { onComplete: () => vo
       if (foundKey !== undefined) return row[foundKey];
     }
     return null;
+  };
+
+  const parseNumericValue = (val: any) => {
+    if (val === null || val === undefined) return 0;
+    if (typeof val === 'number') return val;
+    // Tratar formatos brasileiros "1.234,56"
+    const cleaned = val.toString().replace(/\./g, '').replace(',', '.').replace(/[^\d.-]/g, '');
+    const num = parseFloat(cleaned);
+    return isNaN(num) ? 0 : num;
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -45,7 +61,7 @@ export default function ImportSpreadsheet({ onComplete }: { onComplete: () => vo
       try {
         const data = event.target?.result;
         const workbook = XLSX.read(data, { type: 'binary' });
-        const sheetName = workbook.SheetNames[0];
+        const sheetName = workbook.SheetNames[workbook.SheetNames.length - 1]; // Geralmente a última ou a principal
         const sheet = workbook.Sheets[sheetName];
         const rows = XLSX.utils.sheet_to_json(sheet) as any[];
 
@@ -53,7 +69,7 @@ export default function ImportSpreadsheet({ onComplete }: { onComplete: () => vo
           throw new Error('Planilha vazia ou formato inválido.');
         }
 
-        setProgress({ total: rows.length, current: 0, status: 'uploading', message: 'Iniciando importação...' });
+        setProgress({ total: rows.length, current: 0, status: 'uploading', message: 'Processando dados...' });
         
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) throw new Error('Usuário não autenticado.');
@@ -61,103 +77,123 @@ export default function ImportSpreadsheet({ onComplete }: { onComplete: () => vo
         for (let i = 0; i < rows.length; i++) {
           const row = rows[i];
           
-          // Helper to get columns with different names
-          const colCode = getCol(row, ['Codigo', 'Código', 'Codigo do Item', 'Código do Item', 'Item Code', 'ID Item']);
-          const colDesc = getCol(row, ['Descricao', 'Descrição', 'Descricao do Item', 'Descrição do Item', 'Nome do Item']);
-          const colCat = getCol(row, ['Categoria', 'Category', 'Grupo']);
-          const colUnit = getCol(row, ['Unidade', 'Unit', 'UN']);
-          const colLoc = getCol(row, ['Local', 'Localizacao', 'Localização', 'Pátio', 'Prateleira', 'Departamento']);
-          const colQty = getCol(row, ['Qtd Atual', 'Quantidade Atual', 'Saldo', 'Estoque', 'Saldo Atual', 'Saldo Atual (em Posse)', 'Quantidade']);
-          const colMin = getCol(row, ['Qtd Minima', 'Qtd Mínima', 'Qtd Min', 'Qtd Mín', 'Estoque Mínimo', 'Estoque Minimo']);
-          const colEmployee = getCol(row, ['Funcionario', 'Funcionário', 'Nome', 'Colaborador']);
-          const colCPF = getCol(row, ['CPF', 'Documento']);
-          const colRole = getCol(row, ['Cargo', 'Função', 'Funcao']);
-          const colWithdrawn = getCol(row, ['Total Retirado', 'Retirado', 'Saida', 'Quantidade Retirada', 'Qtd Retirada']);
-          const colReturned = getCol(row, ['Total Devolvido', 'Devolvido', 'Entrada', 'Quantidade Devolvida', 'Qtd Devolvida']);
+          const colCode = getCol(row, ['Codigo', 'Código', 'Codigo do Item', 'Código do Item', 'Item Code']);
+          const colDesc = getCol(row, ['Descricao', 'Descrição', 'Descricao do Item', 'Descrição do Item']);
+          const colQtyCurrent = getCol(row, ['Qtd Atual', 'Quantidade Atual', 'Saldo', 'Saldo Atual', 'Saldo Atual (em Posse)']);
+          const colQtyMin = getCol(row, ['Qtd Minima', 'Qtd Mínima', 'Qtd Min', 'Qtd Mín']);
+          const colLoc = getCol(row, ['Local', 'Localizacao', 'Localização', 'Pátio', 'Departamento']);
+          const colEmployee = getCol(row, ['Funcionario', 'Funcionário', 'Nome']);
+          const colCPF = getCol(row, ['CPF']);
+          const colRole = getCol(row, ['Cargo']);
+          const colWithdrawn = getCol(row, ['Total Retirado', 'Retirado', 'Quantidade Retirada']);
+          const colReturned = getCol(row, ['Total Devolvido', 'Devolvido', 'Quantidade Devolvida']);
 
-          // 1. Upsert Item (Shared across both modes)
+          // 1. Process Item (ALWAYS in Inventory mode, Optional in Movement mode)
           let itemId = null;
           if (colCode) {
-            const { data: itemData, error: itemError } = await supabase
+            const itemPayload: any = {
+              code: colCode.toString().trim(),
+              description: colDesc || '',
+              category: getCol(row, ['Categoria']) || 'Consumível',
+              unit: getCol(row, ['Unidade']) || 'un',
+              location: colLoc || null,
+              user_id: user.id
+            };
+
+            // SOMENTE atualiza saldos no modo INVENTÁRIO para não misturar dados de logs antigos
+            if (mode === 'inventory') {
+              if (colQtyCurrent !== null) itemPayload.quantity_current = parseNumericValue(colQtyCurrent);
+              if (colQtyMin !== null) itemPayload.quantity_min = parseNumericValue(colQtyMin);
+            }
+
+            const { data: itemData } = await supabase
               .from('items')
-              .upsert({
-                code: colCode.toString(),
-                description: colDesc || '',
-                category: colCat || 'Consumível',
-                unit: colUnit || 'un',
-                location: colLoc || null,
-                quantity_current: colQty !== null ? Number(colQty) : undefined,
-                quantity_min: colMin !== null ? Number(colMin) : undefined,
-                user_id: user.id
-              }, { onConflict: 'code' })
+              .upsert(itemPayload, { onConflict: 'code' })
               .select('id')
               .single();
 
-            if (itemError) {
-              console.error('Erro ao processar item:', itemError);
+            itemId = itemData?.id;
+          }
+
+          // 2. Movement Logic: Employees and Movements
+          if (mode === 'movement' && colEmployee && itemId) {
+            // Deduplicação de Funcionário (Nome ou CPF)
+            let employeeId = null;
+            const cleanedCPF = colCPF?.toString().replace(/\D/g, '') || null;
+            
+            // Busca por CPF primeiro
+            let { data: empData } = cleanedCPF 
+              ? await supabase.from('employees').select('id').eq('cpf', cleanedCPF).single()
+              : { data: null };
+
+            // Se não achou por CPF, busca por Nome (Trimmado e case insensitive no DB)
+            if (!empData) {
+              const { data: nameData } = await supabase
+                .from('employees')
+                .select('id')
+                .ilike('full_name', colEmployee.toString().trim())
+                .limit(1)
+                .single();
+              empData = nameData;
+            }
+
+            if (!empData) {
+               // Criar novo se não existir
+               const { data: newData, error: newError } = await supabase
+                 .from('employees')
+                 .insert({
+                   full_name: colEmployee.toString().trim(),
+                   cpf: cleanedCPF,
+                   role: colRole || null,
+                   status: 'Ativo',
+                   user_id: user.id
+                 })
+                 .select('id')
+                 .single();
+               
+               if (!newError) employeeId = newData.id;
             } else {
-              itemId = itemData.id;
+              employeeId = empData.id;
+            }
+
+            if (employeeId) {
+              const qWithdrawn = parseNumericValue(colWithdrawn);
+              const qReturned = parseNumericValue(colReturned);
+
+              if (qWithdrawn > 0) {
+                await supabase.from('movements').insert([{
+                  item_id: itemId,
+                  employee_id: employeeId,
+                  type: 'Saida',
+                  quantity: qWithdrawn,
+                  performed_by: user.id
+                }]);
+                // Opcional: Atualizar stock atual (decrement) já que não há triggers
+                await supabase.rpc('decrement_stock', { i_id: itemId, qty: qWithdrawn });
+              }
+
+              if (qReturned > 0) {
+                await supabase.from('movements').insert([{
+                  item_id: itemId,
+                  employee_id: employeeId,
+                  type: 'Entrada',
+                  quantity: qReturned,
+                  performed_by: user.id
+                }]);
+                await supabase.rpc('increment_stock', { i_id: itemId, qty: qReturned });
+              }
             }
           }
 
-          // 2. Logic for "Movement Log" Format
-          if (colEmployee && colCode && itemId) {
-             let employeeId = null;
-             const { data: empData, error: empError } = await supabase
-               .from('employees')
-               .upsert({
-                 full_name: colEmployee,
-                 cpf: colCPF?.toString() || null,
-                 role: colRole || null,
-                 status: row['Status'] || 'Ativo',
-                 user_id: user.id
-               }, { onConflict: 'cpf' })
-               .select('id')
-               .single();
-             
-             if (empError) {
-               console.error('Erro ao processar funcionário:', empError);
-             } else {
-               employeeId = empData.id;
-             }
-
-             if (employeeId) {
-                const withdrawn = Number(colWithdrawn) || 0;
-                const returned = Number(colReturned) || 0;
-
-                if (withdrawn > 0) {
-                  await supabase.from('movements').insert([{
-                    item_id: itemId,
-                    employee_id: employeeId,
-                    type: 'Saida',
-                    quantity: withdrawn,
-                    performed_by: user.id
-                  }]);
-                }
-
-                if (returned > 0) {
-                  await supabase.from('movements').insert([{
-                    item_id: itemId,
-                    employee_id: employeeId,
-                    type: 'Entrada',
-                    quantity: returned,
-                    performed_by: user.id
-                  }]);
-                }
-             }
-          }
-
-          setProgress(prev => ({ ...prev, current: i + 1, message: `Processando: ${i + 1} de ${rows.length}` }));
+          setProgress(prev => ({ ...prev, current: i + 1, message: `Finalizando: ${i + 1} de ${rows.length}` }));
         }
 
-        setProgress(prev => ({ ...prev, status: 'completed', message: 'Importação concluída com sucesso!' }));
-        setTimeout(() => {
-          onComplete();
-        }, 2000);
+        setProgress(prev => ({ ...prev, status: 'completed', message: 'Importação finalizada!' }));
+        setTimeout(onComplete, 1500);
 
       } catch (error: any) {
         console.error('Erro na importação:', error);
-        setProgress({ ...progress, status: 'error', message: error.message || 'Erro desconhecido.' });
+        setProgress({ ...progress, status: 'error', message: error.message || 'Erro inesperado.' });
       }
     };
 
@@ -165,11 +201,11 @@ export default function ImportSpreadsheet({ onComplete }: { onComplete: () => vo
   };
 
   return (
-    <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-md animate-in zoom-in duration-300">
+    <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-lg animate-in zoom-in duration-300">
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-xl font-bold text-primary flex items-center gap-2">
-          <FileUp className="text-secondary" />
-          Módulo de Importação
+          {mode === 'inventory' ? <Package className="text-secondary" /> : <Users className="text-secondary" />}
+          Importar {mode === 'inventory' ? 'Produtos/Inventário' : 'Movimentação/Log'}
         </h2>
         <button onClick={onComplete} className="text-slate-400 hover:text-primary">
           <X size={20} />
@@ -178,7 +214,7 @@ export default function ImportSpreadsheet({ onComplete }: { onComplete: () => vo
 
       <div className="space-y-6">
         {progress.status === 'idle' && (
-          <div className="border-2 border-dashed border-slate-200 rounded-xl p-8 text-center hover:border-secondary transition-colors group cursor-pointer relative">
+          <div className="border-2 border-dashed border-slate-200 rounded-xl p-10 text-center hover:border-secondary transition-colors group cursor-pointer relative bg-slate-50/50">
             <input 
               type="file" 
               accept=".xlsx, .xls, .csv" 
@@ -186,17 +222,15 @@ export default function ImportSpreadsheet({ onComplete }: { onComplete: () => vo
               onChange={handleFileUpload}
             />
             <div className="flex flex-col items-center">
-              <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mb-4 group-hover:bg-secondary/10 transition-colors">
-                <FileUp className="text-slate-400 group-hover:text-secondary" />
-              </div>
-              <p className="text-sm font-bold text-primary">Subir Planilha Inteligente</p>
-              <p className="text-xs text-slate-400 mt-1">Logs de Movimentação ou Lista de Inventário</p>
+              <FileUp className="w-10 h-10 text-slate-300 group-hover:text-secondary mb-4 transition-transform group-hover:-translate-y-1" />
+              <p className="text-sm font-bold text-primary">Carregar arquivo da planilha</p>
+              <p className="text-xs text-slate-400 mt-1">.XLSX, .XLS ou .CSV</p>
             </div>
           </div>
         )}
 
         {progress.status !== 'idle' && (
-          <div className="space-y-4">
+          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
             <div className="flex items-center gap-3">
               {progress.status === 'parsing' || progress.status === 'uploading' ? (
                 <Loader2 className="animate-spin text-secondary" size={24} />
@@ -208,7 +242,7 @@ export default function ImportSpreadsheet({ onComplete }: { onComplete: () => vo
               <div className="flex-1">
                 <p className="text-sm font-bold text-primary">{progress.message}</p>
                 {progress.status === 'uploading' && (
-                  <div className="w-full bg-slate-100 h-2 rounded-full mt-2 overflow-hidden">
+                  <div className="w-full bg-slate-200 h-1.5 rounded-full mt-2 overflow-hidden">
                     <div 
                       className="bg-secondary h-full transition-all duration-300"
                       style={{ width: `${(progress.current / progress.total) * 100}%` }}
@@ -220,20 +254,15 @@ export default function ImportSpreadsheet({ onComplete }: { onComplete: () => vo
           </div>
         )}
         
-        <div className="p-4 bg-slate-50 rounded-xl border border-border">
-          <div className="flex items-center gap-2 text-primary font-bold text-xs mb-3">
-            <Info size={14} className="text-secondary" />
-            FORMATOS SUPORTADOS
-          </div>
-          <div className="space-y-3">
-            <div>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Opção A: Log de Movimentação</p>
-              <p className="text-[10px] text-slate-500 mt-0.5">Mapeia quem retirou o quê. Requer colunas `Funcionario`, `CPF` e `Total Retirado/Devolvido`.</p>
-            </div>
-            <div>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Opção B: Lista de Inventário</p>
-              <p className="text-[10px] text-slate-500 mt-0.5">Atualiza o estoque atual. Requer colunas `Código/Codigo` e `Qtd Atual`.</p>
-            </div>
+        <div className="p-4 bg-amber-50 rounded-xl border border-amber-100 flex gap-3">
+          <Info className="text-amber-600 shrink-0" size={20} />
+          <div className="text-xs text-amber-800 space-y-2">
+            <p className="font-bold uppercase tracking-widest text-[10px]">Atenção no Formato</p>
+            {mode === 'inventory' ? (
+              <p>O modo **Inventário** atualizará os códigos, descrições e o **saldo total** de cada item no sistema. Use para fazer balanços.</p>
+            ) : (
+              <p>O modo **Movimentação** registrará as retiradas e devoluções nos históricos e **não** sobrescreverá o saldo total dos materiais diretamente.</p>
+            )}
           </div>
         </div>
       </div>
