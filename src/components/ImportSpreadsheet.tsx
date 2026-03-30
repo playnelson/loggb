@@ -66,32 +66,47 @@ export default function ImportSpreadsheet({
           throw new Error('Planilha vazia.');
         }
 
-        // HEADERS ARE ALWAYS THE FIRST ROW
-        const headerRowIndex = 0;
+        // Robust Header Detection: Find the first row that contains at least one keyword
+        const nameKeywords = ['NOME', 'FUNCIONARIO', 'COLABORADOR', 'USER', 'PESSOA', 'FULL_NAME', 'WORKER', 'CONTRIBUTOR'];
+        const cpfKeywords = ['CPF', 'ID', 'IDENTIDADE', 'DOC', 'REGISTRY'];
+        const codeKeywords = ['CODIGO', 'CODE', 'REF', 'ID_ITEM', 'MAT', 'ITEM_CODE', 'REFERENCIA'];
+        const descKeywords = ['DESCRICAO', 'ITEM', 'DESC', 'MATERIAL', 'PRODUCT', 'DESCRIÇÃO', 'ARTICLE'];
+        const qtyKeywords = ['QUANTIDADE', 'QTY', 'STOCK', 'ESTOQUE', 'TOTAL', 'SALDO', 'RETIRADO', 'DEVOLVIDO', 'POSSE', 'SALDO ATUAL', 'BALANCE', 'QTD'];
+
+        const allKeywords = [...nameKeywords, ...cpfKeywords, ...codeKeywords, ...descKeywords, ...qtyKeywords];
+
+        let headerRowIndex = 0;
+        for (let i = 0; i < Math.min(rawData.length, 10); i++) {
+          const row = rawData[i];
+          if (!row || !Array.isArray(row)) continue;
+          
+          const rowStr = row.join(' ').toUpperCase();
+          if (allKeywords.some(k => rowStr.includes(k))) {
+            headerRowIndex = i;
+            break;
+          }
+        }
+
         const headers = rawData[headerRowIndex].map(h => h?.toString().toUpperCase().trim() || '');
-        const rows = rawData.slice(1);
+        const rows = rawData.slice(headerRowIndex + 1);
 
-        console.log('Detected Headers:', headers);
+        console.log(`Found header at row ${headerRowIndex}:`, headers);
 
-        const mapping = {
-          nameIdx: headers.findIndex(h => h.includes('FUNCIONARIO') || h.includes('NOME')),
-          cpfIdx: headers.findIndex(h => h === 'CPF'),
-          codeIdx: headers.findIndex(h => h.includes('CODIGO') || h.includes('REFERENCIA')),
-          descIdx: headers.findIndex(h => h.includes('DESCRICAO') || h.includes('ITEM')),
-          qtyIdx: headers.findIndex(h => h.includes('SALDO') || h.includes('QUANTIDADE') || h.includes('TOTAL RETIRADO') || h.includes('EM POSSE'))
+        const findBestIdx = (keywords: string[]) => {
+          return headers.findIndex(h => keywords.some(k => h.includes(k)));
         };
 
-        console.log('Initial mapping:', mapping);
+        const mapping = {
+          nameIdx: findBestIdx(nameKeywords),
+          cpfIdx: findBestIdx(cpfKeywords),
+          codeIdx: findBestIdx(codeKeywords),
+          descIdx: findBestIdx(descKeywords),
+          qtyIdx: findBestIdx(qtyKeywords)
+        };
 
-        // Fallbacks if specific headers not found
-        if (mapping.nameIdx === -1) mapping.nameIdx = 0;
-        if (mapping.codeIdx === -1) mapping.codeIdx = 5;
-        if (mapping.descIdx === -1) mapping.descIdx = 6;
-        if (mapping.qtyIdx === -1) mapping.qtyIdx = 11;
+        console.log('Detected mapping:', mapping);
 
-        console.log('Final mapping indices:', mapping);
-
-        if (rows.length === 0) throw new Error('Não foram encontrados dados na planilha.');
+        if (rows.length === 0) throw new Error('Dados não encontrados.');
 
         setProgress({ total: rows.length, current: 0, status: 'uploading', message: 'Processando...' });
         
@@ -101,18 +116,20 @@ export default function ImportSpreadsheet({
         const employeeMap = new Map<string, string>(); 
         const uniquePeople = new Map<string, any>();
 
-        rows.forEach(row => {
-          const name = row[mapping.nameIdx]?.toString().trim();
-          let cpf = mapping.cpfIdx !== -1 ? row[mapping.cpfIdx]?.toString().replace(/\D/g, '') : null;
-          if (cpf && cpf.length > 0 && cpf.length < 11) cpf = cpf.padStart(11, '0');
-          
-          if (name && name.length > 2) {
-            const key = cpf || name.toLowerCase();
-            if (!uniquePeople.has(key)) uniquePeople.set(key, { name, cpf });
-          } else {
-            console.log('Skipping person in row because name too short or empty:', row);
-          }
-        });
+        if (mapping.nameIdx !== -1) {
+          rows.forEach(row => {
+            const nameValue = row[mapping.nameIdx];
+            if (!nameValue) return;
+            const name = nameValue.toString().trim();
+            let cpf = mapping.cpfIdx !== -1 ? row[mapping.cpfIdx]?.toString().replace(/\D/g, '') : null;
+            if (cpf && cpf.length > 0 && cpf.length < 11) cpf = cpf.padStart(11, '0');
+            
+            if (name && name.length > 2) {
+              const key = cpf || name.toLowerCase();
+              if (!uniquePeople.has(key)) uniquePeople.set(key, { name, cpf });
+            }
+          });
+        }
 
         let pCount = 0;
         for (const [key, person] of uniquePeople.entries()) {
@@ -145,23 +162,23 @@ export default function ImportSpreadsheet({
         const itemMap = new Map<string, string>();
         const uniqueItems = new Map<string, any>();
 
-        rows.forEach(row => {
-          const code = row[mapping.codeIdx]?.toString().trim();
-          const desc = row[mapping.descIdx]?.toString().trim();
-          if (code || desc) {
-            const itemKey = code || desc;
-            if (!uniqueItems.has(itemKey)) {
-              const qty = parseNumericValue(row[mapping.qtyIdx]);
-              uniqueItems.set(itemKey, {
-                code: code || `REF-${Math.random().toString(36).substr(2, 5).toUpperCase()}`,
-                description: desc || 'Sem descrição',
-                qty
-              });
+        if (mapping.codeIdx !== -1 || mapping.descIdx !== -1) {
+          rows.forEach(row => {
+            const code = mapping.codeIdx !== -1 ? row[mapping.codeIdx]?.toString().trim() : '';
+            const desc = mapping.descIdx !== -1 ? row[mapping.descIdx]?.toString().trim() : '';
+            if (code || desc) {
+              const itemKey = code || desc;
+              if (!uniqueItems.has(itemKey)) {
+                const qty = mapping.qtyIdx !== -1 ? parseNumericValue(row[mapping.qtyIdx]) : 0;
+                uniqueItems.set(itemKey, {
+                  code: code || `REF-${Math.random().toString(36).substr(2, 5).toUpperCase()}`,
+                  description: desc || 'Sem descrição',
+                  qty
+                });
+              }
             }
-          } else {
-            console.log('Skipping item in row because both code and description are empty:', row);
-          }
-        });
+          });
+        }
 
         let iCount = 0;
         for (const [key, itm] of uniqueItems.entries()) {
