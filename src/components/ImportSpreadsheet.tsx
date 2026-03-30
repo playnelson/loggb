@@ -42,11 +42,26 @@ export default function ImportSpreadsheet({
   };
 
   const parseNumericValue = (val: any) => {
-    if (val === null || val === undefined) return 0;
+    if (val === null || val === undefined || val === '') return 0;
     if (typeof val === 'number') return val;
-    // Tratar formatos brasileiros "1.234,56"
-    const cleaned = val.toString().replace(/\./g, '').replace(',', '.').replace(/[^\d.-]/g, '');
-    const num = parseFloat(cleaned);
+    
+    const str = val.toString().trim();
+    // Tenta detectar padrão brasileiro: pontos como milhar e vírgula como decimal
+    // Ou simplesmente remove pontos de milhar e troca vírgula por ponto
+    let cleaned = str;
+    
+    // Se tem vírgula e ponto: 1.234,56
+    if (str.includes(',') && str.includes('.')) {
+      cleaned = str.replace(/\./g, '').replace(',', '.');
+    } 
+    // Se tem apenas vírgula: 1234,56
+    else if (str.includes(',')) {
+      cleaned = str.replace(',', '.');
+    }
+    
+    // Remove qualquer outro caractere não numérico (exceto sinal negativo no início)
+    const finalCleaned = cleaned.replace(/(?!^-)[^\d.]/g, '');
+    const num = parseFloat(finalCleaned);
     return isNaN(num) ? 0 : num;
   };
 
@@ -61,7 +76,7 @@ export default function ImportSpreadsheet({
       try {
         const data = event.target?.result;
         const workbook = XLSX.read(data, { type: 'binary' });
-        const sheetName = workbook.SheetNames[workbook.SheetNames.length - 1]; // Geralmente a última ou a principal
+        const sheetName = workbook.SheetNames[0]; // Pegar primeira aba se houver várias
         const sheet = workbook.Sheets[sheetName];
         const rows = XLSX.utils.sheet_to_json(sheet) as any[];
 
@@ -79,14 +94,19 @@ export default function ImportSpreadsheet({
           
           const colCode = getCol(row, ['Codigo', 'Código', 'Codigo do Item', 'Código do Item', 'Item Code']);
           const colDesc = getCol(row, ['Descricao', 'Descrição', 'Descricao do Item', 'Descrição do Item']);
-          const colQtyCurrent = getCol(row, ['Qtd Atual', 'Quantidade Atual', 'Saldo', 'Saldo Atual', 'Saldo Atual (em Posse)']);
-          const colQtyMin = getCol(row, ['Qtd Minima', 'Qtd Mínima', 'Qtd Min', 'Qtd Mín']);
-          const colLoc = getCol(row, ['Local', 'Localizacao', 'Localização', 'Pátio', 'Departamento']);
+          const colQtyStock = getCol(row, ['Qtd. em Estoque', 'Qtd em Estoque', 'Estoque', 'Saldo Estoque']);
+          const colQtyTotal = getCol(row, ['Qtd. Total', 'Qtd Total', 'Total', 'Saldo Total']);
+          const colQtyMin = getCol(row, ['Qtd. Mínima', 'Qtd Minima', 'Qtd Min', 'Qtd Mín']);
+          const colUnit = getCol(row, ['Unidade', 'Unio.']);
+          const colCat = getCol(row, ['Categoria', 'Category']);
+          const colConsumable = getCol(row, ['Consumível?', 'Consumivel?', 'Consumivel']);
+          
+          const colLoc = getCol(row, ['Local', 'Localizacao', 'Localização', 'Pátio']);
           const colEmployee = getCol(row, ['Funcionario', 'Funcionário', 'Nome']);
           const colCPF = getCol(row, ['CPF']);
           const colRole = getCol(row, ['Cargo']);
-          const colWithdrawn = getCol(row, ['Total Retirado', 'Retirado', 'Quantidade Retirada']);
-          const colReturned = getCol(row, ['Total Devolvido', 'Devolvido', 'Quantidade Devolvida']);
+          const colWithdrawn = getCol(row, ['Total Retirado', 'Retirado', 'Quantidade Retirada', 'Saida']);
+          const colReturned = getCol(row, ['Total Devolvido', 'Devolvido', 'Quantidade Devolvida', 'Entrada']);
 
           // 1. Process Item (ALWAYS in Inventory mode, Optional in Movement mode)
           let itemId = null;
@@ -94,16 +114,22 @@ export default function ImportSpreadsheet({
             const itemPayload: any = {
               code: colCode.toString().trim(),
               description: colDesc || '',
-              category: getCol(row, ['Categoria']) || 'Consumível',
-              unit: getCol(row, ['Unidade']) || 'un',
+              category: colCat || (colConsumable?.toString().toLowerCase().includes('sim') ? 'Consumível' : 'Ferramenta'),
+              unit: colUnit || 'un',
               location: colLoc || null,
               user_id: user.id
             };
 
-            // SOMENTE atualiza saldos no modo INVENTÁRIO para não misturar dados de logs antigos
+            // No modo inventário, atualiza os saldos totais
             if (mode === 'inventory') {
-              if (colQtyCurrent !== null) itemPayload.quantity_current = parseNumericValue(colQtyCurrent);
-              if (colQtyMin !== null) itemPayload.quantity_min = parseNumericValue(colQtyMin);
+              // Prioriza 'Qtd. em Estoque', senão usa 'Qtd. Total'
+              const qVal = colQtyStock !== null ? colQtyStock : colQtyTotal;
+              if (qVal !== null) {
+                itemPayload.quantity_current = parseNumericValue(qVal);
+              }
+              if (colQtyMin !== null) {
+                itemPayload.quantity_min = parseNumericValue(colQtyMin);
+              }
             }
 
             const { data: itemData } = await supabase

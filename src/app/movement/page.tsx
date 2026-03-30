@@ -4,8 +4,7 @@ export const dynamic = 'force-dynamic';
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { ShoppingCart, User, Package, ArrowRight, CheckCircle2, History, FileUp } from 'lucide-react';
-import ImportSpreadsheet from '@/components/ImportSpreadsheet';
+import { ShoppingCart, User, Package, ArrowRight, CheckCircle2, History } from 'lucide-react';
 
 interface Product {
   id: string;
@@ -27,7 +26,6 @@ export default function MovementPage() {
   const [quantity, setQuantity] = useState<number>(1);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
-  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
 
   const fetchData = async () => {
     // Fallback data if Supabase is not connected
@@ -92,13 +90,6 @@ export default function MovementPage() {
           <h1 className="text-3xl font-bold text-primary">Fluxo de Movimentação</h1>
           <p className="text-slate-500 mt-1">Saída rápida de materiais do almoxarifado.</p>
         </div>
-        <button 
-          onClick={() => setIsImportModalOpen(true)}
-          className="flex items-center gap-2 bg-slate-100 text-primary border border-slate-200 px-4 py-2 rounded-lg hover:bg-slate-200 transition-all font-medium"
-        >
-          <FileUp size={18} className="text-secondary" />
-          Importar Logs
-        </button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -246,17 +237,6 @@ export default function MovementPage() {
         </div>
       </div>
       
-      {isImportModalOpen && (
-        <div className="fixed inset-0 bg-primary/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <ImportSpreadsheet 
-            mode="movement"
-            onComplete={() => {
-              setIsImportModalOpen(false);
-              fetchData();
-            }} 
-          />
-        </div>
-      )}
     </div>
   );
 }

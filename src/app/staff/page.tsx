@@ -4,7 +4,8 @@ export const dynamic = 'force-dynamic';
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Search, UserPlus, Mail, Phone, ExternalLink, X } from 'lucide-react';
+import { Search, UserPlus, Mail, Phone, ExternalLink, X, FileUp } from 'lucide-react';
+import ImportSpreadsheet from '@/components/ImportSpreadsheet';
 
 interface Employee {
   id: string;
@@ -19,6 +20,7 @@ export default function StaffPage() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Form states
@@ -87,14 +89,35 @@ export default function StaffPage() {
           <h1 className="text-2xl font-bold text-primary">Quadro de Funcionários</h1>
           <p className="text-slate-500">Gestão de colaboradores e ativos em posse.</p>
         </div>
-        <button 
-          onClick={() => setIsModalOpen(true)}
-          className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-slate-800 transition-all font-medium"
-        >
-          <UserPlus size={18} />
-          Novo Colaborador
-        </button>
+        <div className="flex gap-2">
+          <button 
+            onClick={() => setIsImportModalOpen(true)}
+            className="flex items-center gap-2 bg-slate-100 text-primary border border-slate-200 px-4 py-2 rounded-lg hover:bg-slate-200 transition-all font-medium"
+          >
+            <FileUp size={18} className="text-secondary" />
+            Importar Histórico
+          </button>
+          <button 
+            onClick={() => setIsModalOpen(true)}
+            className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-slate-800 transition-all font-medium"
+          >
+            <UserPlus size={18} />
+            Novo Colaborador
+          </button>
+        </div>
       </div>
+
+      {isImportModalOpen && (
+        <div className="fixed inset-0 bg-primary/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <ImportSpreadsheet 
+            mode="movement"
+            onComplete={() => {
+              setIsImportModalOpen(false);
+              fetchEmployees();
+            }} 
+          />
+        </div>
+      )}
 
       <div className="bg-white p-4 rounded-xl border border-border shadow-sm flex flex-col md:flex-row gap-4">
         <div className="relative flex-1">
