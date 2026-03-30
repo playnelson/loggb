@@ -78,31 +78,39 @@ export default function ImportSpreadsheet({
           throw new Error('Planilha vazia.');
         }
 
-        // Robust Header Detection: Find the first row that contains at least one keyword
-        const nameKeywords = ['NOME', 'FUNCIONARIO', 'COLABORADOR', 'USER', 'PESSOA', 'FULL_NAME', 'WORKER', 'CONTRIBUTOR'];
-        const cpfKeywords = ['CPF', 'ID', 'IDENTIDADE', 'DOC', 'REGISTRY'];
-        const codeKeywords = ['CODIGO', 'CODE', 'REF', 'ID_ITEM', 'MAT', 'ITEM_CODE', 'REFERENCIA', 'SKU'];
-        const descKeywords = ['DESCRICAO', 'ITEM', 'DESC', 'MATERIAL', 'PRODUCT', 'DESCRIÇÃO', 'ARTICLE', 'OBJETO'];
-        const qtyKeywords = ['QUANTIDADE', 'QTY', 'STOCK', 'ESTOQUE', 'TOTAL', 'SALDO', 'RETIRADO', 'DEVOLVIDO', 'POSSE', 'SALDO ATUAL', 'BALANCE', 'QTD'];
+        // Robust Header Detection
+        const nameKeywords = ['NOME', 'FUNCIONARIO', 'FUNCIONÁRIO', 'COLABORADOR', 'FULL NAME'];
+        const cpfKeywords = ['CPF', 'DOC', 'IDENTIDADE', 'REGISTRY'];
+        const roleKeywords = ['CARGO', 'FUNÇÃO', 'ROLE', 'POSITION'];
+        const deptKeywords = ['DEPARTAMENTO', 'DEP', 'DEPT', 'SETOR', 'AREA'];
+        const statusKeywords = ['STATUS', 'SITUAÇÃO', 'ESTADO'];
+        
+        const codeKeywords = ['CODIGO', 'CÓDIGO', 'CODE', 'REF', 'MAT', 'SKU'];
+        const descKeywords = ['DESCRICAO', 'DESCRIÇÃO', 'ITEM', 'MATERIAL', 'PRODUTO'];
+        const unitKeywords = ['UNIDADE', 'UN', 'UNIT'];
+        
+        const possessionKeywords = ['SALDO ATUAL', 'EM POSSE', 'POSSE', 'SALDO'];
+        const stockKeywords = ['ESTOQUE', 'QUANTIDADE', 'QTY', 'STOCK', 'TOTAL'];
+        const commonQtyKeywords = ['QTD', 'QUANT'];
+
         const categoryKeywords = ['CATEGORIA', 'CATEGORY', 'GRUPO', 'TIPO'];
         const originKeywords = ['ORIGEM', 'LOCAL', 'LOCATION', 'DEPÓSITO', 'ALMOXARIFADO'];
         const consumableKeywords = ['CONSUMÍVEL', 'CONSUMIVEL', 'CONSUMABLE'];
-        const minKeywords = ['MÍNIMO', 'MINIMO', 'MIN', 'LIMIT', 'ALERTA', 'MINIMO_ESTOQUE'];
+        const minKeywords = ['MÍNIMO', 'MINIMO', 'MIN', 'LIMIT', 'ALERTA'];
 
         const allKeywords = [
-          ...nameKeywords, ...cpfKeywords, ...codeKeywords, ...descKeywords, 
-          ...qtyKeywords, ...categoryKeywords, ...originKeywords, 
-          ...consumableKeywords, ...minKeywords
+          ...nameKeywords, ...cpfKeywords, ...roleKeywords, ...deptKeywords,
+          ...codeKeywords, ...descKeywords, ...possessionKeywords, ...stockKeywords,
+          ...categoryKeywords, ...consumableKeywords
         ];
 
         let headerRowIndex = 0;
-        for (let i = 0; i < Math.min(rawData.length, 15); i++) { // Check more rows for safety
+        for (let i = 0; i < Math.min(rawData.length, 20); i++) {
           const row = rawData[i];
           if (!row || !Array.isArray(row)) continue;
-          
           const rowStr = row.join(' ').toUpperCase();
           const matchCount = allKeywords.filter(k => rowStr.includes(k)).length;
-          if (matchCount >= 2) { // At least 2 keyword matches to be more confident
+          if (matchCount >= 2) {
             headerRowIndex = i;
             break;
           }
@@ -120,16 +128,35 @@ export default function ImportSpreadsheet({
         const mapping = {
           nameIdx: findBestIdx(nameKeywords),
           cpfIdx: findBestIdx(cpfKeywords),
+          roleIdx: findBestIdx(roleKeywords),
+          deptIdx: findBestIdx(deptKeywords),
+          statusIdx: findBestIdx(statusKeywords),
+          
           codeIdx: findBestIdx(codeKeywords),
           descIdx: findBestIdx(descKeywords),
-          qtyIdx: findBestIdx(qtyKeywords),
+          unitIdx: findBestIdx(unitKeywords),
+          
+          possessionIdx: findBestIdx(possessionKeywords),
+          stockIdx: findBestIdx(stockKeywords),
+          commonQtyIdx: findBestIdx(commonQtyKeywords),
+          
           categoryIdx: findBestIdx(categoryKeywords),
           locationIdx: findBestIdx(originKeywords),
           consumableIdx: findBestIdx(consumableKeywords),
           minIdx: findBestIdx(minKeywords)
         };
 
-        console.log('Detected mapping:', mapping);
+        // Determine which quantity column to use based on mode
+        let qtyIdx = -1;
+        if (mode === 'movement') {
+          qtyIdx = mapping.possessionIdx !== -1 ? mapping.possessionIdx : 
+                   (mapping.stockIdx !== -1 ? mapping.stockIdx : mapping.commonQtyIdx);
+        } else {
+          qtyIdx = mapping.stockIdx !== -1 ? mapping.stockIdx : 
+                   (mapping.commonQtyIdx !== -1 ? mapping.commonQtyIdx : mapping.possessionIdx);
+        }
+
+        console.log('Detected mapping:', { ...mapping, finalQtyIdx: qtyIdx });
 
         if (rows.length === 0) throw new Error('Dados não encontrados.');
 
@@ -138,20 +165,36 @@ export default function ImportSpreadsheet({
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) throw new Error('Usuário não autenticado.');
 
+        // 1. Process Employees
         const employeeMap = new Map<string, string>(); 
         const uniquePeople = new Map<string, any>();
 
         if (mapping.nameIdx !== -1) {
           rows.forEach(row => {
-            const nameValue = row[mapping.nameIdx];
-            if (!nameValue) return;
-            const name = nameValue.toString().trim();
-            let cpf = mapping.cpfIdx !== -1 ? row[mapping.cpfIdx]?.toString().replace(/\D/g, '') : null;
-            if (cpf && cpf.length > 0 && cpf.length < 11) cpf = cpf.padStart(11, '0');
+            const nameLine = row[mapping.nameIdx]?.toString().trim();
+            if (!nameLine || nameLine.length < 2) return;
+
+            let cpf = mapping.cpfIdx !== -1 ? row[mapping.cpfIdx]?.toString().trim() : null;
+            const originalCpf = cpf;
+            const cleanedCpf = cpf ? cpf.replace(/\D/g, '') : '';
             
-            if (name && name.length > 2) {
-              const key = cpf || name.toLowerCase();
-              if (!uniquePeople.has(key)) uniquePeople.set(key, { name, cpf });
+            // If CPF is masked (contains * or X), don't treat it as a hard identifier for matching if it differs from DB
+            const isMaskedCpf = originalCpf && (originalCpf.includes('*') || originalCpf.toUpperCase().includes('X'));
+            
+            const role = mapping.roleIdx !== -1 ? row[mapping.roleIdx]?.toString().trim() : null;
+            const dept = mapping.deptIdx !== -1 ? row[mapping.deptIdx]?.toString().trim() : null;
+            const status = mapping.statusIdx !== -1 ? row[mapping.statusIdx]?.toString().trim() : 'Ativo';
+
+            const key = (!isMaskedCpf && cleanedCpf.length === 11) ? cleanedCpf : nameLine.toLowerCase();
+            
+            if (!uniquePeople.has(key)) {
+              uniquePeople.set(key, { 
+                name: nameLine, 
+                cpf: (cleanedCpf.length === 11 && !isMaskedCpf) ? cleanedCpf : null,
+                role,
+                dept,
+                status
+              });
             }
           });
         }
@@ -159,31 +202,39 @@ export default function ImportSpreadsheet({
         let pCount = 0;
         for (const [key, person] of uniquePeople.entries()) {
           pCount++;
-          setProgress(prev => ({ ...prev, message: `Colaboradores: ${pCount}/${uniquePeople.size}` }));
+          setProgress(prev => ({ ...prev, message: `Sincronizando Colaboradores: ${pCount}/${uniquePeople.size}` }));
           
           let empId = null;
+          // Strategy: Match by CPF (if valid) OR Name
           if (person.cpf) {
-            const { data } = await supabase.from('employees').select('id').eq('cpf', person.cpf).limit(1);
-            if (data?.[0]) empId = data[0].id;
+            const { data } = await supabase.from('employees').select('id').eq('cpf', person.cpf).maybeSingle();
+            if (data) empId = data.id;
           }
+          
           if (!empId) {
-            const { data } = await supabase.from('employees').select('id').ilike('full_name', person.name).limit(1);
-            if (data?.[0]) empId = data[0].id;
+            const { data } = await supabase.from('employees').select('id').ilike('full_name', person.name).maybeSingle();
+            if (data) empId = data.id;
           }
 
+          const empData = {
+            full_name: person.name,
+            cpf: person.cpf || null,
+            role: person.role,
+            department: person.dept,
+            status: person.status || 'Ativo',
+            user_id: user.id
+          };
+
           if (empId) {
+            await supabase.from('employees').update(empData).eq('id', empId);
             employeeMap.set(key, empId);
           } else {
-            const { data } = await supabase.from('employees').insert({
-              full_name: person.name,
-              cpf: person.cpf || null,
-              status: 'Ativo',
-              user_id: user.id
-            }).select('id').single();
+            const { data } = await supabase.from('employees').insert(empData).select('id').single();
             if (data) employeeMap.set(key, data.id);
           }
         }
 
+        // 2. Process Items
         const itemMap = new Map<string, string>();
         const uniqueItems = new Map<string, any>();
 
@@ -195,22 +246,21 @@ export default function ImportSpreadsheet({
             if (code || desc) {
               const itemKey = code || desc;
               if (!uniqueItems.has(itemKey)) {
-                const qty = mapping.qtyIdx !== -1 ? parseNumericValue(row[mapping.qtyIdx]) : 0;
+                const qty = qtyIdx !== -1 ? parseNumericValue(row[qtyIdx]) : 0;
                 const min = mapping.minIdx !== -1 ? parseNumericValue(row[mapping.minIdx]) : 1;
-                const category = mapping.categoryIdx !== -1 ? row[mapping.categoryIdx]?.toString().trim() : null;
+                const category = mapping.categoryIdx !== -1 ? row[mapping.categoryIdx]?.toString().trim() : 'Material';
                 const location = mapping.locationIdx !== -1 ? row[mapping.locationIdx]?.toString().trim() : 'Almoxarifado';
+                const unit = mapping.unitIdx !== -1 ? row[mapping.unitIdx]?.toString().trim() : 'un';
                 const consumable = mapping.consumableIdx !== -1 ? parseBooleanValue(row[mapping.consumableIdx]) : false;
                 
-                // Deterministic code if missing: PRE-description-slug
-                const generatedCode = `REF-${desc.toUpperCase().replace(/[^A-Z0-9]/g, '-').slice(0, 10)}-${Math.random().toString(36).substr(2, 3).toUpperCase()}`;
-
                 uniqueItems.set(itemKey, {
-                  code: code || generatedCode,
+                  code: code || `REF-${desc.toUpperCase().replace(/[^A-Z0-9]/g, '-').slice(0, 10)}`,
                   description: desc || 'Sem descrição',
                   qty,
                   min,
                   category,
                   location,
+                  unit,
                   consumable
                 });
               }
@@ -221,18 +271,13 @@ export default function ImportSpreadsheet({
         let iCount = 0;
         for (const [key, itm] of uniqueItems.entries()) {
           iCount++;
-          setProgress(prev => ({ ...prev, message: `Itens: ${iCount}/${uniqueItems.size}` }));
+          setProgress(prev => ({ ...prev, message: `Sincronizando Itens: ${iCount}/${uniqueItems.size}` }));
           
-          // Check for existing item by code OR description to prevent duplicates
           let existingId = null;
-          
-          // 1. Try by code
           if (itm.code && !itm.code.startsWith('REF-')) {
             const { data: byCode } = await supabase.from('items').select('id').eq('code', itm.code).maybeSingle();
             if (byCode) existingId = byCode.id;
           }
-          
-          // 2. Try by description (if not found by code)
           if (!existingId && itm.description) {
             const { data: byDesc } = await supabase.from('items').select('id').ilike('description', itm.description).maybeSingle();
             if (byDesc) existingId = byDesc.id;
@@ -243,6 +288,7 @@ export default function ImportSpreadsheet({
             description: itm.description,
             category: itm.category,
             location: itm.location,
+            unit: itm.unit,
             consumable: itm.consumable,
             quantity_min: itm.min,
             user_id: user.id,
@@ -258,51 +304,83 @@ export default function ImportSpreadsheet({
           }
         }
 
+        // 3. Process Movements / Possession Sync
         if (mode === 'movement') {
           let ok = 0;
           for (let i = 0; i < rows.length; i++) {
             const row = rows[i];
-            const name = row[mapping.nameIdx]?.toString().trim();
-            let cpf = mapping.cpfIdx !== -1 ? row[mapping.cpfIdx]?.toString().replace(/\D/g, '') : null;
+            const nameValue = row[mapping.nameIdx]?.toString().trim();
+            if (!nameValue) continue;
+
+            let cpf = mapping.cpfIdx !== -1 ? row[mapping.cpfIdx]?.toString().trim() : null;
+            const cleanedCpf = cpf ? cpf.replace(/\D/g, '') : '';
+            const isMaskedCpf = cpf && (cpf.includes('*') || cpf.toUpperCase().includes('X'));
+            
+            const empKey = (!isMaskedCpf && cleanedCpf.length === 11) ? cleanedCpf : nameValue.toLowerCase();
+            const empId = employeeMap.get(empKey);
+            
             const code = row[mapping.codeIdx]?.toString().trim();
             const desc = row[mapping.descIdx]?.toString().trim();
-            const qty = parseNumericValue(row[mapping.qtyIdx]);
+            const itemKey = code || desc;
+            const itemId = itemKey ? itemMap.get(itemKey) : null;
+            
+            const targetQty = qtyIdx !== -1 ? parseNumericValue(row[qtyIdx]) : 0;
 
-            const empId = name ? employeeMap.get(cpf || name.toLowerCase()) : null;
-            const itemId = (code || desc) ? itemMap.get(code || desc) : null;
-
-            if (empId && itemId && qty > 0) {
-              await supabase.from('movements').insert({
-                employee_id: empId, item_id: itemId, quantity: qty, type: 'OUT', performed_by: user.id
-              });
+            if (empId && itemId) {
+              // Get current possession
+              const { data: currentPos } = await supabase
+                .from('possession')
+                .select('quantity')
+                .eq('employee_id', empId)
+                .eq('item_id', itemId)
+                .maybeSingle();
               
-              const { data: item } = await supabase.from('items').select('consumable').eq('id', itemId).single();
-              if (item && !item.consumable) {
-                const { data: pos } = await supabase.from('possession').select('quantity').eq('employee_id', empId).eq('item_id', itemId).single();
-                await supabase.from('possession').upsert({
-                  employee_id: empId, item_id: itemId, user_id: user.id,
-                  quantity: (pos?.quantity || 0) + qty
-                }, { onConflict: 'employee_id,item_id' });
+              const currentQty = currentPos?.quantity || 0;
+              const diff = targetQty - currentQty;
+
+              if (diff !== 0) {
+                // Record adjustment movement
+                const moveType = diff > 0 ? 'OUT' : 'IN'; // Positive diff means more items OUT to employee
+                const moveQty = Math.abs(diff);
+
+                await supabase.from('movements').insert({
+                  employee_id: empId,
+                  item_id: itemId,
+                  quantity: moveQty,
+                  type: moveType,
+                  performed_by: user.id
+                });
+
+                // Update possession record
+                if (targetQty <= 0) {
+                  await supabase.from('possession').delete().match({ employee_id: empId, item_id: itemId });
+                } else {
+                  await supabase.from('possession').upsert({
+                    employee_id: empId,
+                    item_id: itemId,
+                    quantity: targetQty,
+                    user_id: user.id
+                  }, { onConflict: 'employee_id,item_id' });
+                }
+
+                // Update Stock (if OUT, decrease stock. if IN, increase stock)
+                await supabase.rpc('update_stock', { 
+                  p_item_id: itemId, 
+                  p_quantity: -diff // if diff > 0 (OUT), stock decreases. if diff < 0 (IN), stock increases.
+                });
               }
-              await supabase.rpc('update_stock', { p_item_id: itemId, p_quantity: -qty });
               ok++;
-            } else {
-              console.log('Skipping movement because:', {
-                hasEmp: !!empId,
-                hasItem: !!itemId,
-                qty
-              }, 'Row:', row);
             }
             setProgress(prev => ({ ...prev, current: i + 1 }));
           }
-          setProgress(prev => ({ ...prev, status: 'completed', message: `${ok} registros salvos.` }));
+          setProgress(prev => ({ ...prev, status: 'completed', message: `Sincronização concluída: ${ok} registros.` }));
         } else {
-          setProgress(prev => ({ ...prev, status: 'completed', message: 'Concluído!' }));
+          setProgress(prev => ({ ...prev, status: 'completed', message: 'Inventário atualizado!' }));
         }
         setTimeout(onComplete, 2000);
       } catch (err: any) {
         console.error(err);
-        setProgress(prev => ({ ...prev, status: 'error', message: err.message || 'Erro.' }));
+        setProgress(prev => ({ ...prev, status: 'error', message: err.message || 'Erro no processamento.' }));
       }
     };
     reader.readAsBinaryString(file);
