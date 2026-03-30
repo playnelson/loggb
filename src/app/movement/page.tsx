@@ -182,7 +182,7 @@ export default function MovementPage() {
                   <option value="">Buscar material no estoque...</option>
                   {products.map(p => (
                     <option key={p.id} value={p.id}>
-                      {p.description} ({p.code}) - {p.quantity_current} un
+                      {p.description} (Cód: {p.code}) — Saldo {p.quantity_current}
                     </option>
                   ))}
                 </select>
@@ -283,9 +283,14 @@ export default function MovementPage() {
                     <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700">
                       <CheckCircle2 size={14} className="text-green-400" />
                     </div>
-                    <div>
-                      <p className="font-bold truncate max-w-[150px]">{m.items?.description}</p>
-                      <p className="text-[10px] text-slate-400">{m.employees?.full_name}</p>
+                    <div className="flex-1">
+                      <p className="font-bold text-slate-100 truncate max-w-[200px] leading-tight">{m.items?.description}</p>
+                      <div className="flex justify-between items-center mt-1">
+                        <p className="text-[9px] text-slate-500 font-bold uppercase tracking-tighter">Colab: {m.employees?.full_name}</p>
+                        <p className={`text-[10px] font-black ${m.type === 'IN' ? 'text-green-400' : 'text-red-400'}`}>
+                          {m.type === 'IN' ? '+' : '-'}{m.quantity}
+                        </p>
+                      </div>
                     </div>
                   </div>
                 ))

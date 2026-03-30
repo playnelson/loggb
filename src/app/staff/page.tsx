@@ -184,8 +184,11 @@ export default function StaffPage() {
   };
 
   const filteredEmployees = employees.filter(e => {
+    // Search matches name, role OR any item description in possession
     const matchesSearch = e.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         (e.role && e.role.toLowerCase().includes(searchTerm.toLowerCase()));
+                         (e.role && e.role.toLowerCase().includes(searchTerm.toLowerCase())) ||
+                         (e.possession?.some(p => p.items?.description.toLowerCase().includes(searchTerm.toLowerCase())));
+                         
     const matchesStatus = statusFilter === 'Todos' || e.status === statusFilter;
     
     // Only count non-consumable items for the possession filter
@@ -437,10 +440,13 @@ export default function StaffPage() {
                           </span>
                           <span className="text-[10px] text-slate-400 font-mono">{new Date(m.created_at).toLocaleString()}</span>
                         </div>
-                        <h4 className="font-bold text-primary text-sm">{m.items?.description}</h4>
+                        <h4 className="font-bold text-primary text-sm leading-tight">{m.items?.description}</h4>
                         <div className="flex items-center justify-between mt-2">
-                          <span className="text-xs text-slate-500 uppercase font-bold">Código: {m.items?.code}</span>
-                          <span className="text-sm font-bold text-primary">{m.quantity} {m.items?.unit}</span>
+                          <div className="flex flex-col">
+                            <span className="text-[10px] text-slate-400 uppercase font-black tracking-tighter">Código: {m.items?.code}</span>
+                            <span className="text-[10px] text-slate-400 font-bold uppercase">{m.items?.unit}</span>
+                          </div>
+                          <span className="text-sm font-black text-primary">x{m.quantity}</span>
                         </div>
                       </div>
                     </div>

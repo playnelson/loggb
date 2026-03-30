@@ -132,8 +132,12 @@ export default function Home() {
                         <TrendingDown size={18} className={move.type === 'IN' ? 'rotate-180' : ''} />
                       </div>
                       <div>
-                        <p className="font-bold text-primary text-sm">{move.items?.description}</p>
-                        <p className="text-xs text-slate-500 font-medium">{move.employees?.full_name}</p>
+                        <p className="font-bold text-primary text-sm leading-tight">{move.items?.description}</p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">Cód: {move.items?.code}</p>
+                          <span className="text-[10px] text-slate-300">•</span>
+                          <p className="text-[10px] text-slate-500 font-medium">{move.employees?.full_name}</p>
+                        </div>
                       </div>
                     </div>
                     <div className="text-right">
@@ -196,9 +200,12 @@ export default function Home() {
               ) : (
                 criticalItems.map((item) => (
                   <div key={item.id} className="p-4 bg-slate-800/50 rounded-xl border border-slate-700/50 hover:bg-slate-800 transition-colors">
-                    <div className="flex justify-between items-start mb-2">
-                      <p className="font-bold text-sm truncate max-w-[150px]">{item.description}</p>
-                      <span className="text-[10px] font-bold bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full">ALERTA</span>
+                    <div className="flex justify-between items-start mb-2 gap-3">
+                      <div>
+                        <p className="font-bold text-sm leading-tight text-white">{item.description}</p>
+                        <p className="text-[9px] text-slate-500 font-bold uppercase mt-1">Cód: {item.code}</p>
+                      </div>
+                      <span className="text-[10px] font-black bg-red-500/20 text-red-500 px-2 py-0.5 rounded shrink-0">CRÍTICO</span>
                     </div>
                     <div className="flex items-center justify-between text-[11px] font-bold text-slate-400">
                       <span>Atual: <span className="text-red-400">{item.quantity_current}</span></span>
