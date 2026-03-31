@@ -289,8 +289,9 @@ export default function StaffPage() {
                          
     const matchesStatus = statusFilter === 'Todos' || e.status === statusFilter;
     
-    // Only count non-consumable items for the possession filter
-    const activePossessions = e.possession?.filter(p => p.quantity > 0 && !p.items?.consumable) || [];
+    // Only count non-consumable items for the possession filter.
+    // Require `items` join to exist; otherwise avoid showing ghost entries.
+    const activePossessions = e.possession?.filter(p => p.quantity > 0 && !!p.items && !p.items.consumable) || [];
     const matchesHasItems = !hasItemsFilter || activePossessions.length > 0;
     
     return matchesSearch && matchesStatus && matchesHasItems;
@@ -402,7 +403,7 @@ export default function StaffPage() {
                 </tr>
               ) : (
                 filteredEmployees.map((e) => {
-                  const activePossessions = e.possession?.filter(p => p.quantity > 0) || [];
+                  const activePossessions = e.possession?.filter(p => p.quantity > 0 && !!p.items) || [];
                   return (
                     <tr key={e.id} className="hover:bg-slate-50 transition-colors group">
                       <td className="px-6 py-4">
@@ -431,9 +432,9 @@ export default function StaffPage() {
                               <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Carteira de EPIs</span>
                             </div>
                             <div className="flex flex-wrap gap-1.5">
-                              {e.possession?.filter(p => p.quantity > 0 && !p.items?.consumable && p.items?.category === 'EPI').length ? (
+                              {e.possession?.filter(p => p.quantity > 0 && !!p.items && !p.items.consumable && p.items.category === 'EPI').length ? (
                                 e.possession
-                                  .filter(p => p.quantity > 0 && !p.items?.consumable && p.items?.category === 'EPI')
+                                  .filter(p => p.quantity > 0 && !!p.items && !p.items.consumable && p.items.category === 'EPI')
                                   .map((p, idx) => (
                                     <div key={idx} className="flex items-center gap-2 bg-purple-50 border border-purple-100 px-2 py-1 rounded text-[10px] font-bold text-purple-700 group/p">
                                       <span className="truncate max-w-[150px]">{p.items?.description}</span>
@@ -460,9 +461,9 @@ export default function StaffPage() {
                               <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Demais Itens</span>
                             </div>
                             <div className="flex flex-wrap gap-1.5">
-                              {e.possession?.filter(p => p.quantity > 0 && !p.items?.consumable && p.items?.category !== 'EPI').length ? (
+                              {e.possession?.filter(p => p.quantity > 0 && !!p.items && !p.items.consumable && p.items.category !== 'EPI').length ? (
                                 e.possession
-                                  .filter(p => p.quantity > 0 && !p.items?.consumable && p.items?.category !== 'EPI')
+                                  .filter(p => p.quantity > 0 && !!p.items && !p.items.consumable && p.items.category !== 'EPI')
                                   .map((p, idx) => (
                                     <div key={idx} className="flex items-center gap-2 bg-blue-50 border border-blue-100 px-2 py-1 rounded text-[10px] font-bold text-blue-700 group/p">
                                       <span className="truncate max-w-[150px]">{p.items?.description}</span>
