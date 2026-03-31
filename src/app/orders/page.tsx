@@ -2,7 +2,7 @@
 
 export const dynamic = 'force-dynamic';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Plus, Search, Link as LinkIcon, Loader2, Trash2 } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
@@ -10,7 +10,7 @@ import type { PurchaseRequestRow, PurchaseStage } from '@/lib/purchaseRequests';
 import { PURCHASE_STAGES, isPurchaseStage } from '@/lib/purchaseRequests';
 import { PurchaseRequestFormModal } from '@/components/PurchaseRequestFormModal';
 
-export default function OrdersPage() {
+function OrdersContent() {
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [requests, setRequests] = useState<PurchaseRequestRow[]>([]);
@@ -228,6 +228,14 @@ export default function OrdersPage() {
         }}
       />
     </div>
+  );
+}
+
+export default function OrdersPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-center text-slate-500">Carregando pedidos...</div>}>
+      <OrdersContent />
+    </Suspense>
   );
 }
 
