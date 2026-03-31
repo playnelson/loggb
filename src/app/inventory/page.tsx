@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { Search, Plus, Filter, AlertCircle, MoreHorizontal, X, FileUp, Users, History, Edit, Trash2, Loader2, Package, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
+import { Search, Plus, AlertCircle, X, FileUp, Users, History, Edit, Trash2, Loader2, ArrowUpRight, ArrowDownLeft, Tags } from 'lucide-react';
 import ImportSpreadsheet from '@/components/ImportSpreadsheet';
 import QuickMovementModal from '@/components/QuickMovementModal';
 import { itemCodeFromDescription } from '@/lib/itemCode';
@@ -36,6 +36,14 @@ interface Product {
   possession?: PossessionDetail[];
 }
 
+interface ItemCategory {
+  id: string;
+  name: string;
+  locked: boolean;
+}
+
+const FALLBACK_CATEGORIES = ['Ferramenta', 'EPI', 'Tubulação', 'Consumível'] as const;
+
 function InventoryContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -45,6 +53,12 @@ function InventoryContent() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [categories, setCategories] = useState<ItemCategory[] | null>(null);
+  const [isCategoriesOpen, setIsCategoriesOpen] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [editingCategory, setEditingCategory] = useState<ItemCategory | null>(null);
+  const [editingCategoryName, setEditingCategoryName] = useState('');
+  const [categoryError, setCategoryError] = useState<string | null>(null);
   
   // Modals for actions
   const [editingItem, setEditingItem] = useState<Product | null>(null);
@@ -68,6 +82,62 @@ function InventoryContent() {
     unit: 'un'
   });
 
+  const fetchCategories = async () => {
+    setCategoryError(null);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setCategories(null);
+      return;
+    }
+
+    // If the table doesn't exist (or RLS blocks), we fall back to the hardcoded list.
+    const { data, error } = await supabase
+      .from('item_categories')
+      .select('id, name, locked')
+      .order('locked', { ascending: false })
+      .order('name', { ascending: true });
+
+    if (error) {
+      console.warn('Error fetching categories:', error);
+      setCategories(null);
+      setCategoryError('Categorias não configuradas no banco (usando padrão).');
+      return;
+    }
+
+    const list = (data || []).map((c) => ({
+      id: String(c.id),
+      name: String((c as any).name),
+      locked: Boolean((c as any).locked),
+    })) as ItemCategory[];
+
+    // Ensure defaults (client-side seed per user)
+    const existingLower = new Set(list.map((c) => c.name.trim().toLowerCase()));
+    const missingDefaults = FALLBACK_CATEGORIES.filter((n) => !existingLower.has(n.toLowerCase()));
+    if (missingDefaults.length) {
+      await supabase.from('item_categories').insert(
+        missingDefaults.map((name) => ({
+          name,
+          locked: name === 'EPI',
+          user_id: user.id,
+        }))
+      );
+      const { data: data2 } = await supabase
+        .from('item_categories')
+        .select('id, name, locked')
+        .order('locked', { ascending: false })
+        .order('name', { ascending: true });
+      const list2 = (data2 || []).map((c) => ({
+        id: String(c.id),
+        name: String((c as any).name),
+        locked: Boolean((c as any).locked),
+      })) as ItemCategory[];
+      setCategories(list2);
+      return;
+    }
+
+    setCategories(list);
+  };
+
   const fetchProducts = async () => {
     setLoading(true);
     const { data, error } = await supabase
@@ -89,7 +159,93 @@ function InventoryContent() {
   useEffect(() => {
     // eslint-disable-next-line @typescript-eslint/no-floating-promises
     fetchProducts();
+    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+    fetchCategories();
   }, []);
+
+  const categoryNames = categories?.map((c) => c.name) ?? [...FALLBACK_CATEGORIES];
+  const categoryOptions = Array.from(
+    new Set([...(categoryNames || []), ...products.map((p) => p.category).filter(Boolean)])
+  ).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+
+  const openCategoryManager = () => {
+    setIsCategoriesOpen(true);
+    setNewCategoryName('');
+    setEditingCategory(null);
+    setEditingCategoryName('');
+    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+    fetchCategories();
+  };
+
+  const createCategory = async () => {
+    const name = newCategoryName.trim();
+    if (name.length < 2) return;
+    setIsSubmitting(true);
+    setCategoryError(null);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setIsSubmitting(false);
+      alert('Usuário não autenticado.');
+      return;
+    }
+    const { error } = await supabase.from('item_categories').insert([{ name, locked: name === 'EPI', user_id: user.id }]);
+    if (error) setCategoryError(error.message);
+    setNewCategoryName('');
+    await fetchCategories();
+    setIsSubmitting(false);
+  };
+
+  const startEditCategory = (cat: ItemCategory) => {
+    if (cat.locked) return;
+    setEditingCategory(cat);
+    setEditingCategoryName(cat.name);
+  };
+
+  const saveEditCategory = async () => {
+    if (!editingCategory) return;
+    if (editingCategory.locked) return;
+    const nextName = editingCategoryName.trim();
+    if (nextName.length < 2) return;
+    if (nextName.toLowerCase() === 'epi') {
+      alert('A categoria EPI é travada e não pode ser renomeada.');
+      return;
+    }
+    setIsSubmitting(true);
+    setCategoryError(null);
+    const prevName = editingCategory.name;
+    const { error } = await supabase
+      .from('item_categories')
+      .update({ name: nextName })
+      .eq('id', editingCategory.id);
+    if (error) {
+      setCategoryError(error.message);
+      setIsSubmitting(false);
+      return;
+    }
+
+    // Update existing items to keep consistency (does NOT delete items).
+    await supabase.from('items').update({ category: nextName }).eq('category', prevName);
+
+    setEditingCategory(null);
+    setEditingCategoryName('');
+    await fetchCategories();
+    await fetchProducts();
+    setIsSubmitting(false);
+  };
+
+  const deleteCategory = async (cat: ItemCategory) => {
+    if (cat.locked || cat.name.toLowerCase() === 'epi') {
+      alert('Esta categoria é travada e não pode ser excluída.');
+      return;
+    }
+    if (!confirm(`Excluir a categoria "${cat.name}"? (Os itens NÃO serão apagados.)`)) return;
+    setIsSubmitting(true);
+    setCategoryError(null);
+    const { error } = await supabase.from('item_categories').delete().eq('id', cat.id);
+    if (error) setCategoryError(error.message);
+    await fetchCategories();
+    setIsSubmitting(false);
+  };
 
   const openHistory = async (item: Product) => {
     setHistoryItem(item);
@@ -177,6 +333,15 @@ function InventoryContent() {
           <p className="text-slate-500 text-sm">Gestão de materiais, EPIs e ferramentas por descrição e categoria.</p>
         </div>
         <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={openCategoryManager}
+            className="flex items-center gap-2 bg-white text-primary border border-slate-200 px-4 py-2 rounded-lg hover:bg-slate-50 transition-all font-medium"
+            title="Criar, editar e excluir categorias"
+          >
+            <Tags size={18} className="text-secondary" />
+            Categorias
+          </button>
           <button 
             onClick={() => setIsImportModalOpen(true)}
             className="flex items-center gap-2 bg-slate-100 text-primary border border-slate-200 px-4 py-2 rounded-lg hover:bg-slate-200 transition-all font-medium"
@@ -203,6 +368,109 @@ function InventoryContent() {
               fetchProducts();
             }} 
           />
+        </div>
+      )}
+
+      {/* Modal Gerenciar Categorias */}
+      {isCategoriesOpen && (
+        <div className="fixed inset-0 bg-primary/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-hidden flex flex-col animate-in zoom-in duration-300">
+            <div className="p-6 border-b bg-slate-50 flex items-center justify-between">
+              <div>
+                <h3 className="text-xl font-bold text-primary">Categorias de Itens</h3>
+                <p className="text-xs text-slate-500 mt-1">Excluir aqui não apaga itens. “EPI” é travada.</p>
+              </div>
+              <button onClick={() => setIsCategoriesOpen(false)} className="p-2 hover:bg-slate-200 rounded-full">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 overflow-y-auto">
+              {categoryError && (
+                <div className="p-3 bg-amber-50 border border-amber-100 text-amber-700 rounded-xl text-xs font-bold">
+                  {categoryError}
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none text-sm"
+                  placeholder="Nova categoria (ex.: Elétrica)"
+                  value={newCategoryName}
+                  onChange={(e) => setNewCategoryName(e.target.value)}
+                />
+                <button
+                  type="button"
+                  onClick={() => void createCategory()}
+                  disabled={isSubmitting || newCategoryName.trim().length < 2}
+                  className="px-4 py-2 bg-primary text-white rounded-lg font-bold disabled:opacity-50"
+                >
+                  Criar
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                {(categories ?? categoryOptions.map((n, idx) => ({ id: String(idx), name: n, locked: n === 'EPI' } as ItemCategory))).map((cat) => (
+                  <div key={cat.id} className="flex items-center justify-between p-3 bg-white border border-slate-100 rounded-xl">
+                    <div className="min-w-0">
+                      <div className="font-bold text-primary text-sm truncate">{cat.name}</div>
+                      {cat.locked && <div className="text-[10px] text-slate-400 font-bold uppercase">Travada</div>}
+                    </div>
+                    <div className="flex gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => startEditCategory(cat)}
+                        disabled={cat.locked}
+                        className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-blue-500 disabled:opacity-40"
+                        title="Renomear"
+                      >
+                        <Edit size={16} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void deleteCategory(cat)}
+                        disabled={cat.locked}
+                        className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-red-500 disabled:opacity-40"
+                        title="Excluir (não apaga itens)"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {editingCategory && (
+              <div className="p-6 border-t bg-slate-50">
+                <div className="text-xs font-bold uppercase text-slate-400 mb-2">Renomear categoria</div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    className="flex-1 p-3 bg-white border border-slate-200 rounded-lg outline-none text-sm"
+                    value={editingCategoryName}
+                    onChange={(e) => setEditingCategoryName(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void saveEditCategory()}
+                    disabled={isSubmitting || editingCategoryName.trim().length < 2}
+                    className="px-4 py-2 bg-primary text-white rounded-lg font-bold disabled:opacity-50"
+                  >
+                    Salvar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setEditingCategory(null); setEditingCategoryName(''); }}
+                    className="px-4 py-2 bg-white border border-slate-200 rounded-lg font-bold text-slate-500"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -500,10 +768,9 @@ function InventoryContent() {
                     value={formData.category}
                     onChange={(e) => setFormData({...formData, category: e.target.value})}
                   >
-                    <option value="Ferramenta">Ferramenta</option>
-                    <option value="EPI">EPI</option>
-                    <option value="Tubulação">Tubulação</option>
-                    <option value="Consumível">Consumível</option>
+                    {categoryOptions.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
                   </select>
                 </div>
                 <div className="space-y-1">
