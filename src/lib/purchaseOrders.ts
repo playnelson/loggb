@@ -35,6 +35,7 @@ export type PurchaseOrderItemRow = {
   product_url: string | null;
   vendor: string | null;
   product_price: string | null;
+  unit: string;
   quantity_requested: number;
   quantity_received: number;
   received_at: string | null;
@@ -58,6 +59,7 @@ export type NewOrderForm = {
     product_name: string;
     vendor: string;
     product_price: string;
+    unit: string;
     quantity_requested: number;
     notes: string;
   }>;

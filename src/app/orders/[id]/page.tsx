@@ -54,7 +54,7 @@ function OrderDetailContent() {
 
     const { data: it, error: itErr } = await supabase
       .from('purchase_order_items')
-      .select('id, order_id, product_name, product_url, vendor, product_price, quantity_requested, quantity_received, received_at, notes, created_at, updated_at')
+      .select('id, order_id, product_name, product_url, vendor, product_price, unit, quantity_requested, quantity_received, received_at, notes, created_at, updated_at')
       .eq('order_id', orderId)
       .order('created_at', { ascending: true });
     if (itErr) {
@@ -69,6 +69,7 @@ function OrderDetailContent() {
         product_url: (row.product_url as string) ?? null,
         vendor: (row.vendor as string) ?? null,
         product_price: (row.product_price as string) ?? null,
+        unit: String(row.unit ?? 'un'),
         quantity_requested: Number(row.quantity_requested ?? 0),
         quantity_received: Number(row.quantity_received ?? 0),
         received_at: (row.received_at as string) ?? null,
@@ -138,6 +139,7 @@ function OrderDetailContent() {
     const { error } = await supabase.from('purchase_order_items').insert([
       {
         order_id: orderId,
+        unit: 'un',
         quantity_requested: 1,
         quantity_received: 0,
       },
@@ -311,6 +313,7 @@ function OrderDetailContent() {
                   <tr>
                     <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Produto</th>
                     <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Fornecedor</th>
+                    <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Un</th>
                     <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Qtd. pedida</th>
                     <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Qtd. recebida</th>
                     <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Preço</th>
@@ -320,7 +323,7 @@ function OrderDetailContent() {
                 <tbody className="divide-y divide-border">
                   {items.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="px-6 py-10 text-center text-slate-400 italic">
+                      <td colSpan={7} className="px-6 py-10 text-center text-slate-400 italic">
                         Nenhum item. Clique em “Adicionar item”.
                       </td>
                     </tr>
@@ -377,6 +380,24 @@ function OrderDetailContent() {
                             value={it.vendor || ''}
                             onChange={(e) => void updateItem(it.id, { vendor: e.target.value })}
                           />
+                        </td>
+                        <td className="px-6 py-4">
+                          <select
+                            className="w-24 p-2 bg-slate-50 border border-slate-200 rounded-lg outline-none font-bold text-sm"
+                            value={it.unit}
+                            onChange={(e) => void updateItem(it.id, { unit: e.target.value })}
+                            title="Unidade"
+                          >
+                            <option value="un">un</option>
+                            <option value="par">par</option>
+                            <option value="kg">kg</option>
+                            <option value="g">g</option>
+                            <option value="L">L</option>
+                            <option value="mL">mL</option>
+                            <option value="m">m</option>
+                            <option value="cm">cm</option>
+                            <option value="cx">cx</option>
+                          </select>
                         </td>
                         <td className="px-6 py-4">
                           <input

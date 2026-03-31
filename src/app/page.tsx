@@ -293,6 +293,7 @@ export default function Home() {
                         const requesterName = employeeNameById.get(o.requester_employee_id) || '—';
                         const title = `Pedido (${itemCount} itens)`;
                         const subtitle = `${requesterName} • ${qtyRec}/${qtyReq} recebidos`;
+                        const desc = (o.notes || '').trim();
                         return (
                           <div
                             key={o.id}
@@ -304,6 +305,11 @@ export default function Home() {
                                 <div className="text-[11px] text-slate-500 font-medium truncate">
                                   {subtitle || '—'}
                                 </div>
+                                {desc && (
+                                  <div className="text-[10px] text-slate-400 font-bold truncate mt-1">
+                                    {desc}
+                                  </div>
+                                )}
                               </div>
                               <button
                                 type="button"

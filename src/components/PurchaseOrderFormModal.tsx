@@ -12,6 +12,7 @@ function emptyItem() {
     product_name: '',
     vendor: '',
     product_price: '',
+    unit: 'un',
     quantity_requested: 1,
     notes: '',
   };
@@ -143,6 +144,7 @@ export function PurchaseOrderFormModal({
       product_name: it.product_name.trim() || null,
       vendor: it.vendor.trim() || null,
       product_price: it.product_price.trim() || null,
+      unit: it.unit.trim() || 'un',
       quantity_requested: clampNumber(Number(it.quantity_requested), 1, 1_000_000),
       quantity_received: 0,
       notes: it.notes.trim() || null,
@@ -325,24 +327,32 @@ export function PurchaseOrderFormModal({
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs font-bold uppercase text-slate-500">Preço (opcional)</label>
-                    <input
-                      type="text"
-                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none text-sm font-mono"
-                      placeholder="Ex.: R$ 199,90"
-                      value={it.product_price}
+                    <label className="text-xs font-bold uppercase text-slate-500">Unidade</label>
+                    <select
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none text-sm font-medium"
+                      value={it.unit}
                       onChange={(e) =>
                         setForm((f) => {
                           const next = { ...f, items: [...f.items] };
-                          next.items[idx] = { ...next.items[idx], product_price: e.target.value };
+                          next.items[idx] = { ...next.items[idx], unit: e.target.value };
                           return next;
                         })
                       }
-                    />
+                    >
+                      <option value="un">Unidade (un)</option>
+                      <option value="par">Par</option>
+                      <option value="kg">Quilos (kg)</option>
+                      <option value="g">Gramas (g)</option>
+                      <option value="L">Litros (L)</option>
+                      <option value="mL">Mililitros (mL)</option>
+                      <option value="m">Metros (m)</option>
+                      <option value="cm">Centímetros (cm)</option>
+                      <option value="cx">Caixa (cx)</option>
+                    </select>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div className="space-y-1">
                     <label className="text-xs font-bold uppercase text-slate-500">Fornecedor / Site</label>
                     <input
@@ -354,6 +364,22 @@ export function PurchaseOrderFormModal({
                         setForm((f) => {
                           const next = { ...f, items: [...f.items] };
                           next.items[idx] = { ...next.items[idx], vendor: e.target.value };
+                          return next;
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold uppercase text-slate-500">Preço (opcional)</label>
+                    <input
+                      type="text"
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none text-sm font-mono"
+                      placeholder="Ex.: R$ 199,90"
+                      value={it.product_price}
+                      onChange={(e) =>
+                        setForm((f) => {
+                          const next = { ...f, items: [...f.items] };
+                          next.items[idx] = { ...next.items[idx], product_price: e.target.value };
                           return next;
                         })
                       }
