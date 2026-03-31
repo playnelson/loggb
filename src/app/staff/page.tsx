@@ -4,8 +4,9 @@ export const dynamic = 'force-dynamic';
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Search, UserPlus, Mail, Phone, ExternalLink, X, FileUp, Filter, Package, AlertCircle, History, RotateCcw, Download, Loader2, ArrowLeft } from 'lucide-react';
+import { Search, UserPlus, Mail, Phone, ExternalLink, X, FileUp, Filter, Package, AlertCircle, History, RotateCcw, Download, Loader2, ArrowLeft, FileText } from 'lucide-react';
 import ImportSpreadsheet from '@/components/ImportSpreadsheet';
+import { downloadEpiFichaPdf } from '@/lib/epiFichaPdf';
 
 interface Possession {
   item_id: string;
@@ -23,8 +24,20 @@ interface Employee {
   full_name: string;
   role: string | null;
   status: string;
+  cpf?: string | null;
+  department?: string | null;
   possession?: Possession[];
 }
+
+const EPI_FICHA_STORAGE_KEY = 'loggb_epi_ficha_defaults';
+
+type EpiFichaFormState = {
+  companyName: string;
+  companyCnpj: string;
+  branchOrDept: string;
+  issuedAt: string;
+  responsibleName: string;
+};
 
 export default function StaffPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -41,6 +54,14 @@ export default function StaffPage() {
   const [movements, setMovements] = useState<any[]>([]);
   const [returnItem, setReturnItem] = useState<{employeeId: string, item: Possession} | null>(null);
   const [returnQty, setReturnQty] = useState<number>(0);
+  const [epiFichaEmployee, setEpiFichaEmployee] = useState<Employee | null>(null);
+  const [epiFichaForm, setEpiFichaForm] = useState<EpiFichaFormState>({
+    companyName: '',
+    companyCnpj: '',
+    branchOrDept: '',
+    issuedAt: '',
+    responsibleName: '',
+  });
 
   // Form states
   const [formData, setFormData] = useState({
@@ -117,6 +138,85 @@ export default function StaffPage() {
     a.href = url;
     a.download = `historico_${employee.full_name.toLowerCase().replace(/ /g, '_')}.txt`;
     a.click();
+  };
+
+  const openEpiFichaModal = (employee: Employee) => {
+    let saved: Partial<EpiFichaFormState> = {};
+    if (typeof window !== 'undefined') {
+      try {
+        saved = JSON.parse(localStorage.getItem(EPI_FICHA_STORAGE_KEY) || '{}') as Partial<EpiFichaFormState>;
+      } catch {
+        saved = {};
+      }
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    setEpiFichaForm({
+      companyName: typeof saved.companyName === 'string' ? saved.companyName : '',
+      companyCnpj: typeof saved.companyCnpj === 'string' ? saved.companyCnpj : '',
+      branchOrDept:
+        typeof saved.branchOrDept === 'string' && saved.branchOrDept
+          ? saved.branchOrDept
+          : (employee.department || ''),
+      issuedAt: today,
+      responsibleName: typeof saved.responsibleName === 'string' ? saved.responsibleName : '',
+    });
+    setEpiFichaEmployee(employee);
+  };
+
+  const handleDownloadEpiFicha = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!epiFichaEmployee) return;
+    if (!epiFichaForm.companyName.trim()) {
+      alert('Informe o nome da empresa (razão social ou nome fantasia).');
+      return;
+    }
+    const issued = epiFichaForm.issuedAt
+      ? new Date(epiFichaForm.issuedAt + 'T12:00:00').toLocaleDateString('pt-BR')
+      : new Date().toLocaleDateString('pt-BR');
+
+    const epiRows =
+      epiFichaEmployee.possession
+        ?.filter(
+          (p) =>
+            p.quantity > 0 &&
+            !p.items?.consumable &&
+            p.items?.category === 'EPI'
+        )
+        .map((p) => [
+          p.items?.description ?? '—',
+          p.items?.unit ?? '—',
+          String(p.quantity),
+        ] as [string, string, string]) ?? [];
+
+    downloadEpiFichaPdf(
+      {
+        full_name: epiFichaEmployee.full_name,
+        role: epiFichaEmployee.role,
+        cpf: epiFichaEmployee.cpf,
+        department: epiFichaEmployee.department,
+      },
+      epiRows,
+      {
+        companyName: epiFichaForm.companyName,
+        companyCnpj: epiFichaForm.companyCnpj,
+        branchOrDept: epiFichaForm.branchOrDept,
+        issuedAtLabel: issued,
+        responsibleName: epiFichaForm.responsibleName,
+      }
+    );
+
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(
+        EPI_FICHA_STORAGE_KEY,
+        JSON.stringify({
+          companyName: epiFichaForm.companyName,
+          companyCnpj: epiFichaForm.companyCnpj,
+          branchOrDept: epiFichaForm.branchOrDept,
+          responsibleName: epiFichaForm.responsibleName,
+        })
+      );
+    }
+    setEpiFichaEmployee(null);
   };
 
   const handleReturn = async (e: React.FormEvent) => {
@@ -384,13 +484,24 @@ export default function StaffPage() {
                         </div>
                       </td>
                       <td className="px-6 py-4 text-right">
-                        <button 
-                          onClick={() => openTimeline(e)}
-                          className="text-slate-400 hover:text-secondary p-2 bg-slate-50 border border-slate-200 rounded-lg transition-all"
-                          title="Ver Histórico"
-                        >
-                          <History size={16} />
-                        </button>
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button 
+                            type="button"
+                            onClick={() => openEpiFichaModal(e)}
+                            className="text-slate-400 hover:text-secondary p-2 bg-slate-50 border border-slate-200 rounded-lg transition-all"
+                            title="Ficha de EPI (PDF)"
+                          >
+                            <FileText size={16} />
+                          </button>
+                          <button 
+                            type="button"
+                            onClick={() => openTimeline(e)}
+                            className="text-slate-400 hover:text-secondary p-2 bg-slate-50 border border-slate-200 rounded-lg transition-all"
+                            title="Ver Histórico"
+                          >
+                            <History size={16} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -400,6 +511,102 @@ export default function StaffPage() {
           </table>
         </div>
       </div>
+
+      {/* Modal Ficha de EPI */}
+      {epiFichaEmployee && (
+        <div className="fixed inset-0 bg-primary/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in duration-300">
+            <div className="p-6 border-b bg-slate-50 flex items-center justify-between shrink-0">
+              <div>
+                <h3 className="text-xl font-bold text-primary">Ficha de EPI</h3>
+                <p className="text-xs text-slate-500 mt-1 font-medium">{epiFichaEmployee.full_name}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEpiFichaEmployee(null)}
+                className="p-2 hover:bg-slate-200 rounded-full"
+                aria-label="Fechar"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <form onSubmit={handleDownloadEpiFicha} className="p-6 space-y-4 overflow-y-auto">
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Ajuste os dados do empregador abaixo; o PDF incluirá os EPIs em posse deste colaborador
+                (categoria EPI, não consumíveis). Nome, função e CPF vêm do cadastro.
+              </p>
+              <div className="space-y-1">
+                <label className="text-xs font-bold uppercase text-slate-500">Nome da empresa *</label>
+                <input
+                  required
+                  type="text"
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-secondary/30 font-medium text-sm"
+                  placeholder="Razão social ou nome fantasia"
+                  value={epiFichaForm.companyName}
+                  onChange={(ev) => setEpiFichaForm((f) => ({ ...f, companyName: ev.target.value }))}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold uppercase text-slate-500">CNPJ (opcional)</label>
+                <input
+                  type="text"
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-secondary/30 text-sm"
+                  placeholder="00.000.000/0001-00"
+                  value={epiFichaForm.companyCnpj}
+                  onChange={(ev) => setEpiFichaForm((f) => ({ ...f, companyCnpj: ev.target.value }))}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold uppercase text-slate-500">Setor / estabelecimento (opcional)</label>
+                <input
+                  type="text"
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-secondary/30 text-sm"
+                  placeholder="Ex.: Filial Norte, Obra X"
+                  value={epiFichaForm.branchOrDept}
+                  onChange={(ev) => setEpiFichaForm((f) => ({ ...f, branchOrDept: ev.target.value }))}
+                />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold uppercase text-slate-500">Data do documento</label>
+                  <input
+                    type="date"
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-secondary/30 text-sm"
+                    value={epiFichaForm.issuedAt}
+                    onChange={(ev) => setEpiFichaForm((f) => ({ ...f, issuedAt: ev.target.value }))}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold uppercase text-slate-500">Responsável pela entrega</label>
+                  <input
+                    type="text"
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-secondary/30 text-sm"
+                    placeholder="Nome completo"
+                    value={epiFichaForm.responsibleName}
+                    onChange={(ev) => setEpiFichaForm((f) => ({ ...f, responsibleName: ev.target.value }))}
+                  />
+                </div>
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEpiFichaEmployee(null)}
+                  className="flex-1 p-3 border border-slate-200 rounded-xl font-bold text-slate-500 hover:bg-slate-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 p-3 bg-primary text-white rounded-xl font-bold hover:bg-slate-800 flex items-center justify-center gap-2"
+                >
+                  <Download size={16} />
+                  Baixar PDF
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Modal Histórico do Colaborador (Timeline) */}
       {timelineEmployee && (
