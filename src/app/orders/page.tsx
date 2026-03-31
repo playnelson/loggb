@@ -4,12 +4,13 @@ export const dynamic = 'force-dynamic';
 
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Plus, Search, Loader2, Trash2, ExternalLink } from 'lucide-react';
+import { Plus, Search, Loader2, Trash2, ExternalLink, Download, FileUp } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import type { EmployeeLite, PurchaseOrderItemRow, PurchaseOrderRow, PurchaseStage } from '@/lib/purchaseOrders';
 import { PURCHASE_STAGES, isPurchaseStage } from '@/lib/purchaseOrders';
 import { PurchaseOrderFormModal } from '@/components/PurchaseOrderFormModal';
+import { PurchaseOrderImportModal, downloadOrdersTemplate } from '@/components/PurchaseOrderImportModal';
 
 function OrdersContent() {
   const searchParams = useSearchParams();
@@ -20,6 +21,7 @@ function OrdersContent() {
   const [search, setSearch] = useState(() => searchParams.get('q') || '');
   const [stageFilter, setStageFilter] = useState<'Todos' | PurchaseStage>('Todos');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isImportOpen, setIsImportOpen] = useState(false);
   const parseStageFilter = (v: string): 'Todos' | PurchaseStage => (v === 'Todos' ? 'Todos' : (v as PurchaseStage));
 
   const fetchOrders = async () => {
@@ -186,14 +188,34 @@ function OrdersContent() {
           <h1 className="text-2xl font-bold text-primary">Pedidos</h1>
           <p className="text-slate-500 text-sm">Rascunhos, estágios de compra e links de produto com preenchimento automático.</p>
         </div>
-        <button
-          type="button"
-          onClick={() => setIsModalOpen(true)}
-          className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-slate-800 transition-all font-medium text-sm"
-        >
-          <Plus size={16} />
-          Novo Pedido
-        </button>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={downloadOrdersTemplate}
+            className="flex items-center gap-2 bg-white text-primary border border-slate-200 px-4 py-2 rounded-lg hover:bg-slate-50 transition-all font-medium text-sm"
+            title="Baixar planilha modelo"
+          >
+            <Download size={16} />
+            Modelo
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsImportOpen(true)}
+            className="flex items-center gap-2 bg-slate-100 text-primary border border-slate-200 px-4 py-2 rounded-lg hover:bg-slate-200 transition-all font-medium text-sm"
+            title="Importar planilha e criar pedido"
+          >
+            <FileUp size={16} className="text-secondary" />
+            Importar
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsModalOpen(true)}
+            className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-slate-800 transition-all font-medium text-sm"
+          >
+            <Plus size={16} />
+            Novo Pedido
+          </button>
+        </div>
       </div>
 
       <div className="bg-white p-4 rounded-xl border border-border shadow-sm flex flex-col lg:flex-row gap-4">
@@ -313,6 +335,15 @@ function OrdersContent() {
       <PurchaseOrderFormModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
+        onSaved={() => {
+          // eslint-disable-next-line @typescript-eslint/no-floating-promises
+          fetchOrders();
+        }}
+      />
+
+      <PurchaseOrderImportModal
+        isOpen={isImportOpen}
+        onClose={() => setIsImportOpen(false)}
         onSaved={() => {
           // eslint-disable-next-line @typescript-eslint/no-floating-promises
           fetchOrders();
