@@ -147,7 +147,7 @@ function InventoryContent() {
 
     if (error) {
       console.error('Error adding item:', error);
-      alert('Erro ao cadastrar item. Verifique o console.');
+      alert(`Erro ao cadastrar item: ${error.message}`);
     } else {
       setIsModalOpen(false);
       setFormData({
