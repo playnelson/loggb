@@ -56,7 +56,7 @@ export default function Home() {
     } else {
       const { data: itemData, error: itemError } = await supabase
         .from('purchase_order_items')
-        .select('id, order_id, product_name, product_url, vendor, product_price, quantity_requested, quantity_received, received_at, notes, created_at, updated_at')
+        .select('id, order_id, product_name, product_url, vendor, product_price, unit, quantity_requested, quantity_received, received_at, notes, created_at, updated_at')
         .in('order_id', ids);
       if (itemError) {
         console.error('Error fetching purchase order items:', itemError);
@@ -71,6 +71,7 @@ export default function Home() {
             product_url: (row.product_url as string) ?? null,
             vendor: (row.vendor as string) ?? null,
             product_price: (row.product_price as string) ?? null,
+            unit: String(row.unit ?? 'un'),
             quantity_requested: Number(row.quantity_requested ?? 0),
             quantity_received: Number(row.quantity_received ?? 0),
             received_at: (row.received_at as string) ?? null,
