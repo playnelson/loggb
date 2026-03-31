@@ -1,0 +1,450 @@
+'use client';
+
+export const dynamic = 'force-dynamic';
+
+import { Suspense, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useParams, useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabase';
+import { ArrowLeft, Loader2, Plus, Trash2, Wand2, Link as LinkIcon, Save } from 'lucide-react';
+import type { EmployeeLite, PurchaseOrderItemRow, PurchaseOrderRow, PurchaseStage } from '@/lib/purchaseOrders';
+import { PURCHASE_STAGES, clampNumber, isPurchaseStage } from '@/lib/purchaseOrders';
+
+function OrderDetailContent() {
+  const params = useParams<{ id: string }>();
+  const router = useRouter();
+  const orderId = params?.id;
+
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [linkLoadingIdx, setLinkLoadingIdx] = useState<number | null>(null);
+
+  const [items, setItems] = useState<PurchaseOrderItemRow[]>([]);
+  const [employees, setEmployees] = useState<EmployeeLite[]>([]);
+
+  const [orderStage, setOrderStage] = useState<PurchaseStage>('Rascunho');
+  const [requesterId, setRequesterId] = useState<string>('');
+  const [notes, setNotes] = useState<string>('');
+
+  const fetchAll = async () => {
+    if (!orderId) return;
+    setLoading(true);
+
+    const { data: o, error: oErr } = await supabase
+      .from('purchase_orders')
+      .select('id, requester_employee_id, stage, notes, created_at, updated_at')
+      .eq('id', orderId)
+      .single();
+    if (oErr || !o) {
+      alert(`Pedido não encontrado: ${oErr?.message || 'erro'}`);
+      setLoading(false);
+      return;
+    }
+
+    const oRow = o as Record<string, unknown>;
+    const stageRaw = String(oRow.stage ?? '');
+    const row: PurchaseOrderRow = {
+      id: String(oRow.id),
+      requester_employee_id: String(oRow.requester_employee_id),
+      stage: isPurchaseStage(stageRaw) ? stageRaw : 'Rascunho',
+      notes: (oRow.notes as string) ?? null,
+      created_at: String(oRow.created_at),
+      updated_at: String(oRow.updated_at),
+    };
+
+    const { data: it, error: itErr } = await supabase
+      .from('purchase_order_items')
+      .select('id, order_id, product_name, product_url, vendor, product_price, quantity_requested, quantity_received, received_at, notes, created_at, updated_at')
+      .eq('order_id', orderId)
+      .order('created_at', { ascending: true });
+    if (itErr) {
+      console.error('Error fetching order items:', itErr);
+    }
+    const itemList: PurchaseOrderItemRow[] = (it || []).map((r: unknown) => {
+      const row = r as Record<string, unknown>;
+      return {
+        id: String(row.id),
+        order_id: String(row.order_id),
+        product_name: (row.product_name as string) ?? null,
+        product_url: (row.product_url as string) ?? null,
+        vendor: (row.vendor as string) ?? null,
+        product_price: (row.product_price as string) ?? null,
+        quantity_requested: Number(row.quantity_requested ?? 0),
+        quantity_received: Number(row.quantity_received ?? 0),
+        received_at: (row.received_at as string) ?? null,
+        notes: (row.notes as string) ?? null,
+        created_at: String(row.created_at),
+        updated_at: String(row.updated_at),
+      };
+    });
+
+    const { data: empData } = await supabase
+      .from('employees')
+      .select('id, full_name, status')
+      .order('full_name', { ascending: true });
+
+    const empList: EmployeeLite[] = (empData || []).map((r: unknown) => {
+      const row = r as Record<string, unknown>;
+      return {
+        id: String(row.id),
+        full_name: String(row.full_name ?? ''),
+        status: row.status ? String(row.status) : undefined,
+      };
+    });
+    setEmployees(empList);
+    setItems(itemList);
+    setOrderStage(row.stage);
+    setRequesterId(row.requester_employee_id);
+    setNotes(row.notes || '');
+
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchAll();
+  }, [orderId]);
+
+  const totals = useMemo(() => {
+    const req = items.reduce((acc, it) => acc + (it.quantity_requested || 0), 0);
+    const rec = items.reduce((acc, it) => acc + (it.quantity_received || 0), 0);
+    const progress = req > 0 ? Math.min(100, Math.round((rec / req) * 100)) : 0;
+    return { req, rec, progress };
+  }, [items]);
+
+  const saveOrderHeader = async () => {
+    if (!orderId) return;
+    if (!requesterId) {
+      alert('Selecione um solicitante.');
+      return;
+    }
+    setSaving(true);
+    const { error } = await supabase
+      .from('purchase_orders')
+      .update({
+        requester_employee_id: requesterId,
+        stage: orderStage,
+        notes: notes.trim() || null,
+      })
+      .eq('id', orderId);
+    if (error) alert(`Erro ao salvar pedido: ${error.message}`);
+    await fetchAll();
+    setSaving(false);
+  };
+
+  const addItem = async () => {
+    if (!orderId) return;
+    const { error } = await supabase.from('purchase_order_items').insert([
+      {
+        order_id: orderId,
+        quantity_requested: 1,
+        quantity_received: 0,
+      },
+    ]);
+    if (error) alert(`Erro ao adicionar item: ${error.message}`);
+    else await fetchAll();
+  };
+
+  const deleteItem = async (id: string) => {
+    if (!confirm('Remover este item do pedido?')) return;
+    const { error } = await supabase.from('purchase_order_items').delete().eq('id', id);
+    if (error) alert(`Erro ao remover item: ${error.message}`);
+    else setItems((prev) => prev.filter((x) => x.id !== id));
+  };
+
+  const updateItem = async (id: string, patch: Partial<PurchaseOrderItemRow>) => {
+    setItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));
+    const dbPatch: Record<string, unknown> = { ...patch };
+    // Ensure received_at set when quantity_received reaches requested
+    if (typeof patch.quantity_received === 'number') {
+      const next = patch.quantity_received;
+      const cur = items.find((x) => x.id === id);
+      const requested = patch.quantity_requested ?? cur?.quantity_requested ?? 0;
+      if (next > 0 && next >= requested) {
+        dbPatch.received_at = new Date().toISOString();
+      } else if (next === 0) {
+        dbPatch.received_at = null;
+      }
+    }
+    const { error } = await supabase.from('purchase_order_items').update(dbPatch).eq('id', id);
+    if (error) {
+      alert(`Erro ao salvar item: ${error.message}`);
+      await fetchAll();
+    }
+  };
+
+  const pullFromLink = async (id: string, url: string) => {
+    const trimmed = url.trim();
+    if (!trimmed) return;
+    const idx = items.findIndex((x) => x.id === id);
+    if (idx === -1) return;
+    setLinkLoadingIdx(idx);
+    try {
+      const res = await fetch(`/api/link-metadata?url=${encodeURIComponent(trimmed)}`);
+      const json: unknown = await res.json();
+      if (!res.ok) {
+        const msg =
+          typeof json === 'object' && json && 'error' in json
+            ? String((json as { error?: unknown }).error ?? 'Não foi possível ler o link.')
+            : 'Não foi possível ler o link.';
+        alert(msg);
+        return;
+      }
+      const payload = json as { product_name?: string | null; vendor?: string | null; product_price?: string | null };
+      const cur = items[idx];
+      await updateItem(id, {
+        product_name: cur.product_name || (payload.product_name ?? null),
+        vendor: cur.vendor || (payload.vendor ?? null),
+        product_price: cur.product_price || (payload.product_price ?? null),
+      });
+    } finally {
+      setLinkLoadingIdx(null);
+    }
+  };
+
+  if (!orderId) return null;
+
+  return (
+    <div className="space-y-6 animate-in fade-in duration-500">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <Link href="/" className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-400 hover:text-primary">
+            <ArrowLeft size={20} />
+          </Link>
+          <div>
+            <h1 className="text-2xl font-bold text-primary">Editar Pedido</h1>
+            <p className="text-slate-500 text-sm">
+              {loading ? 'Carregando…' : `${totals.rec}/${totals.req} recebidos • ${totals.progress}%`}
+            </p>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => router.push('/orders')}
+            className="px-4 py-2 bg-white border border-slate-200 rounded-lg font-bold text-slate-600 hover:bg-slate-50"
+          >
+            Lista
+          </button>
+          <button
+            type="button"
+            onClick={() => void saveOrderHeader()}
+            disabled={saving}
+            className="px-4 py-2 bg-primary text-white rounded-lg font-bold hover:bg-slate-800 disabled:opacity-50 flex items-center gap-2"
+          >
+            {saving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}
+            Salvar
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="bg-white p-8 rounded-2xl border border-border shadow-sm text-center text-slate-500">
+          <Loader2 className="animate-spin inline mr-2" size={18} />
+          Carregando pedido…
+        </div>
+      ) : (
+        <>
+          <div className="bg-white p-6 rounded-2xl border border-border shadow-sm space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-1">
+                <label className="text-xs font-bold uppercase text-slate-500">Solicitante (Funcionário) *</label>
+                <select
+                  required
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none text-sm font-medium"
+                  value={requesterId}
+                  onChange={(e) => setRequesterId(e.target.value)}
+                >
+                  <option value="">Selecione…</option>
+                  {employees.map((emp) => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.full_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold uppercase text-slate-500">Estágio</label>
+                <select
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none text-sm font-medium"
+                  value={orderStage}
+                  onChange={(e) => setOrderStage(e.target.value as PurchaseStage)}
+                >
+                  {PURCHASE_STAGES.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold uppercase text-slate-500">Observações</label>
+                <input
+                  type="text"
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none text-sm"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden">
+            <div className="p-6 border-b bg-slate-50 flex items-center justify-between">
+              <h2 className="font-bold text-primary">Itens do pedido</h2>
+              <button
+                type="button"
+                onClick={() => void addItem()}
+                className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-slate-800 transition-all font-medium text-sm"
+              >
+                <Plus size={16} />
+                Adicionar item
+              </button>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead className="bg-slate-50 border-b border-border">
+                  <tr>
+                    <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Produto</th>
+                    <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Fornecedor</th>
+                    <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Qtd. pedida</th>
+                    <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Qtd. recebida</th>
+                    <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Preço</th>
+                    <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Ações</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {items.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="px-6 py-10 text-center text-slate-400 italic">
+                        Nenhum item. Clique em “Adicionar item”.
+                      </td>
+                    </tr>
+                  ) : (
+                    items.map((it, idx) => (
+                      <tr key={it.id} className="hover:bg-slate-50 transition-colors">
+                        <td className="px-6 py-4">
+                          <div className="space-y-2">
+                            <input
+                              type="text"
+                              className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg outline-none text-sm font-bold text-primary"
+                              placeholder="Nome do produto"
+                              value={it.product_name || ''}
+                              onChange={(e) => void updateItem(it.id, { product_name: e.target.value })}
+                            />
+                            <div className="flex gap-2">
+                              <input
+                                type="url"
+                                className="flex-1 p-2 bg-slate-50 border border-slate-200 rounded-lg outline-none text-xs font-mono"
+                                placeholder="Link do produto"
+                                value={it.product_url || ''}
+                                onChange={(e) => void updateItem(it.id, { product_url: e.target.value })}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => void pullFromLink(it.id, it.product_url || '')}
+                                disabled={linkLoadingIdx === idx || !(it.product_url || '').trim()}
+                                className="px-3 py-2 bg-white border border-slate-200 rounded-lg font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50 flex items-center gap-2 text-xs"
+                                title="Puxar nome/infos do link"
+                              >
+                                {linkLoadingIdx === idx ? <Loader2 className="animate-spin" size={14} /> : <Wand2 size={14} />}
+                                Puxar
+                              </button>
+                              {it.product_url && (
+                                <a
+                                  href={it.product_url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="px-3 py-2 bg-white border border-slate-200 rounded-lg font-bold text-slate-600 hover:bg-slate-50 flex items-center gap-2 text-xs"
+                                  title="Abrir link"
+                                >
+                                  <LinkIcon size={14} />
+                                  Abrir
+                                </a>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <input
+                            type="text"
+                            className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg outline-none text-sm"
+                            placeholder="Fornecedor"
+                            value={it.vendor || ''}
+                            onChange={(e) => void updateItem(it.id, { vendor: e.target.value })}
+                          />
+                        </td>
+                        <td className="px-6 py-4">
+                          <input
+                            type="number"
+                            min={1}
+                            className="w-24 p-2 bg-slate-50 border border-slate-200 rounded-lg outline-none font-bold"
+                            value={it.quantity_requested}
+                            onChange={(e) =>
+                              void updateItem(it.id, {
+                                quantity_requested: clampNumber(Number(e.target.value), 1, 1_000_000),
+                                quantity_received: clampNumber(it.quantity_received, 0, clampNumber(Number(e.target.value), 1, 1_000_000)),
+                              })
+                            }
+                            onFocus={(e) => e.target.select()}
+                          />
+                        </td>
+                        <td className="px-6 py-4">
+                          <input
+                            type="number"
+                            min={0}
+                            max={it.quantity_requested}
+                            className="w-24 p-2 bg-slate-50 border border-slate-200 rounded-lg outline-none font-bold"
+                            value={it.quantity_received}
+                            onChange={(e) =>
+                              void updateItem(it.id, {
+                                quantity_received: clampNumber(Number(e.target.value), 0, it.quantity_requested),
+                              })
+                            }
+                            onFocus={(e) => e.target.select()}
+                          />
+                        </td>
+                        <td className="px-6 py-4">
+                          <input
+                            type="text"
+                            className="w-28 p-2 bg-slate-50 border border-slate-200 rounded-lg outline-none font-mono text-sm"
+                            placeholder="R$ 0,00"
+                            value={it.product_price || ''}
+                            onChange={(e) => void updateItem(it.id, { product_price: e.target.value })}
+                          />
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <button
+                            type="button"
+                            onClick={() => void deleteItem(it.id)}
+                            className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-red-500"
+                            title="Remover item"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+export default function OrderDetailPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-center text-slate-500">Carregando pedido...</div>}>
+      <OrderDetailContent />
+    </Suspense>
+  );
+}
+

@@ -4,96 +4,178 @@ export const dynamic = 'force-dynamic';
 
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Plus, Search, Link as LinkIcon, Loader2, Trash2 } from 'lucide-react';
+import { Plus, Search, Loader2, Trash2, ExternalLink } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
-import type { PurchaseRequestRow, PurchaseStage } from '@/lib/purchaseRequests';
-import { PURCHASE_STAGES, isPurchaseStage } from '@/lib/purchaseRequests';
-import { PurchaseRequestFormModal } from '@/components/PurchaseRequestFormModal';
+import Link from 'next/link';
+import type { EmployeeLite, PurchaseOrderItemRow, PurchaseOrderRow, PurchaseStage } from '@/lib/purchaseOrders';
+import { PURCHASE_STAGES, isPurchaseStage } from '@/lib/purchaseOrders';
+import { PurchaseOrderFormModal } from '@/components/PurchaseOrderFormModal';
 
 function OrdersContent() {
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
-  const [requests, setRequests] = useState<PurchaseRequestRow[]>([]);
+  const [orders, setOrders] = useState<PurchaseOrderRow[]>([]);
+  const [items, setItems] = useState<PurchaseOrderItemRow[]>([]);
+  const [employees, setEmployees] = useState<EmployeeLite[]>([]);
   const [search, setSearch] = useState(() => searchParams.get('q') || '');
   const [stageFilter, setStageFilter] = useState<'Todos' | PurchaseStage>('Todos');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const parseStageFilter = (v: string): 'Todos' | PurchaseStage => (v === 'Todos' ? 'Todos' : (v as PurchaseStage));
 
-  const fetchRequests = async () => {
+  const fetchOrders = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('purchase_requests')
-      .select('id, requester, vendor, product_name, product_url, product_price, stage, notes, created_at')
+    const { data: orderData, error: orderError } = await supabase
+      .from('purchase_orders')
+      .select('id, requester_employee_id, stage, notes, created_at, updated_at')
       .order('created_at', { ascending: false });
 
-    if (error) {
-      console.error('Error fetching purchase requests:', error);
-      setRequests([]);
+    if (orderError) {
+      console.error('Error fetching purchase orders:', orderError);
+      setOrders([]);
+      setItems([]);
+      setEmployees([]);
+      setLoading(false);
+      return;
+    }
+
+    const orderList: PurchaseOrderRow[] = (orderData || []).map((r: unknown) => {
+      const row = r as Record<string, unknown>;
+      const stageRaw = String(row.stage ?? '');
+      return {
+        id: String(row.id),
+        requester_employee_id: String(row.requester_employee_id),
+        stage: isPurchaseStage(stageRaw) ? stageRaw : 'Rascunho',
+        notes: (row.notes as string) ?? null,
+        created_at: String(row.created_at),
+        updated_at: String(row.updated_at),
+      };
+    });
+    setOrders(orderList);
+
+    const ids = orderList.map((o) => o.id);
+    if (ids.length === 0) {
+      setItems([]);
     } else {
-      const list: PurchaseRequestRow[] = (data || []).map((r: unknown) => {
+      const { data: itemData, error: itemError } = await supabase
+        .from('purchase_order_items')
+        .select('id, order_id, product_name, product_url, vendor, product_price, quantity_requested, quantity_received, received_at, notes, created_at, updated_at')
+        .in('order_id', ids);
+      if (itemError) {
+        console.error('Error fetching order items:', itemError);
+        setItems([]);
+      } else {
+        const itemList: PurchaseOrderItemRow[] = (itemData || []).map((r: unknown) => {
+          const row = r as Record<string, unknown>;
+          return {
+            id: String(row.id),
+            order_id: String(row.order_id),
+            product_name: (row.product_name as string) ?? null,
+            product_url: (row.product_url as string) ?? null,
+            vendor: (row.vendor as string) ?? null,
+            product_price: (row.product_price as string) ?? null,
+            quantity_requested: Number(row.quantity_requested ?? 0),
+            quantity_received: Number(row.quantity_received ?? 0),
+            received_at: (row.received_at as string) ?? null,
+            notes: (row.notes as string) ?? null,
+            created_at: String(row.created_at),
+            updated_at: String(row.updated_at),
+          };
+        });
+        setItems(itemList);
+      }
+    }
+
+    const { data: empData, error: empError } = await supabase
+      .from('employees')
+      .select('id, full_name, status')
+      .order('full_name', { ascending: true });
+    if (empError) {
+      console.error('Error fetching employees:', empError);
+      setEmployees([]);
+    } else {
+      const list: EmployeeLite[] = (empData || []).map((r: unknown) => {
         const row = r as Record<string, unknown>;
-        const stageRaw = String(row.stage ?? '');
         return {
           id: String(row.id),
-          requester: (row.requester as string) ?? null,
-          vendor: (row.vendor as string) ?? null,
-          product_name: (row.product_name as string) ?? null,
-          product_url: (row.product_url as string) ?? null,
-          product_price: (row.product_price as string) ?? null,
-          stage: isPurchaseStage(stageRaw) ? stageRaw : 'Rascunho',
-          notes: (row.notes as string) ?? null,
-          created_at: String(row.created_at),
+          full_name: String(row.full_name ?? ''),
+          status: row.status ? String(row.status) : undefined,
         };
       });
-      setRequests(list);
+      setEmployees(list);
     }
+
     setLoading(false);
   };
 
   useEffect(() => {
     // eslint-disable-next-line @typescript-eslint/no-floating-promises
-    fetchRequests();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchOrders();
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSearch(searchParams.get('q') || '');
   }, [searchParams]);
 
+  const employeeNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    employees.forEach((e) => map.set(e.id, e.full_name));
+    return map;
+  }, [employees]);
+
+  const itemsByOrderId = useMemo(() => {
+    const map = new Map<string, PurchaseOrderItemRow[]>();
+    items.forEach((it) => {
+      const bucket = map.get(it.order_id) || [];
+      bucket.push(it);
+      map.set(it.order_id, bucket);
+    });
+    return map;
+  }, [items]);
+
   const filtered = useMemo(() => {
     const s = search.trim().toLowerCase();
-    return requests.filter((r) => {
-      const matchesStage = stageFilter === 'Todos' || r.stage === stageFilter;
+    return orders.filter((o) => {
+      const matchesStage = stageFilter === 'Todos' || o.stage === stageFilter;
       if (!s) return matchesStage;
+      const requesterName = employeeNameById.get(o.requester_employee_id) || '';
+      const lineItems = itemsByOrderId.get(o.id) || [];
+      const itemBlob = lineItems
+        .flatMap((it) => [it.product_name, it.vendor, it.product_url, it.product_price, it.notes])
+        .filter(Boolean)
+        .join(' ');
       const blob = [
-        r.requester,
-        r.vendor,
-        r.product_name,
-        r.product_url,
-        r.product_price,
-        r.stage,
-        r.notes,
+        requesterName,
+        o.stage,
+        o.notes,
+        itemBlob,
       ]
         .filter(Boolean)
         .join(' ')
         .toLowerCase();
       return matchesStage && blob.includes(s);
     });
-  }, [requests, search, stageFilter]);
+  }, [orders, search, stageFilter, employeeNameById, itemsByOrderId]);
 
   const updateStage = async (id: string, stage: PurchaseStage) => {
-    setRequests((prev) => prev.map((r) => (r.id === id ? { ...r, stage } : r)));
-    const { error } = await supabase.from('purchase_requests').update({ stage }).eq('id', id);
+    setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, stage } : o)));
+    const { error } = await supabase.from('purchase_orders').update({ stage }).eq('id', id);
     if (error) {
       alert(`Erro ao atualizar estágio: ${error.message}`);
       // eslint-disable-next-line @typescript-eslint/no-floating-promises
-      fetchRequests();
+      fetchOrders();
     }
   };
 
-  const deleteRequest = async (id: string) => {
+  const deleteOrder = async (id: string) => {
     if (!confirm('Excluir este pedido? (Não apaga itens do almoxarifado)')) return;
-    const { error } = await supabase.from('purchase_requests').delete().eq('id', id);
+    const { error } = await supabase.from('purchase_orders').delete().eq('id', id);
     if (error) alert(`Erro ao excluir: ${error.message}`);
-    else setRequests((prev) => prev.filter((r) => r.id !== id));
+    else {
+      setOrders((prev) => prev.filter((o) => o.id !== id));
+      setItems((prev) => prev.filter((it) => it.order_id !== id));
+    }
   };
 
   return (
@@ -129,7 +211,7 @@ function OrdersContent() {
           <select
             className="bg-transparent border-none text-sm focus:ring-0 outline-none font-medium text-slate-600"
             value={stageFilter}
-            onChange={(e) => setStageFilter(e.target.value as any)}
+            onChange={(e) => setStageFilter(parseStageFilter(e.target.value))}
           >
             <option value="Todos">Todos</option>
             {PURCHASE_STAGES.map((s) => (
@@ -167,32 +249,31 @@ function OrdersContent() {
                   <td colSpan={6} className="px-6 py-12 text-center text-slate-400">Nenhum pedido encontrado.</td>
                 </tr>
               ) : (
-                filtered.map((r) => (
-                  <tr key={r.id} className="hover:bg-slate-50 transition-colors">
+                filtered.map((o) => {
+                  const lineItems = itemsByOrderId.get(o.id) || [];
+                  const itemCount = lineItems.length;
+                  const qtyReq = lineItems.reduce((acc, it) => acc + (it.quantity_requested || 0), 0);
+                  const qtyRec = lineItems.reduce((acc, it) => acc + (it.quantity_received || 0), 0);
+                  const requesterName = employeeNameById.get(o.requester_employee_id) || '—';
+                  const title = lineItems[0]?.product_name || `Pedido (${itemCount} itens)`;
+                  return (
+                  <tr key={o.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-6 py-4">
                       <div className="font-bold text-primary text-sm">
-                        {r.product_name || <span className="text-slate-300 italic font-medium">Sem nome</span>}
+                        {title}
                       </div>
-                      {r.product_url && (
-                        <a
-                          href={r.product_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-[10px] text-secondary font-bold inline-flex items-center gap-1 mt-1 hover:underline"
-                        >
-                          <LinkIcon size={12} />
-                          Abrir link
-                        </a>
-                      )}
+                      <div className="text-[10px] text-slate-400 font-bold mt-1">
+                        {itemCount} itens • {qtyRec}/{qtyReq} recebidos
+                      </div>
                     </td>
-                    <td className="px-6 py-4 text-sm text-slate-600 font-medium">{r.requester || '—'}</td>
-                    <td className="px-6 py-4 text-sm text-slate-600 font-medium">{r.vendor || '—'}</td>
-                    <td className="px-6 py-4 text-sm text-slate-600 font-mono">{r.product_price || '—'}</td>
+                    <td className="px-6 py-4 text-sm text-slate-600 font-medium">{requesterName}</td>
+                    <td className="px-6 py-4 text-sm text-slate-600 font-medium">{lineItems[0]?.vendor || '—'}</td>
+                    <td className="px-6 py-4 text-sm text-slate-600 font-mono">{lineItems[0]?.product_price || '—'}</td>
                     <td className="px-6 py-4">
                       <select
                         className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-slate-700 outline-none"
-                        value={r.stage}
-                        onChange={(e) => updateStage(r.id, e.target.value as PurchaseStage)}
+                        value={o.stage}
+                        onChange={(e) => updateStage(o.id, e.target.value as PurchaseStage)}
                       >
                         {PURCHASE_STAGES.map((s) => (
                           <option key={s} value={s}>
@@ -202,9 +283,17 @@ function OrdersContent() {
                       </select>
                     </td>
                     <td className="px-6 py-4 text-right">
+                      <Link
+                        href={`/orders/${o.id}`}
+                        className="inline-flex items-center gap-2 mr-2 text-primary bg-white border border-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-slate-50"
+                        title="Abrir pedido"
+                      >
+                        <ExternalLink size={14} />
+                        Abrir
+                      </Link>
                       <button
                         type="button"
-                        onClick={() => deleteRequest(r.id)}
+                        onClick={() => deleteOrder(o.id)}
                         className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-red-500"
                         title="Excluir pedido"
                       >
@@ -212,19 +301,20 @@ function OrdersContent() {
                       </button>
                     </td>
                   </tr>
-                ))
+                );
+                })
               )}
             </tbody>
           </table>
         </div>
       </div>
 
-      <PurchaseRequestFormModal
+      <PurchaseOrderFormModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         onSaved={() => {
           // eslint-disable-next-line @typescript-eslint/no-floating-promises
-          fetchRequests();
+          fetchOrders();
         }}
       />
     </div>
