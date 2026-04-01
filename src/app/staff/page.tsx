@@ -2,8 +2,9 @@
 
 export const dynamic = 'force-dynamic';
 
-import { useMemo, useState, useEffect } from 'react';
+import { useCallback, useMemo, useRef, useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { recordMovement, updatePossessionQuantity, updateStock } from '@/lib/movements';
 import { Search, UserPlus, Mail, Phone, ExternalLink, X, FileUp, Filter, Package, AlertCircle, History, RotateCcw, Download, Loader2, ArrowLeft, FileText } from 'lucide-react';
 import ImportSpreadsheet from '@/components/ImportSpreadsheet';
 import { downloadEpiFichaPdf } from '@/lib/epiFichaPdf';
@@ -52,7 +53,7 @@ export default function StaffPage() {
   // Modals for actions
   const [timelineEmployee, setTimelineEmployee] = useState<Employee | null>(null);
   const [movements, setMovements] = useState<any[]>([]);
-  const [walletEmployee, setWalletEmployee] = useState<Employee | null>(null);
+  const [walletEmployeeId, setWalletEmployeeId] = useState<string | null>(null);
   const [walletMovements, setWalletMovements] = useState<any[]>([]);
   const [walletLoading, setWalletLoading] = useState(false);
   const [walletError, setWalletError] = useState<string | null>(null);
@@ -64,6 +65,7 @@ export default function StaffPage() {
     consumable: boolean;
     maxQty: number;
   } | null>(null);
+  const walletReqIdRef = useRef(0);
   const [returnItem, setReturnItem] = useState<{employeeId: string, item: Possession} | null>(null);
   const [returnQty, setReturnQty] = useState<number>(0);
   const [epiFichaEmployee, setEpiFichaEmployee] = useState<Employee | null>(null);
@@ -149,19 +151,37 @@ export default function StaffPage() {
     return all;
   };
 
-  const openWallet = async (employee: Employee) => {
-    setWalletEmployee(employee);
-    setWalletLoading(true);
-    setWalletError(null);
-    try {
-      const all = await fetchAllEmployeeMovements(employee.id);
-      setWalletMovements(all);
-    } catch (err: any) {
+  const walletEmployee = useMemo(() => {
+    if (!walletEmployeeId) return null;
+    return employees.find((e) => e.id === walletEmployeeId) || null;
+  }, [employees, walletEmployeeId]);
+
+  const reloadWallet = useCallback(
+    async (employeeId: string) => {
+      const reqId = ++walletReqIdRef.current;
+      setWalletLoading(true);
+      setWalletError(null);
       setWalletMovements([]);
-      setWalletError(err?.message ? String(err.message) : 'Falha ao carregar histórico completo.');
-    } finally {
-      setWalletLoading(false);
-    }
+      try {
+        const all = await fetchAllEmployeeMovements(employeeId);
+        if (walletReqIdRef.current !== reqId) return; // ignore stale request
+        setWalletMovements(all);
+      } catch (err: any) {
+        if (walletReqIdRef.current !== reqId) return;
+        setWalletMovements([]);
+        setWalletError(err?.message ? String(err.message) : 'Falha ao carregar histórico completo.');
+      } finally {
+        if (walletReqIdRef.current === reqId) setWalletLoading(false);
+      }
+    },
+    []
+  );
+
+  const openWallet = async (employee: Employee) => {
+    setWalletEmployeeId(employee.id);
+    setWalletReturn(null);
+    setReturnQty(0);
+    await reloadWallet(employee.id);
   };
 
   const downloadFullHistory = async (employee: Employee) => {
@@ -278,34 +298,32 @@ export default function StaffPage() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    // 1. Process Return Movement
-    await supabase.from('movements').insert([{
+    // 1) Movement IN
+    const mvRes = await recordMovement(supabase, {
       item_id: returnItem.item.item_id,
       employee_id: returnItem.employeeId,
       quantity: returnQty,
       type: 'IN',
-      performed_by: user.id
-    }]);
-
-    // 2. Update Possession
-    const newQty = returnItem.item.quantity - returnQty;
-    if (newQty <= 0) {
-      await supabase.from('possession').delete().match({ 
-        employee_id: returnItem.employeeId, 
-        item_id: returnItem.item.item_id 
-      });
-    } else {
-      await supabase.from('possession').update({ quantity: newQty }).match({ 
-        employee_id: returnItem.employeeId, 
-        item_id: returnItem.item.item_id 
-      });
+      performed_by: user.id,
+    });
+    if (!mvRes.ok) {
+      alert(mvRes.message);
+      setIsSubmitting(false);
+      return;
     }
 
-    // 3. Update Inventory
-    await supabase.rpc('update_stock', { 
-      p_item_id: returnItem.item.item_id, 
-      p_quantity: returnQty 
-    });
+    // 2) Possession decrement/delete
+    const newQty = returnItem.item.quantity - returnQty;
+    const posRes = await updatePossessionQuantity(supabase, returnItem.employeeId, returnItem.item.item_id, newQty, user.id);
+    if (!posRes.ok) {
+      alert(posRes.message);
+      setIsSubmitting(false);
+      return;
+    }
+
+    // 3) Stock +
+    const stockRes = await updateStock(supabase, returnItem.item.item_id, returnQty);
+    if (!stockRes.ok) console.error(stockRes.message);
 
     setReturnItem(null);
     setIsSubmitting(false);
@@ -330,24 +348,43 @@ export default function StaffPage() {
       .sort((a, b) => b.balance - a.balance);
   }, [walletMovements]);
 
+  const walletBalanceByItemId = useMemo(() => {
+    const map = new Map<string, number>();
+    walletBalances.forEach((x) => map.set(String(x.item_id), Number(x.balance || 0)));
+    return map;
+  }, [walletBalances]);
+
   const handleWalletReturn = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!walletReturn || returnQty <= 0) return;
+
+    if (walletReturn.consumable) {
+      const curBal = walletBalanceByItemId.get(String(walletReturn.item_id)) || 0;
+      if (returnQty > curBal) {
+        alert(`Quantidade maior que o saldo em aberto (${curBal}).`);
+        return;
+      }
+    }
     setIsSubmitting(true);
 
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
     // 1) movement IN
-    await supabase.from('movements').insert([{
+    const mvRes = await recordMovement(supabase, {
       item_id: walletReturn.item_id,
       employee_id: walletReturn.employeeId,
       quantity: returnQty,
       type: 'IN',
-      performed_by: user.id
-    }]);
+      performed_by: user.id,
+    });
+    if (!mvRes.ok) {
+      alert(mvRes.message);
+      setIsSubmitting(false);
+      return;
+    }
 
-    // 2) consumable: no possession update (only stock)
+    // 2) non-consumable: possession update
     if (!walletReturn.consumable) {
       const { data: currentPos } = await supabase
         .from('possession')
@@ -357,27 +394,23 @@ export default function StaffPage() {
         .maybeSingle();
       const cur = Number(currentPos?.quantity || 0);
       const next = cur - returnQty;
-      if (next <= 0) await supabase.from('possession').delete().match({ employee_id: walletReturn.employeeId, item_id: walletReturn.item_id });
-      else await supabase.from('possession').upsert({ employee_id: walletReturn.employeeId, item_id: walletReturn.item_id, quantity: next, user_id: user.id }, { onConflict: 'employee_id,item_id' });
+      const posRes = await updatePossessionQuantity(supabase, walletReturn.employeeId, walletReturn.item_id, next, user.id);
+      if (!posRes.ok) {
+        alert(posRes.message);
+        setIsSubmitting(false);
+        return;
+      }
     }
 
     // 3) stock +
-    await supabase.rpc('update_stock', { p_item_id: walletReturn.item_id, p_quantity: returnQty });
+    const stockRes = await updateStock(supabase, walletReturn.item_id, returnQty);
+    if (!stockRes.ok) console.error(stockRes.message);
 
     setWalletReturn(null);
     setIsSubmitting(false);
-    if (walletEmployee) {
+    if (walletEmployeeId) {
       await fetchEmployees();
-      // reload wallet movements
-      setWalletLoading(true);
-      try {
-        const all = await fetchAllEmployeeMovements(walletEmployee.id);
-        setWalletMovements(all);
-      } catch (err: any) {
-        setWalletError(err?.message ? String(err.message) : 'Falha ao atualizar histórico.');
-      } finally {
-        setWalletLoading(false);
-      }
+      await reloadWallet(walletEmployeeId);
     }
   };
 
@@ -798,15 +831,24 @@ export default function StaffPage() {
       )}
 
       {/* Modal Carteira Completa */}
-      {walletEmployee && (
+      {walletEmployeeId && (
         <div className="fixed inset-0 bg-primary/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in duration-300">
             <div className="p-6 border-b bg-slate-50 flex items-center justify-between shrink-0">
               <div>
                 <h3 className="text-xl font-bold text-primary">Carteira do colaborador</h3>
-                <p className="text-xs text-slate-500 mt-1 font-medium">{walletEmployee.full_name}</p>
+                <p className="text-xs text-slate-500 mt-1 font-medium">{walletEmployee?.full_name || '—'}</p>
               </div>
-              <button onClick={() => { setWalletEmployee(null); setWalletMovements([]); }} className="p-2 hover:bg-slate-200 rounded-full">
+              <button
+                onClick={() => {
+                  setWalletEmployeeId(null);
+                  setWalletMovements([]);
+                  setWalletError(null);
+                  setWalletReturn(null);
+                  setReturnQty(0);
+                }}
+                className="p-2 hover:bg-slate-200 rounded-full"
+              >
                 <X size={20} />
               </button>
             </div>
@@ -823,11 +865,11 @@ export default function StaffPage() {
                   <div className="p-4 border-b bg-slate-50 flex items-center justify-between">
                     <div className="text-xs font-black text-primary uppercase">Itens em posse (não consumíveis)</div>
                     <div className="text-xs font-bold text-slate-500">
-                      {(walletEmployee.possession || []).filter((p) => p.quantity > 0 && !!p.items && !p.items.consumable).length}
+                      {(walletEmployee?.possession || []).filter((p) => p.quantity > 0 && !!p.items && !p.items.consumable).length}
                     </div>
                   </div>
                   <div className="p-4 space-y-2">
-                    {(walletEmployee.possession || [])
+                    {(walletEmployee?.possession || [])
                       .filter((p) => p.quantity > 0 && !!p.items && !p.items.consumable)
                       .map((p, idx) => (
                         <div key={idx} className="flex items-center justify-between bg-slate-50 border border-slate-100 rounded-xl px-3 py-2">
@@ -839,7 +881,18 @@ export default function StaffPage() {
                             <div className="text-sm font-black text-primary">x{p.quantity}</div>
                             <button
                               type="button"
-                              onClick={() => { setWalletReturn({ employeeId: walletEmployee.id, item_id: p.item_id, description: p.items.description, unit: p.items.unit, consumable: false, maxQty: p.quantity }); setReturnQty(p.quantity); }}
+                              onClick={() => {
+                                if (!walletEmployeeId) return;
+                                setWalletReturn({
+                                  employeeId: walletEmployeeId,
+                                  item_id: p.item_id,
+                                  description: p.items.description,
+                                  unit: p.items.unit,
+                                  consumable: false,
+                                  maxQty: p.quantity,
+                                });
+                                setReturnQty(p.quantity);
+                              }}
                               className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-black text-slate-600 hover:bg-slate-50"
                               title="Devolver (remove da carteira e devolve ao estoque)"
                             >
@@ -848,7 +901,7 @@ export default function StaffPage() {
                           </div>
                         </div>
                       ))}
-                    {(walletEmployee.possession || []).filter((p) => p.quantity > 0 && !!p.items && !p.items.consumable).length === 0 && (
+                    {(walletEmployee?.possession || []).filter((p) => p.quantity > 0 && !!p.items && !p.items.consumable).length === 0 && (
                       <div className="text-sm text-slate-400 italic">Sem itens não consumíveis em posse.</div>
                     )}
                   </div>
@@ -878,7 +931,18 @@ export default function StaffPage() {
                             <div className="text-sm font-black text-amber-900">x{c.balance}</div>
                             <button
                               type="button"
-                              onClick={() => { setWalletReturn({ employeeId: walletEmployee.id, item_id: c.item_id, description: c.description, unit: c.unit, consumable: true, maxQty: c.balance }); setReturnQty(c.balance); }}
+                              onClick={() => {
+                                if (!walletEmployeeId) return;
+                                setWalletReturn({
+                                  employeeId: walletEmployeeId,
+                                  item_id: c.item_id,
+                                  description: c.description,
+                                  unit: c.unit,
+                                  consumable: true,
+                                  maxQty: c.balance,
+                                });
+                                setReturnQty(c.balance);
+                              }}
                               className="px-3 py-1.5 bg-white border border-amber-200 rounded-lg text-xs font-black text-amber-800 hover:bg-amber-50"
                               title="Registrar devolução de consumível (só estoque + histórico)"
                             >
@@ -898,7 +962,7 @@ export default function StaffPage() {
                   <div className="flex gap-2">
                     <button
                       type="button"
-                      onClick={() => void downloadFullHistory(walletEmployee)}
+                      onClick={() => walletEmployee && void downloadFullHistory(walletEmployee)}
                       className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-black text-slate-600 hover:bg-slate-50 flex items-center gap-2"
                       title="Baixar histórico completo em TXT"
                     >
@@ -943,8 +1007,9 @@ export default function StaffPage() {
                                   const maxQty = consumable
                                     ? (walletBalances.find((x) => x.item_id === String(m.item_id))?.balance ?? Number(m.quantity || 0))
                                     : Number(m.quantity || 0);
+                                  if (!walletEmployeeId) return;
                                   setWalletReturn({
-                                    employeeId: walletEmployee.id,
+                                    employeeId: walletEmployeeId,
                                     item_id: String(m.item_id),
                                     description: String(m.items?.description || '—'),
                                     unit: String(m.items?.unit || 'un'),

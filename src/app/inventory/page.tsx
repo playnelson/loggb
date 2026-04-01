@@ -66,6 +66,8 @@ function InventoryContent() {
   const [historyItem, setHistoryItem] = useState<Product | null>(null);
   const [itemMovements, setItemMovements] = useState<any[]>([]);
   const [activePopover, setActivePopover] = useState<string | null>(null);
+  const [adjustItem, setAdjustItem] = useState<Product | null>(null);
+  const [adjustQty, setAdjustQty] = useState<number>(0);
 
   // Quick Movement State
   const [isQuickMovementOpen, setIsQuickMovementOpen] = useState(false);
@@ -106,10 +108,10 @@ function InventoryContent() {
       return;
     }
 
-    const list = (data || []).map((c) => ({
+    const list = (data || []).map((c: { id: unknown; name: unknown; locked: unknown }) => ({
       id: String(c.id),
-      name: String((c as any).name),
-      locked: Boolean((c as any).locked),
+      name: String(c.name ?? ''),
+      locked: Boolean(c.locked),
     })) as ItemCategory[];
 
     // Ensure defaults (client-side seed per user)
@@ -128,10 +130,10 @@ function InventoryContent() {
         .select('id, name, locked')
         .order('locked', { ascending: false })
         .order('name', { ascending: true });
-      const list2 = (data2 || []).map((c) => ({
+      const list2 = (data2 || []).map((c: { id: unknown; name: unknown; locked: unknown }) => ({
         id: String(c.id),
-        name: String((c as any).name),
-        locked: Boolean((c as any).locked),
+        name: String(c.name ?? ''),
+        locked: Boolean(c.locked),
       })) as ItemCategory[];
       setCategories(list2);
       return;
@@ -258,6 +260,46 @@ function InventoryContent() {
       .order('created_at', { ascending: false })
       .limit(30);
     setItemMovements(data || []);
+  };
+
+  const handleAdjustStock = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adjustItem) return;
+    const qty = Number(adjustQty || 0);
+    if (!Number.isFinite(qty) || qty === 0) return;
+    setIsSubmitting(true);
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      alert('Usuário não autenticado.');
+      setIsSubmitting(false);
+      return;
+    }
+
+    const type = qty > 0 ? 'IN' : 'OUT';
+    const abs = Math.abs(qty);
+
+    const { error: moveError } = await supabase.from('movements').insert([{
+      item_id: adjustItem.id,
+      employee_id: null,
+      quantity: abs,
+      type,
+      performed_by: user.id
+    }]);
+    if (moveError) {
+      alert(`Erro ao registrar ajuste: ${moveError.message}`);
+      setIsSubmitting(false);
+      return;
+    }
+
+    const { error: stockError } = await supabase.rpc('update_stock', { p_item_id: adjustItem.id, p_quantity: qty });
+    if (stockError) console.error(stockError);
+
+    setAdjustItem(null);
+    setAdjustQty(0);
+    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+    fetchProducts();
+    setIsSubmitting(false);
   };
 
   const handleDelete = async (id: string, name: string) => {
@@ -826,11 +868,26 @@ function InventoryContent() {
                   <label className="text-xs font-bold uppercase text-secondary">Qtd. em Estoque</label>
                   <input 
                     type="number" 
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none font-bold"
+                    disabled={!!editingItem}
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none font-bold disabled:opacity-60"
                     value={formData.quantity_current === 0 ? '' : formData.quantity_current}
                     onChange={(e) => setFormData({...formData, quantity_current: Number(e.target.value)})}
                     onFocus={(e) => e.target.select()}
                   />
+                  {editingItem && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!editingItem) return;
+                        setAdjustItem(editingItem);
+                        setAdjustQty(0);
+                      }}
+                      className="mt-2 w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs font-black text-slate-600 hover:bg-slate-50"
+                      title="Ajustar saldo com histórico"
+                    >
+                      Ajustar estoque (com histórico)
+                    </button>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold uppercase text-red-500">Alerta Mínimo</label>
@@ -874,6 +931,62 @@ function InventoryContent() {
           fetchProducts();
         }}
       />
+
+      {/* Modal Ajuste de Estoque */}
+      {adjustItem && (
+        <div className="fixed inset-0 bg-primary/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in duration-300">
+            <div className="p-6 border-b border-border bg-slate-50 flex items-center justify-between">
+              <div>
+                <h3 className="text-xl font-bold text-primary">Ajustar estoque</h3>
+                <p className="text-xs text-slate-500 mt-1">{adjustItem.description}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setAdjustItem(null); setAdjustQty(0); }}
+                className="p-2 hover:bg-slate-200 rounded-full"
+                aria-label="Fechar"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <form onSubmit={handleAdjustStock} className="p-6 space-y-4">
+              <div className="space-y-1">
+                <label className="text-xs font-bold uppercase text-slate-400">
+                  Quantidade do ajuste (use positivo ou negativo)
+                </label>
+                <input
+                  type="number"
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none font-black text-lg"
+                  value={adjustQty === 0 ? '' : adjustQty}
+                  onChange={(e) => setAdjustQty(Number(e.target.value))}
+                  onFocus={(e) => e.target.select()}
+                  placeholder="Ex.: 5 ou -2"
+                />
+                <div className="text-[11px] text-slate-500 font-bold">
+                  Isso cria uma movimentação no histórico e atualiza o saldo.
+                </div>
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => { setAdjustItem(null); setAdjustQty(0); }}
+                  className="flex-1 p-3 border border-slate-200 rounded-xl font-bold text-slate-500 hover:bg-slate-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting || adjustQty === 0}
+                  className="flex-1 p-3 bg-primary text-white rounded-xl font-bold hover:bg-slate-800 disabled:opacity-50"
+                >
+                  {isSubmitting ? 'Salvando...' : 'Confirmar ajuste'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -4,6 +4,7 @@ export const dynamic = 'force-dynamic';
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { recordMovement, updatePossessionQuantity, updateStock } from '@/lib/movements';
 import { ShoppingCart, User, Package, ArrowRight, CheckCircle2, History, Loader2, Clock } from 'lucide-react';
 
 interface Product {
@@ -80,22 +81,18 @@ export default function MovementPage() {
       return;
     }
 
-    // 1. Record Movement
-    const { error: moveError } = await supabase.from('movements').insert([
-      { 
-        item_id: selectedProduct, 
-        employee_id: selectedEmployee, 
-        quantity, 
-        type: 'OUT',
-        performed_by: user.id
-      }
-    ]);
-
-    if (moveError) {
-       console.error('Movement record error:', moveError);
-       alert('Erro ao registrar movimentação.');
-       setLoading(false);
-       return;
+    // 1) Movement OUT
+    const mvRes = await recordMovement(supabase, {
+      item_id: selectedProduct,
+      employee_id: selectedEmployee,
+      quantity,
+      type: 'OUT',
+      performed_by: user.id,
+    });
+    if (!mvRes.ok) {
+      alert(mvRes.message);
+      setLoading(false);
+      return;
     }
 
     // 2. Update Possession (UPSERT) - ONLY for non-consumables
@@ -109,19 +106,17 @@ export default function MovementPage() {
         .single();
       
       const newQty = (currentPos?.quantity || 0) + quantity;
-      await supabase.from('possession').upsert({
-        employee_id: selectedEmployee,
-        item_id: selectedProduct,
-        quantity: newQty,
-        user_id: user.id
-      }, { onConflict: 'employee_id,item_id' });
+      const posRes = await updatePossessionQuantity(supabase, selectedEmployee, selectedProduct, newQty, user.id);
+      if (!posRes.ok) {
+        alert(posRes.message);
+        setLoading(false);
+        return;
+      }
     }
 
     // 3. Update stock quantity locally and in DB (RPC should handle DB if set up, elsewhere manual)
-    await supabase.rpc('update_stock', { 
-      p_item_id: selectedProduct, 
-      p_quantity: -quantity 
-    });
+    const stockRes = await updateStock(supabase, selectedProduct, -quantity);
+    if (!stockRes.ok) console.error(stockRes.message);
 
     setSuccess(true);
     setLoading(false);

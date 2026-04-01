@@ -2,7 +2,7 @@
 
 export const dynamic = 'force-dynamic';
 
-import { useState, useEffect } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { 
   History, 
@@ -40,6 +40,8 @@ export default function HistoryPage() {
   const [typeFilter, setTypeFilter] = useState('ALL');
   const [dateFilter, setDateFilter] = useState('');
 
+  const searchLower = useMemo(() => searchTerm.trim().toLowerCase(), [searchTerm]);
+
   const fetchMovements = async () => {
     setLoading(true);
     let query = supabase
@@ -52,10 +54,10 @@ export default function HistoryPage() {
     }
 
     if (dateFilter) {
-      // Filter by date (YYYY-MM-DD)
-      const startOfDay = `${dateFilter}T00:00:00Z`;
-      const endOfDay = `${dateFilter}T23:59:59Z`;
-      query = query.gte('created_at', startOfDay).lte('created_at', endOfDay);
+      // Filter by local day boundaries to avoid timezone "missing rows".
+      const start = new Date(`${dateFilter}T00:00:00`);
+      const end = new Date(`${dateFilter}T23:59:59.999`);
+      query = query.gte('created_at', start.toISOString()).lte('created_at', end.toISOString());
     }
 
     const { data, error } = await query;
@@ -63,7 +65,7 @@ export default function HistoryPage() {
     if (error) {
       console.error('Error fetching history:', error);
     } else {
-      setMovements(data as any || []);
+      setMovements(((data as unknown) as Movement[]) || []);
     }
     setLoading(false);
   };
@@ -73,10 +75,20 @@ export default function HistoryPage() {
     fetchMovements();
   }, [typeFilter, dateFilter]);
 
-  const filteredMovements = movements.filter(m =>
-    m.items?.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    m.employees?.full_name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredMovements = useMemo(() => {
+    if (!searchLower) return movements;
+    return movements.filter((m) => {
+      const item = (m.items?.description || '').toLowerCase();
+      const emp = (m.employees?.full_name || '').toLowerCase();
+      return item.includes(searchLower) || emp.includes(searchLower);
+    });
+  }, [movements, searchLower]);
+
+  const csvCell = (v: unknown): string => {
+    const s = v == null ? '' : String(v);
+    const escaped = s.replace(/"/g, '""');
+    return /[",\n\r]/.test(escaped) ? `"${escaped}"` : escaped;
+  };
 
   const downloadCSV = () => {
     const headers = ['Data', 'Tipo', 'Material', 'Funcionário', 'Quantidade', 'Unidade'];
@@ -89,7 +101,7 @@ export default function HistoryPage() {
       m.items?.unit
     ]);
 
-    const csvContent = [headers, ...rows].map(e => e.join(',')).join('\n');
+    const csvContent = [headers, ...rows].map((row) => row.map(csvCell).join(',')).join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);

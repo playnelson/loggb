@@ -2,6 +2,7 @@
 
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
+import { recordMovement, updateStock, updatePossessionQuantity } from '@/lib/movements';
 import { 
   X, 
   ArrowUpRight, 
@@ -95,24 +96,10 @@ export default function QuickMovementModal({
     return null;
   }, [item, needsEmployee, selectedEmployee, mode, effectiveQty, isUnique, tag]);
 
-  const insertMovement = useCallback(
-    async (payload: Record<string, unknown>) => {
-      const { error: err1 } = await supabase.from('movements').insert([payload]);
-      if (!err1) return null;
-
-      const msg = String(err1.message || '');
-      // If DB doesn't have the optional column yet, retry without it.
-      if (msg.toLowerCase().includes('column') && msg.toLowerCase().includes('tag')) {
-        const { tag: _tag, ...withoutTag } = payload as { tag?: unknown };
-        const { error: err2 } = await supabase.from('movements').insert([withoutTag]);
-        if (!err2) return null;
-        return err2;
-      }
-
-      return err1;
-    },
-    []
-  );
+  const insertMovement = useCallback(async (payload: Record<string, unknown>) => {
+    const res = await recordMovement(supabase, payload as any);
+    return res.ok ? null : new Error(res.message);
+  }, []);
 
   const handleAction = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -173,34 +160,18 @@ export default function QuickMovementModal({
         return;
       }
 
-      if (nextQty <= 0) {
-        await supabase.from('possession').delete().match({
-          employee_id: selectedEmployee,
-          item_id: item.id,
-        });
-      } else {
-        await supabase.from('possession').upsert(
-          {
-            employee_id: selectedEmployee,
-            item_id: item.id,
-            quantity: nextQty,
-            user_id: user.id,
-          },
-          { onConflict: 'employee_id,item_id' }
-        );
+      const posRes = await updatePossessionQuantity(supabase, selectedEmployee, item.id, nextQty, user.id);
+      if (!posRes.ok) {
+        setError(posRes.message);
+        setLoading(false);
+        return;
       }
     }
 
     // 3. Update stock quantity via RPC
     const rpcQty = mode === 'IN' ? effectiveQty : -effectiveQty;
-    const { error: stockError } = await supabase.rpc('update_stock', { 
-      p_item_id: item.id, 
-      p_quantity: rpcQty 
-    });
-
-    if (stockError) {
-      console.error('Stock update error:', stockError);
-    }
+    const stockRes = await updateStock(supabase, item.id, rpcQty);
+    if (!stockRes.ok) console.error('Stock update error:', stockRes.message);
 
     setSuccess(true);
     setLoading(false);

@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import * as XLSX from 'xlsx';
 import { supabase } from '@/lib/supabase';
 import { itemCodeFromDescription } from '@/lib/itemCode';
+import { recordMovement, updatePossessionQuantity, updateStock } from '@/lib/movements';
 import { FileUp, Loader2, CheckCircle2, AlertCircle, X, Info, Users, Package } from 'lucide-react';
 
 type ImportMode = 'inventory' | 'movement';
@@ -360,31 +361,22 @@ export default function ImportSpreadsheet({
                 const moveType = diff > 0 ? 'OUT' : 'IN'; // Positive diff means more items OUT to employee
                 const moveQty = Math.abs(diff);
 
-                await supabase.from('movements').insert({
+                const mvRes = await recordMovement(supabase, {
                   employee_id: empId,
                   item_id: itemId,
                   quantity: moveQty,
                   type: moveType,
-                  performed_by: user.id
+                  performed_by: user.id,
                 });
+                if (!mvRes.ok) throw new Error(mvRes.message);
 
                 // Update possession record
-                if (targetQty <= 0) {
-                  await supabase.from('possession').delete().match({ employee_id: empId, item_id: itemId });
-                } else {
-                  await supabase.from('possession').upsert({
-                    employee_id: empId,
-                    item_id: itemId,
-                    quantity: targetQty,
-                    user_id: user.id
-                  }, { onConflict: 'employee_id,item_id' });
-                }
+                const posRes = await updatePossessionQuantity(supabase, empId, itemId, targetQty, user.id);
+                if (!posRes.ok) throw new Error(posRes.message);
 
                 // Update Stock (if OUT, decrease stock. if IN, increase stock)
-                await supabase.rpc('update_stock', { 
-                  p_item_id: itemId, 
-                  p_quantity: -diff // if diff > 0 (OUT), stock decreases. if diff < 0 (IN), stock increases.
-                });
+                const stockRes = await updateStock(supabase, itemId, -diff);
+                if (!stockRes.ok) throw new Error(stockRes.message);
               }
               ok++;
             }
