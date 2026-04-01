@@ -4,13 +4,14 @@ export const dynamic = 'force-dynamic';
 
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Plus, Search, Loader2, Trash2, ExternalLink, Download, FileUp } from 'lucide-react';
+import { Plus, Search, Loader2, Trash2, ExternalLink, Download, FileUp, Sheet } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import type { EmployeeLite, PurchaseOrderItemRow, PurchaseOrderRow, PurchaseStage } from '@/lib/purchaseOrders';
 import { PURCHASE_STAGES, isPurchaseStage } from '@/lib/purchaseOrders';
 import { PurchaseOrderFormModal } from '@/components/PurchaseOrderFormModal';
 import { PurchaseOrderImportModal, downloadOrdersTemplate } from '@/components/PurchaseOrderImportModal';
+import { downloadOrdersSpreadsheet } from '@/lib/ordersExport';
 
 function OrdersContent() {
   const searchParams = useSearchParams();
@@ -117,6 +118,26 @@ function OrdersContent() {
   }, []);
 
   useEffect(() => {
+    const onFocus = () => {
+      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+      fetchOrders();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        // eslint-disable-next-line @typescript-eslint/no-floating-promises
+        fetchOrders();
+      }
+    };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSearch(searchParams.get('q') || '');
   }, [searchParams]);
@@ -197,6 +218,22 @@ function OrdersContent() {
           >
             <Download size={16} />
             Modelo
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              downloadOrdersSpreadsheet({
+                orders: filtered,
+                items,
+                employees,
+                title: 'Pedidos (lista filtrada)',
+              })
+            }
+            className="flex items-center gap-2 bg-white text-primary border border-slate-200 px-4 py-2 rounded-lg hover:bg-slate-50 transition-all font-medium text-sm"
+            title="Baixar pedidos em planilha (.xlsx)"
+          >
+            <Sheet size={16} />
+            Baixar
           </button>
           <button
             type="button"

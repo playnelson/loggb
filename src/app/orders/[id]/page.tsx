@@ -156,19 +156,27 @@ function OrderDetailContent() {
   };
 
   const updateItem = async (id: string, patch: Partial<PurchaseOrderItemRow>) => {
-    setItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));
-    const dbPatch: Record<string, unknown> = { ...patch };
-    // Ensure received_at set when quantity_received reaches requested
-    if (typeof patch.quantity_received === 'number') {
-      const next = patch.quantity_received;
-      const cur = items.find((x) => x.id === id);
-      const requested = patch.quantity_requested ?? cur?.quantity_requested ?? 0;
-      if (next > 0 && next >= requested) {
-        dbPatch.received_at = new Date().toISOString();
-      } else if (next === 0) {
-        dbPatch.received_at = null;
+    let dbPatch: Record<string, unknown> = { ...patch };
+    setItems((prev) => {
+      const cur = prev.find((x) => x.id === id);
+      const nextRequested =
+        typeof patch.quantity_requested === 'number' ? patch.quantity_requested : (cur?.quantity_requested ?? 0);
+      const nextReceived =
+        typeof patch.quantity_received === 'number' ? patch.quantity_received : (cur?.quantity_received ?? 0);
+
+      // Ensure received_at set when quantity_received reaches requested
+      if (typeof patch.quantity_received === 'number' || typeof patch.quantity_requested === 'number') {
+        if (nextReceived > 0 && nextReceived >= nextRequested) {
+          dbPatch = { ...dbPatch, received_at: new Date().toISOString() };
+        } else if (nextReceived === 0) {
+          dbPatch = { ...dbPatch, received_at: null };
+        } else {
+          dbPatch = { ...dbPatch, received_at: null };
+        }
       }
-    }
+
+      return prev.map((it) => (it.id === id ? { ...it, ...patch, received_at: (dbPatch.received_at as string | null) ?? it.received_at } : it));
+    });
     const { error } = await supabase.from('purchase_order_items').update(dbPatch).eq('id', id);
     if (error) {
       alert(`Erro ao salvar item: ${error.message}`);
