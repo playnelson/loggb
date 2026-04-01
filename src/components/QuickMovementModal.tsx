@@ -20,6 +20,7 @@ interface Product {
   quantity_current: number;
   consumable: boolean;
   unit: string;
+  unique_item?: boolean;
 }
 
 interface Employee {
@@ -35,8 +36,6 @@ interface QuickMovementModalProps {
   initialMode?: 'IN' | 'OUT';
 }
 
-type ItemHandling = 'CONSUMIVEL' | 'NAO_CONSUMIVEL' | 'ITEM_UNICO';
-
 export default function QuickMovementModal({ 
   item, 
   isOpen, 
@@ -48,7 +47,6 @@ export default function QuickMovementModal({
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [selectedEmployee, setSelectedEmployee] = useState('');
   const [quantity, setQuantity] = useState(1);
-  const [handling, setHandling] = useState<ItemHandling>('NAO_CONSUMIVEL');
   const [tag, setTag] = useState('');
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -67,19 +65,18 @@ export default function QuickMovementModal({
       setTag('');
       setSuccess(false);
       setError(null);
-      setHandling(item?.consumable ? 'CONSUMIVEL' : 'NAO_CONSUMIVEL');
       void fetchEmployees();
     }
-  }, [isOpen, initialMode, item?.consumable, fetchEmployees]);
+  }, [isOpen, initialMode, fetchEmployees]);
 
   const needsEmployee = useMemo(() => {
-    // OUT: always identify who is taking (even if consumable) for audit/history.
-    // IN: only needs employee when we're removing from someone's wallet (non-consumable / unique).
-    if (mode === 'OUT') return true;
-    return handling !== 'CONSUMIVEL';
-  }, [mode, handling]);
+    // Only require employee when we must update someone's wallet (non-consumable / unique).
+    if (!item) return false;
+    if (item.consumable) return false;
+    return true;
+  }, [item]);
 
-  const isUnique = handling === 'ITEM_UNICO';
+  const isUnique = Boolean(item?.unique_item);
 
   const effectiveQty = useMemo(() => (isUnique ? 1 : quantity), [isUnique, quantity]);
 
@@ -153,7 +150,7 @@ export default function QuickMovementModal({
     // 2. Update Possession (wallet)
     // - Consumível: não mexe na carteira (só estoque + histórico).
     // - Não consumível / Item único: OUT adiciona na carteira; IN remove da carteira.
-    if (handling !== 'CONSUMIVEL' && selectedEmployee) {
+    if (!item.consumable && selectedEmployee) {
       const { data: currentPos } = await supabase
         .from('possession')
         .select('quantity')
@@ -263,58 +260,6 @@ export default function QuickMovementModal({
                   <ArrowDownLeft size={16} />
                   Entrada
                 </button>
-              </div>
-
-              {/* Handling options */}
-              <div className="space-y-2">
-                <label className="text-xs font-bold uppercase text-slate-400 flex items-center gap-2">
-                  <Package size={14} className="text-secondary" />
-                  Tipo do item no lançamento
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setHandling('CONSUMIVEL')}
-                    className={`px-3 py-2 rounded-lg text-xs font-black border transition-all ${
-                      handling === 'CONSUMIVEL'
-                        ? 'bg-amber-50 border-amber-200 text-amber-800'
-                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                    }`}
-                    title="Consumível: não entra na carteira do colaborador (só histórico e estoque)"
-                  >
-                    Consumível
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setHandling('NAO_CONSUMIVEL')}
-                    className={`px-3 py-2 rounded-lg text-xs font-black border transition-all ${
-                      handling === 'NAO_CONSUMIVEL'
-                        ? 'bg-blue-50 border-blue-200 text-blue-800'
-                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                    }`}
-                    title="Não consumível: entra/sai da carteira do colaborador"
-                  >
-                    Não consumível
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setHandling('ITEM_UNICO');
-                      setQuantity(1);
-                    }}
-                    className={`px-3 py-2 rounded-lg text-xs font-black border transition-all ${
-                      handling === 'ITEM_UNICO'
-                        ? 'bg-secondary/10 border-secondary/40 text-secondary'
-                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                    }`}
-                    title="Item único: normalmente 1 unidade com TAG"
-                  >
-                    Item único
-                  </button>
-                </div>
-                <div className="text-[10px] text-slate-400 font-bold">
-                  Dica: “Item único” força quantidade 1 e pede TAG.
-                </div>
               </div>
 
               {needsEmployee && (

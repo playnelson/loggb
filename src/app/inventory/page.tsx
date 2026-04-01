@@ -29,6 +29,7 @@ interface Product {
   category: string;
   location: string;
   consumable: boolean;
+  unique_item?: boolean;
   quantity_current: number;
   quantity_min: number;
   unit: string;
@@ -77,6 +78,7 @@ function InventoryContent() {
     category: 'Ferramenta',
     location: '',
     consumable: false,
+    unique_item: false,
     quantity_current: 0,
     quantity_min: 0,
     unit: 'un'
@@ -143,7 +145,7 @@ function InventoryContent() {
     const { data, error } = await supabase
       .from('items')
       .select(
-        'id, description, category, location, consumable, quantity_current, quantity_min, unit, updated_at, possession (id, quantity, employees (full_name))'
+        'id, description, category, location, consumable, unique_item, quantity_current, quantity_min, unit, updated_at, possession (id, quantity, employees (full_name))'
       )
       .order('description', { ascending: true });
 
@@ -311,6 +313,7 @@ function InventoryContent() {
         category: 'Ferramenta',
         location: '',
         consumable: false,
+        unique_item: false,
         quantity_current: 0,
         quantity_min: 0,
         unit: 'un'
@@ -628,6 +631,7 @@ function InventoryContent() {
                                 category: p.category,
                                 location: p.location,
                                 consumable: p.consumable || false,
+                                unique_item: Boolean(p.unique_item),
                                 quantity_current: p.quantity_current,
                                 quantity_min: p.quantity_min,
                                 unit: p.unit
@@ -746,17 +750,49 @@ function InventoryContent() {
                     onChange={(e) => setFormData({...formData, description: e.target.value})}
                   />
                 </div>
-                <div className="flex items-center gap-3 pt-6">
-                  <input 
-                    type="checkbox" 
-                    id="consumable-toggle"
-                    className="w-5 h-5 accent-secondary rounded border-slate-300 cursor-pointer"
-                    checked={formData.consumable}
-                    onChange={(e) => setFormData({...formData, consumable: e.target.checked})}
-                  />
-                  <label htmlFor="consumable-toggle" className="text-sm font-bold text-primary cursor-pointer">
-                    Consumível?
-                  </label>
+                <div className="space-y-3 pt-6">
+                  <div className="flex items-center gap-3">
+                    <input 
+                      type="checkbox" 
+                      id="consumable-toggle"
+                      className="w-5 h-5 accent-secondary rounded border-slate-300 cursor-pointer"
+                      checked={formData.consumable}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          consumable: e.target.checked,
+                          unique_item: e.target.checked ? false : formData.unique_item,
+                        })
+                      }
+                    />
+                    <label htmlFor="consumable-toggle" className="text-sm font-bold text-primary cursor-pointer">
+                      Consumível?
+                    </label>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <input 
+                      type="checkbox" 
+                      id="unique-item-toggle"
+                      className="w-5 h-5 accent-secondary rounded border-slate-300 cursor-pointer"
+                      checked={Boolean(formData.unique_item)}
+                      disabled={formData.consumable}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          unique_item: e.target.checked,
+                          consumable: e.target.checked ? false : formData.consumable,
+                        })
+                      }
+                    />
+                    <label
+                      htmlFor="unique-item-toggle"
+                      className={`text-sm font-black cursor-pointer ${formData.consumable ? 'text-slate-300' : 'text-secondary'}`}
+                      title="Quando marcado, a movimentação exige TAG e força quantidade 1."
+                    >
+                      Item único (exige TAG)
+                    </label>
+                  </div>
                 </div>
               </div>
 
