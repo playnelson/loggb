@@ -2,7 +2,7 @@
 
 export const dynamic = 'force-dynamic';
 
-import { useState, useEffect } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Search, UserPlus, Mail, Phone, ExternalLink, X, FileUp, Filter, Package, AlertCircle, History, RotateCcw, Download, Loader2, ArrowLeft, FileText } from 'lucide-react';
 import ImportSpreadsheet from '@/components/ImportSpreadsheet';
@@ -52,6 +52,18 @@ export default function StaffPage() {
   // Modals for actions
   const [timelineEmployee, setTimelineEmployee] = useState<Employee | null>(null);
   const [movements, setMovements] = useState<any[]>([]);
+  const [walletEmployee, setWalletEmployee] = useState<Employee | null>(null);
+  const [walletMovements, setWalletMovements] = useState<any[]>([]);
+  const [walletLoading, setWalletLoading] = useState(false);
+  const [walletError, setWalletError] = useState<string | null>(null);
+  const [walletReturn, setWalletReturn] = useState<{
+    employeeId: string;
+    item_id: string;
+    description: string;
+    unit: string;
+    consumable: boolean;
+    maxQty: number;
+  } | null>(null);
   const [returnItem, setReturnItem] = useState<{employeeId: string, item: Possession} | null>(null);
   const [returnQty, setReturnQty] = useState<number>(0);
   const [epiFichaEmployee, setEpiFichaEmployee] = useState<Employee | null>(null);
@@ -107,17 +119,55 @@ export default function StaffPage() {
     setTimelineEmployee(employee);
     const { data } = await supabase
       .from('movements')
-      .select('*, items(description, unit)')
+      .select('*, items(description, unit, consumable), tag')
       .eq('employee_id', employee.id)
       .order('created_at', { ascending: false })
       .limit(30);
     setMovements(data || []);
   };
 
+  const fetchAllEmployeeMovements = async (employeeId: string) => {
+    // best-effort full history for wallet panel (paginated by range)
+    const pageSize = 1000;
+    let from = 0;
+    const all: any[] = [];
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const { data, error } = await supabase
+        .from('movements')
+        .select('*, items(description, unit, consumable), tag')
+        .eq('employee_id', employeeId)
+        .order('created_at', { ascending: false })
+        .range(from, from + pageSize - 1);
+      if (error) throw error;
+      const chunk = data || [];
+      all.push(...chunk);
+      if (chunk.length < pageSize) break;
+      from += pageSize;
+      if (from > 50_000) break; // safety guard
+    }
+    return all;
+  };
+
+  const openWallet = async (employee: Employee) => {
+    setWalletEmployee(employee);
+    setWalletLoading(true);
+    setWalletError(null);
+    try {
+      const all = await fetchAllEmployeeMovements(employee.id);
+      setWalletMovements(all);
+    } catch (err: any) {
+      setWalletMovements([]);
+      setWalletError(err?.message ? String(err.message) : 'Falha ao carregar histórico completo.');
+    } finally {
+      setWalletLoading(false);
+    }
+  };
+
   const downloadFullHistory = async (employee: Employee) => {
     const { data } = await supabase
       .from('movements')
-      .select('*, items(description)')
+      .select('*, items(description), tag')
       .eq('employee_id', employee.id)
       .order('created_at', { ascending: false });
 
@@ -126,10 +176,11 @@ export default function StaffPage() {
     const content = `HISTÓRICO DE MOVIMENTAÇÕES - ${employee.full_name}\n` +
       `Gerado em: ${new Date().toLocaleString()}\n` +
       `--------------------------------------------------\n\n` +
-      data.map(m => {
+      data.map((m: any) => {
         const date = new Date(m.created_at).toLocaleString();
         const type = m.type === 'IN' ? '[DEVOLUÇÃO]' : '[RETIRADA] ';
-        return `${date} | ${type} | ${m.quantity}x ${m.items?.description}`;
+        const tag = m.tag ? ` | TAG: ${String(m.tag)}` : '';
+        return `${date} | ${type} | ${m.quantity}x ${m.items?.description}${tag}`;
       }).join('\n');
 
     const blob = new Blob([content], { type: 'text/plain' });
@@ -259,6 +310,75 @@ export default function StaffPage() {
     setReturnItem(null);
     setIsSubmitting(false);
     fetchEmployees();
+  };
+
+  const walletBalances = useMemo(() => {
+    // compute "saldo" for consumables by item: OUT - IN
+    const map = new Map<string, { description: string; unit: string; balance: number }>();
+    for (const m of walletMovements) {
+      const it = m.items;
+      if (!it?.consumable) continue;
+      const key = String(m.item_id);
+      const prev = map.get(key) || { description: String(it.description || '—'), unit: String(it.unit || 'un'), balance: 0 };
+      const qty = Number(m.quantity || 0);
+      const delta = String(m.type) === 'OUT' ? qty : -qty;
+      map.set(key, { ...prev, balance: prev.balance + delta });
+    }
+    return Array.from(map.entries())
+      .map(([item_id, v]) => ({ item_id, ...v }))
+      .filter((x) => x.balance > 0)
+      .sort((a, b) => b.balance - a.balance);
+  }, [walletMovements]);
+
+  const handleWalletReturn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!walletReturn || returnQty <= 0) return;
+    setIsSubmitting(true);
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    // 1) movement IN
+    await supabase.from('movements').insert([{
+      item_id: walletReturn.item_id,
+      employee_id: walletReturn.employeeId,
+      quantity: returnQty,
+      type: 'IN',
+      performed_by: user.id
+    }]);
+
+    // 2) consumable: no possession update (only stock)
+    if (!walletReturn.consumable) {
+      const { data: currentPos } = await supabase
+        .from('possession')
+        .select('quantity')
+        .eq('employee_id', walletReturn.employeeId)
+        .eq('item_id', walletReturn.item_id)
+        .maybeSingle();
+      const cur = Number(currentPos?.quantity || 0);
+      const next = cur - returnQty;
+      if (next <= 0) await supabase.from('possession').delete().match({ employee_id: walletReturn.employeeId, item_id: walletReturn.item_id });
+      else await supabase.from('possession').upsert({ employee_id: walletReturn.employeeId, item_id: walletReturn.item_id, quantity: next, user_id: user.id }, { onConflict: 'employee_id,item_id' });
+    }
+
+    // 3) stock +
+    await supabase.rpc('update_stock', { p_item_id: walletReturn.item_id, p_quantity: returnQty });
+
+    setWalletReturn(null);
+    setIsSubmitting(false);
+    if (walletEmployee) {
+      await fetchEmployees();
+      // reload wallet movements
+      setWalletLoading(true);
+      try {
+        const all = await fetchAllEmployeeMovements(walletEmployee.id);
+        setWalletMovements(all);
+      } catch (err: any) {
+        setWalletError(err?.message ? String(err.message) : 'Falha ao atualizar histórico.');
+      } finally {
+        setWalletLoading(false);
+      }
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -502,6 +622,14 @@ export default function StaffPage() {
                           >
                             <History size={16} />
                           </button>
+                          <button
+                            type="button"
+                            onClick={() => void openWallet(e)}
+                            className="text-slate-400 hover:text-secondary p-2 bg-slate-50 border border-slate-200 rounded-lg transition-all"
+                            title="Carteira completa (posse + consumíveis + histórico completo)"
+                          >
+                            <Package size={16} />
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -665,6 +793,234 @@ export default function StaffPage() {
                 )}
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Carteira Completa */}
+      {walletEmployee && (
+        <div className="fixed inset-0 bg-primary/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in duration-300">
+            <div className="p-6 border-b bg-slate-50 flex items-center justify-between shrink-0">
+              <div>
+                <h3 className="text-xl font-bold text-primary">Carteira do colaborador</h3>
+                <p className="text-xs text-slate-500 mt-1 font-medium">{walletEmployee.full_name}</p>
+              </div>
+              <button onClick={() => { setWalletEmployee(null); setWalletMovements([]); }} className="p-2 hover:bg-slate-200 rounded-full">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              {walletError && (
+                <div className="p-3 bg-red-50 border border-red-100 text-red-700 rounded-xl text-xs font-bold">
+                  {walletError}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+                  <div className="p-4 border-b bg-slate-50 flex items-center justify-between">
+                    <div className="text-xs font-black text-primary uppercase">Itens em posse (não consumíveis)</div>
+                    <div className="text-xs font-bold text-slate-500">
+                      {(walletEmployee.possession || []).filter((p) => p.quantity > 0 && !!p.items && !p.items.consumable).length}
+                    </div>
+                  </div>
+                  <div className="p-4 space-y-2">
+                    {(walletEmployee.possession || [])
+                      .filter((p) => p.quantity > 0 && !!p.items && !p.items.consumable)
+                      .map((p, idx) => (
+                        <div key={idx} className="flex items-center justify-between bg-slate-50 border border-slate-100 rounded-xl px-3 py-2">
+                          <div className="min-w-0">
+                            <div className="font-bold text-primary text-sm truncate">{p.items.description}</div>
+                            <div className="text-[10px] text-slate-400 font-bold uppercase">{p.items.unit}</div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <div className="text-sm font-black text-primary">x{p.quantity}</div>
+                            <button
+                              type="button"
+                              onClick={() => { setWalletReturn({ employeeId: walletEmployee.id, item_id: p.item_id, description: p.items.description, unit: p.items.unit, consumable: false, maxQty: p.quantity }); setReturnQty(p.quantity); }}
+                              className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-black text-slate-600 hover:bg-slate-50"
+                              title="Devolver (remove da carteira e devolve ao estoque)"
+                            >
+                              Devolver
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    {(walletEmployee.possession || []).filter((p) => p.quantity > 0 && !!p.items && !p.items.consumable).length === 0 && (
+                      <div className="text-sm text-slate-400 italic">Sem itens não consumíveis em posse.</div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+                  <div className="p-4 border-b bg-slate-50 flex items-center justify-between">
+                    <div className="text-xs font-black text-primary uppercase">Consumíveis (saldo retirado)</div>
+                    <div className="text-xs font-bold text-slate-500">{walletBalances.length}</div>
+                  </div>
+                  <div className="p-4 space-y-2">
+                    {walletLoading ? (
+                      <div className="text-slate-400 text-sm">
+                        <Loader2 className="animate-spin inline mr-2" size={16} />
+                        Carregando histórico completo…
+                      </div>
+                    ) : walletBalances.length === 0 ? (
+                      <div className="text-sm text-slate-400 italic">Sem saldo de consumíveis em aberto.</div>
+                    ) : (
+                      walletBalances.map((c) => (
+                        <div key={c.item_id} className="flex items-center justify-between bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
+                          <div className="min-w-0">
+                            <div className="font-bold text-amber-900 text-sm truncate">{c.description}</div>
+                            <div className="text-[10px] text-amber-700 font-bold uppercase">{c.unit}</div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <div className="text-sm font-black text-amber-900">x{c.balance}</div>
+                            <button
+                              type="button"
+                              onClick={() => { setWalletReturn({ employeeId: walletEmployee.id, item_id: c.item_id, description: c.description, unit: c.unit, consumable: true, maxQty: c.balance }); setReturnQty(c.balance); }}
+                              className="px-3 py-1.5 bg-white border border-amber-200 rounded-lg text-xs font-black text-amber-800 hover:bg-amber-50"
+                              title="Registrar devolução de consumível (só estoque + histórico)"
+                            >
+                              Devolver
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+                <div className="p-4 border-b bg-slate-50 flex items-center justify-between">
+                  <div className="text-xs font-black text-primary uppercase">Histórico completo</div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void downloadFullHistory(walletEmployee)}
+                      className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-black text-slate-600 hover:bg-slate-50 flex items-center gap-2"
+                      title="Baixar histórico completo em TXT"
+                    >
+                      <Download size={14} />
+                      Baixar TXT
+                    </button>
+                  </div>
+                </div>
+                <div className="p-4">
+                  {walletLoading ? (
+                    <div className="text-slate-400 text-sm">
+                      <Loader2 className="animate-spin inline mr-2" size={16} />
+                      Carregando…
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {walletMovements.slice(0, 200).map((m) => (
+                        <div key={m.id} className="flex items-center justify-between bg-slate-50 border border-slate-100 rounded-xl px-3 py-2">
+                          <div className="min-w-0">
+                            <div className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                              {m.type === 'IN' ? 'DEVOLUÇÃO' : 'RETIRADA'} • {new Date(m.created_at).toLocaleString('pt-BR')}
+                            </div>
+                            <div className="font-bold text-primary text-sm truncate">
+                              {m.items?.description || '—'}
+                            </div>
+                            {m.tag && (
+                              <div className="mt-1 inline-flex items-center gap-2 bg-secondary/10 border border-secondary/20 px-2 py-1 rounded-lg">
+                                <span className="text-[9px] font-black text-secondary uppercase tracking-wider">TAG</span>
+                                <span className="text-[11px] font-black text-primary font-mono tracking-wide">{String(m.tag)}</span>
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <div className="text-sm font-black text-primary">
+                              {m.type === 'IN' ? '+' : '-'}{m.quantity} <span className="text-xs text-slate-400">{m.items?.unit || ''}</span>
+                            </div>
+                            {String(m.type) === 'OUT' && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const consumable = Boolean(m.items?.consumable);
+                                  const maxQty = consumable
+                                    ? (walletBalances.find((x) => x.item_id === String(m.item_id))?.balance ?? Number(m.quantity || 0))
+                                    : Number(m.quantity || 0);
+                                  setWalletReturn({
+                                    employeeId: walletEmployee.id,
+                                    item_id: String(m.item_id),
+                                    description: String(m.items?.description || '—'),
+                                    unit: String(m.items?.unit || 'un'),
+                                    consumable,
+                                    maxQty: Math.max(1, Number(maxQty || 1)),
+                                  });
+                                  setReturnQty(Math.max(1, Math.min(Number(m.quantity || 1), Number(maxQty || 1))));
+                                }}
+                                className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-black text-slate-600 hover:bg-slate-50"
+                                title="Devolver a partir do histórico"
+                              >
+                                Devolver
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                      {walletMovements.length > 200 && (
+                        <div className="text-[11px] text-slate-400 font-bold">
+                          Mostrando 200 de {walletMovements.length} (use “Baixar TXT” para ver tudo).
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Modal interno: devolver (carteira completa) */}
+            {walletReturn && (
+              <div className="fixed inset-0 bg-primary/40 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in duration-300">
+                  <div className="p-6 border-b border-border bg-slate-50">
+                    <h3 className="text-xl font-bold text-primary">Devolver item</h3>
+                    <p className="text-xs text-slate-500 mt-1">{walletReturn.description}</p>
+                  </div>
+                  <form onSubmit={handleWalletReturn} className="p-6 space-y-4">
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold uppercase text-slate-400">Quantidade a devolver</label>
+                      <div className="flex items-center gap-3">
+                        <input
+                          required
+                          type="number"
+                          min="1"
+                          max={walletReturn.maxQty}
+                          className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-lg text-lg font-bold outline-none focus:ring-2 focus:ring-secondary/50"
+                          value={returnQty === 0 ? '' : returnQty}
+                          onChange={(e) => setReturnQty(Math.min(walletReturn.maxQty, Number(e.target.value)))}
+                          onFocus={(e) => e.target.select()}
+                        />
+                        <span className="text-sm font-bold text-slate-400">de {walletReturn.maxQty}</span>
+                      </div>
+                      <div className="text-[11px] text-slate-500 font-bold">
+                        {walletReturn.consumable ? 'Consumível: devolução atualiza estoque e histórico.' : 'Não consumível: remove da carteira e devolve ao estoque.'}
+                      </div>
+                    </div>
+                    <div className="flex gap-2 pt-4">
+                      <button
+                        type="button"
+                        onClick={() => setWalletReturn(null)}
+                        className="flex-1 p-3 border border-slate-200 rounded-xl font-bold text-slate-500 hover:bg-slate-50"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={isSubmitting}
+                        className="flex-1 p-3 bg-primary text-white rounded-xl font-bold hover:bg-slate-800 shadow-lg shadow-primary/20 disabled:opacity-50"
+                      >
+                        {isSubmitting ? '...' : 'Confirmar'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

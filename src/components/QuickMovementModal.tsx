@@ -70,11 +70,17 @@ export default function QuickMovementModal({
   }, [isOpen, initialMode, fetchEmployees]);
 
   const needsEmployee = useMemo(() => {
-    // Only require employee when we must update someone's wallet (non-consumable / unique).
     if (!item) return false;
-    if (item.consumable) return false;
-    return true;
-  }, [item]);
+    // OUT: always require employee for audit + wallet panel.
+    if (mode === 'OUT') return true;
+    // IN: require employee only when the item affects wallet (non-consumable / unique).
+    return !item.consumable;
+  }, [item, mode]);
+
+  const showEmployeeOptionalOnIn = useMemo(() => {
+    if (!item) return false;
+    return mode === 'IN' && item.consumable;
+  }, [item, mode]);
 
   const isUnique = Boolean(item?.unique_item);
 
@@ -132,7 +138,7 @@ export default function QuickMovementModal({
     // 1. Record Movement
     const movePayload: Record<string, unknown> = {
       item_id: item.id,
-      employee_id: needsEmployee ? selectedEmployee : null,
+      employee_id: (needsEmployee || (showEmployeeOptionalOnIn && selectedEmployee)) ? selectedEmployee : null,
       type: mode,
       quantity: effectiveQty,
       performed_by: user.id,
@@ -262,23 +268,34 @@ export default function QuickMovementModal({
                 </button>
               </div>
 
-              {needsEmployee && (
+              {(needsEmployee || showEmployeeOptionalOnIn) && (
                 <div className="space-y-2">
                   <label className="text-xs font-bold uppercase text-slate-400 flex items-center gap-2">
                     <User size={14} className="text-secondary" />
-                    {mode === 'IN' ? 'Quem está devolvendo?' : 'Quem está retirando?'}
+                    {mode === 'IN'
+                      ? (showEmployeeOptionalOnIn ? 'Devolução de colaborador (opcional)' : 'Quem está devolvendo?')
+                      : 'Quem está retirando?'}
                   </label>
                   <select
-                    required
+                    required={needsEmployee}
                     className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-secondary/20 outline-none font-medium"
                     value={selectedEmployee}
                     onChange={(e) => setSelectedEmployee(e.target.value)}
                   >
-                    <option value="">{mode === 'IN' ? 'Selecione quem está devolvendo...' : 'Selecione o colaborador...'}</option>
+                    <option value="">
+                      {mode === 'IN'
+                        ? (showEmployeeOptionalOnIn ? 'Entrada no estoque (sem colaborador)' : 'Selecione quem está devolvendo...')
+                        : 'Selecione o colaborador...'}
+                    </option>
                     {employees.map(e => (
                       <option key={e.id} value={e.id}>{e.full_name}</option>
                     ))}
                   </select>
+                  {showEmployeeOptionalOnIn && (
+                    <div className="text-[10px] text-slate-400 font-bold">
+                      Se você escolher um colaborador, a devolução ficará registrada no painel dele.
+                    </div>
+                  )}
                 </div>
               )}
 
