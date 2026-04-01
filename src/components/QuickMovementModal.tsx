@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { 
   X, 
@@ -10,7 +10,8 @@ import {
   User, 
   Loader2, 
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Tag
 } from 'lucide-react';
 
 interface Product {
@@ -34,6 +35,8 @@ interface QuickMovementModalProps {
   initialMode?: 'IN' | 'OUT';
 }
 
+type ItemHandling = 'CONSUMIVEL' | 'NAO_CONSUMIVEL' | 'ITEM_UNICO';
+
 export default function QuickMovementModal({ 
   item, 
   isOpen, 
@@ -45,25 +48,68 @@ export default function QuickMovementModal({
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [selectedEmployee, setSelectedEmployee] = useState('');
   const [quantity, setQuantity] = useState(1);
+  const [handling, setHandling] = useState<ItemHandling>('NAO_CONSUMIVEL');
+  const [tag, setTag] = useState('');
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const fetchEmployees = useCallback(async () => {
+    const { data } = await supabase.from('employees').select('id, full_name').eq('status', 'Ativo').order('full_name');
+    setEmployees(data || []);
+  }, []);
 
   useEffect(() => {
     if (isOpen) {
       setMode(initialMode);
       setQuantity(1);
       setSelectedEmployee('');
+      setTag('');
       setSuccess(false);
       setError(null);
-      fetchEmployees();
+      setHandling(item?.consumable ? 'CONSUMIVEL' : 'NAO_CONSUMIVEL');
+      void fetchEmployees();
     }
-  }, [isOpen, initialMode]);
+  }, [isOpen, initialMode, item?.consumable, fetchEmployees]);
 
-  const fetchEmployees = async () => {
-    const { data } = await supabase.from('employees').select('id, full_name').eq('status', 'Ativo').order('full_name');
-    setEmployees(data || []);
-  };
+  const needsEmployee = useMemo(() => {
+    // OUT: always identify who is taking (even if consumable) for audit/history.
+    // IN: only needs employee when we're removing from someone's wallet (non-consumable / unique).
+    if (mode === 'OUT') return true;
+    return handling !== 'CONSUMIVEL';
+  }, [mode, handling]);
+
+  const isUnique = handling === 'ITEM_UNICO';
+
+  const effectiveQty = useMemo(() => (isUnique ? 1 : quantity), [isUnique, quantity]);
+
+  const validate = useCallback((): string | null => {
+    if (!item) return 'Item inválido.';
+    if (needsEmployee && !selectedEmployee) return mode === 'IN' ? 'Selecione quem está devolvendo.' : 'Selecione um colaborador para a saída.';
+    if (effectiveQty <= 0) return 'Quantidade deve ser maior que zero.';
+    if (mode === 'OUT' && effectiveQty > item.quantity_current) return 'Quantidade maior do que o saldo atual.';
+    if (isUnique && !tag.trim()) return 'Informe a TAG do item único.';
+    return null;
+  }, [item, needsEmployee, selectedEmployee, mode, effectiveQty, isUnique, tag]);
+
+  const insertMovement = useCallback(
+    async (payload: Record<string, unknown>) => {
+      const { error: err1 } = await supabase.from('movements').insert([payload]);
+      if (!err1) return null;
+
+      const msg = String(err1.message || '');
+      // If DB doesn't have the optional column yet, retry without it.
+      if (msg.toLowerCase().includes('column') && msg.toLowerCase().includes('tag')) {
+        const { tag: _tag, ...withoutTag } = payload as { tag?: unknown };
+        const { error: err2 } = await supabase.from('movements').insert([withoutTag]);
+        if (!err2) return null;
+        return err2;
+      }
+
+      return err1;
+    },
+    []
+  );
 
   const handleAction = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -79,53 +125,71 @@ export default function QuickMovementModal({
       return;
     }
 
-    if (mode === 'OUT' && !selectedEmployee) {
-      setError('Selecione um colaborador para a saída.');
-      setLoading(false);
-      return;
-    }
-
-    if (quantity <= 0) {
-      setError('Quantidade deve ser maior que zero.');
+    const validationError = validate();
+    if (validationError) {
+      setError(validationError);
       setLoading(false);
       return;
     }
 
     // 1. Record Movement
-    const { error: moveError } = await supabase.from('movements').insert([{
+    const movePayload: Record<string, unknown> = {
       item_id: item.id,
-      employee_id: mode === 'OUT' ? selectedEmployee : null,
+      employee_id: needsEmployee ? selectedEmployee : null,
       type: mode,
-      quantity: quantity,
-      performed_by: user.id
-    }]);
+      quantity: effectiveQty,
+      performed_by: user.id,
+    };
+    if (isUnique) movePayload.tag = tag.trim();
+
+    const moveError = await insertMovement(movePayload);
 
     if (moveError) {
-      setError('Erro ao registrar movimentação.');
+      setError(moveError.message || 'Erro ao registrar movimentação.');
       setLoading(false);
       return;
     }
 
-    // 2. Update Possession (Only for OUT and non-consumables)
-    if (mode === 'OUT' && !item.consumable && selectedEmployee) {
+    // 2. Update Possession (wallet)
+    // - Consumível: não mexe na carteira (só estoque + histórico).
+    // - Não consumível / Item único: OUT adiciona na carteira; IN remove da carteira.
+    if (handling !== 'CONSUMIVEL' && selectedEmployee) {
       const { data: currentPos } = await supabase
         .from('possession')
         .select('quantity')
         .eq('employee_id', selectedEmployee)
         .eq('item_id', item.id)
-        .single();
-      
-      const newPosQty = (currentPos?.quantity || 0) + quantity;
-      await supabase.from('possession').upsert({
-        employee_id: selectedEmployee,
-        item_id: item.id,
-        quantity: newPosQty,
-        user_id: user.id
-      }, { onConflict: 'employee_id,item_id' });
+        .maybeSingle();
+
+      const currentQty = Number(currentPos?.quantity ?? 0);
+      const nextQty = mode === 'OUT' ? currentQty + effectiveQty : currentQty - effectiveQty;
+
+      if (mode === 'IN' && nextQty < 0) {
+        setError('Esse colaborador não tem essa quantidade na carteira para devolver.');
+        setLoading(false);
+        return;
+      }
+
+      if (nextQty <= 0) {
+        await supabase.from('possession').delete().match({
+          employee_id: selectedEmployee,
+          item_id: item.id,
+        });
+      } else {
+        await supabase.from('possession').upsert(
+          {
+            employee_id: selectedEmployee,
+            item_id: item.id,
+            quantity: nextQty,
+            user_id: user.id,
+          },
+          { onConflict: 'employee_id,item_id' }
+        );
+      }
     }
 
     // 3. Update stock quantity via RPC
-    const rpcQty = mode === 'IN' ? quantity : -quantity;
+    const rpcQty = mode === 'IN' ? effectiveQty : -effectiveQty;
     const { error: stockError } = await supabase.rpc('update_stock', { 
       p_item_id: item.id, 
       p_quantity: rpcQty 
@@ -201,11 +265,63 @@ export default function QuickMovementModal({
                 </button>
               </div>
 
-              {mode === 'OUT' && (
+              {/* Handling options */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase text-slate-400 flex items-center gap-2">
+                  <Package size={14} className="text-secondary" />
+                  Tipo do item no lançamento
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setHandling('CONSUMIVEL')}
+                    className={`px-3 py-2 rounded-lg text-xs font-black border transition-all ${
+                      handling === 'CONSUMIVEL'
+                        ? 'bg-amber-50 border-amber-200 text-amber-800'
+                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                    title="Consumível: não entra na carteira do colaborador (só histórico e estoque)"
+                  >
+                    Consumível
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHandling('NAO_CONSUMIVEL')}
+                    className={`px-3 py-2 rounded-lg text-xs font-black border transition-all ${
+                      handling === 'NAO_CONSUMIVEL'
+                        ? 'bg-blue-50 border-blue-200 text-blue-800'
+                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                    title="Não consumível: entra/sai da carteira do colaborador"
+                  >
+                    Não consumível
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHandling('ITEM_UNICO');
+                      setQuantity(1);
+                    }}
+                    className={`px-3 py-2 rounded-lg text-xs font-black border transition-all ${
+                      handling === 'ITEM_UNICO'
+                        ? 'bg-secondary/10 border-secondary/40 text-secondary'
+                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                    title="Item único: normalmente 1 unidade com TAG"
+                  >
+                    Item único
+                  </button>
+                </div>
+                <div className="text-[10px] text-slate-400 font-bold">
+                  Dica: “Item único” força quantidade 1 e pede TAG.
+                </div>
+              </div>
+
+              {needsEmployee && (
                 <div className="space-y-2">
                   <label className="text-xs font-bold uppercase text-slate-400 flex items-center gap-2">
                     <User size={14} className="text-secondary" />
-                    Quem está retirando?
+                    {mode === 'IN' ? 'Quem está devolvendo?' : 'Quem está retirando?'}
                   </label>
                   <select
                     required
@@ -213,11 +329,31 @@ export default function QuickMovementModal({
                     value={selectedEmployee}
                     onChange={(e) => setSelectedEmployee(e.target.value)}
                   >
-                    <option value="">Selecione o colaborador...</option>
+                    <option value="">{mode === 'IN' ? 'Selecione quem está devolvendo...' : 'Selecione o colaborador...'}</option>
                     {employees.map(e => (
                       <option key={e.id} value={e.id}>{e.full_name}</option>
                     ))}
                   </select>
+                </div>
+              )}
+
+              {isUnique && (
+                <div className="space-y-2">
+                  <label className="text-xs font-black uppercase flex items-center gap-2 text-secondary">
+                    <Tag size={14} />
+                    TAG do item único *
+                  </label>
+                  <input
+                    required
+                    type="text"
+                    className="w-full p-3 bg-white border-2 border-secondary/60 rounded-lg focus:ring-4 focus:ring-secondary/15 outline-none font-black tracking-wide text-primary"
+                    placeholder="Ex.: TAG-000123"
+                    value={tag}
+                    onChange={(e) => setTag(e.target.value)}
+                  />
+                  <div className="text-[10px] text-slate-400 font-bold">
+                    Essa TAG vai junto no histórico da movimentação.
+                  </div>
                 </div>
               )}
 
@@ -228,8 +364,9 @@ export default function QuickMovementModal({
                     required
                     type="number"
                     min="1"
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-secondary/20 outline-none font-bold text-center text-lg"
-                    value={quantity}
+                    disabled={isUnique}
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-secondary/20 outline-none font-bold text-center text-lg disabled:opacity-60"
+                    value={effectiveQty}
                     onChange={(e) => setQuantity(Number(e.target.value))}
                     onFocus={(e) => e.target.select()}
                   />

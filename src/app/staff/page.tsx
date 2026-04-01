@@ -647,6 +647,12 @@ export default function StaffPage() {
                           <span className="text-[10px] text-slate-400 font-mono">{new Date(m.created_at).toLocaleString()}</span>
                         </div>
                         <h4 className="font-bold text-primary text-sm leading-tight">{m.items?.description}</h4>
+                        {m.tag && (
+                          <div className="mt-2 inline-flex items-center gap-2 bg-secondary/10 border border-secondary/20 px-2 py-1 rounded-lg">
+                            <span className="text-[9px] font-black text-secondary uppercase tracking-wider">TAG</span>
+                            <span className="text-[11px] font-black text-primary font-mono tracking-wide">{String(m.tag)}</span>
+                          </div>
+                        )}
                         <div className="flex items-center justify-between mt-2">
                           <div className="flex flex-col">
                             <span className="text-[10px] text-slate-400 font-bold uppercase">{m.items?.unit}</span>
