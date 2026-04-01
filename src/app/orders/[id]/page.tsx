@@ -6,9 +6,10 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { ArrowLeft, Loader2, Plus, Trash2, Wand2, Link as LinkIcon, Save } from 'lucide-react';
+import { ArrowLeft, Loader2, Plus, Trash2, Wand2, Link as LinkIcon, Save, Sheet } from 'lucide-react';
 import type { EmployeeLite, PurchaseOrderItemRow, PurchaseOrderRow, PurchaseStage } from '@/lib/purchaseOrders';
 import { PURCHASE_STAGES, clampNumber, isPurchaseStage } from '@/lib/purchaseOrders';
+import { downloadOrdersSpreadsheet } from '@/lib/ordersExport';
 
 function OrderDetailContent() {
   const params = useParams<{ id: string }>();
@@ -21,6 +22,7 @@ function OrderDetailContent() {
 
   const [items, setItems] = useState<PurchaseOrderItemRow[]>([]);
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
+  const [order, setOrder] = useState<PurchaseOrderRow | null>(null);
 
   const [orderStage, setOrderStage] = useState<PurchaseStage>('Rascunho');
   const [requesterId, setRequesterId] = useState<string>('');
@@ -94,6 +96,7 @@ function OrderDetailContent() {
     });
     setEmployees(empList);
     setItems(itemList);
+    setOrder(row);
     setOrderStage(row.stage);
     setRequesterId(row.requester_employee_id);
     setNotes(row.notes || '');
@@ -236,6 +239,24 @@ function OrderDetailContent() {
             className="px-4 py-2 bg-white border border-slate-200 rounded-lg font-bold text-slate-600 hover:bg-slate-50"
           >
             Lista
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (!order) return;
+              downloadOrdersSpreadsheet({
+                orders: [order],
+                items,
+                employees,
+                title: `Pedido ${order.id}`,
+              });
+            }}
+            disabled={loading || !order}
+            className="px-4 py-2 bg-white border border-slate-200 rounded-lg font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50 flex items-center gap-2"
+            title="Baixar este pedido em planilha (.xlsx)"
+          >
+            <Sheet size={16} />
+            Baixar
           </button>
           <button
             type="button"
