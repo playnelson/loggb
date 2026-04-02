@@ -3,13 +3,12 @@
 export const dynamic = 'force-dynamic';
 
 import { useState, useEffect, Suspense } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { Search, Plus, AlertCircle, X, FileUp, Users, History, Edit, Trash2, Loader2, ArrowUpRight, ArrowDownLeft, Tags } from 'lucide-react';
+import { Search, Plus, AlertCircle, X, FileUp, Users, History, Edit, Trash2, Loader2, ArrowUpRight, ArrowDownLeft, Tags, ShoppingCart, User, Minus, Tag } from 'lucide-react';
 import ImportSpreadsheet from '@/components/ImportSpreadsheet';
 import QuickMovementModal from '@/components/QuickMovementModal';
 import { itemCodeFromDescription } from '@/lib/itemCode';
-import { updateStock } from '@/lib/movements';
+import { recordMovement, updatePossessionQuantity, updateStock } from '@/lib/movements';
 
 function possessionEmployeeName(
   employees: { full_name: string } | { full_name: string }[] | null | undefined
@@ -44,12 +43,27 @@ interface ItemCategory {
   locked: boolean;
 }
 
+interface EmployeeLite {
+  id: string;
+  full_name: string;
+}
+
+interface CartLine {
+  lineId: string;
+  itemId: string;
+  description: string;
+  quantity: number;
+  unit: string;
+  consumable: boolean;
+  unique_item: boolean;
+  tag?: string;
+}
+
 const FALLBACK_CATEGORIES = ['Ferramenta', 'EPI', 'Tubulação', 'Consumível'] as const;
 
 function InventoryContent() {
-  const searchParams = useSearchParams();
-  const router = useRouter();
   const [products, setProducts] = useState<Product[]>([]);
+  const [employees, setEmployees] = useState<EmployeeLite[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -74,6 +88,12 @@ function InventoryContent() {
   const [isQuickMovementOpen, setIsQuickMovementOpen] = useState(false);
   const [quickMovementItem, setQuickMovementItem] = useState<Product | null>(null);
   const [quickMovementMode, setQuickMovementMode] = useState<'IN' | 'OUT'>('OUT');
+  const [isCartOpen, setIsCartOpen] = useState(false);
+  const [cart, setCart] = useState<CartLine[]>([]);
+  const [cartEmployeeId, setCartEmployeeId] = useState('');
+  const [cartPickItemId, setCartPickItemId] = useState('');
+  const [cartPickQty, setCartPickQty] = useState(1);
+  const [cartPickTag, setCartPickTag] = useState('');
 
   // Form states for NEW/EDIT
   const [formData, setFormData] = useState({
@@ -161,11 +181,29 @@ function InventoryContent() {
     setLoading(false);
   };
 
+  const fetchEmployees = async () => {
+    const { data, error } = await supabase
+      .from('employees')
+      .select('id, full_name, status')
+      .order('full_name', { ascending: true });
+    if (error) {
+      console.error('Error fetching employees:', error);
+      setEmployees([]);
+      return;
+    }
+    const actives = (data || [])
+      .filter((e: { id: string; full_name: string; status?: string }) => !e.status || e.status === 'Ativo')
+      .map((e: { id: string; full_name: string }) => ({ id: e.id, full_name: e.full_name }));
+    setEmployees(actives);
+  };
+
   useEffect(() => {
     // eslint-disable-next-line @typescript-eslint/no-floating-promises
     fetchProducts();
     // eslint-disable-next-line @typescript-eslint/no-floating-promises
     fetchCategories();
+    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+    fetchEmployees();
   }, []);
 
   const categoryNames = categories?.map((c) => c.name) ?? [...FALLBACK_CATEGORIES];
@@ -375,6 +413,170 @@ function InventoryContent() {
     p.description.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const cartPickedItem = products.find((p) => p.id === cartPickItemId) || null;
+  const cartTotalUnits = cart.reduce((acc, line) => acc + line.quantity, 0);
+
+  const addLineToCart = () => {
+    if (!cartPickedItem) return;
+    const isUnique = Boolean(cartPickedItem.unique_item);
+    const qty = isUnique ? 1 : Math.max(1, Math.floor(Number(cartPickQty || 1)));
+    if (isUnique && !cartPickTag.trim()) {
+      alert('Informe a TAG para item único.');
+      return;
+    }
+
+    const inCartQty = cart
+      .filter((l) => l.itemId === cartPickedItem.id)
+      .reduce((s, l) => s + l.quantity, 0);
+    if (qty + inCartQty > cartPickedItem.quantity_current) {
+      alert('Quantidade no carrinho maior que o saldo atual do estoque.');
+      return;
+    }
+
+    if (isUnique) {
+      const normalizedTag = cartPickTag.trim().toLowerCase();
+      const duplicatedTag = cart.some(
+        (l) => l.itemId === cartPickedItem.id && (l.tag || '').trim().toLowerCase() === normalizedTag
+      );
+      if (duplicatedTag) {
+        alert('Essa TAG já está no carrinho.');
+        return;
+      }
+      setCart((prev) => [
+        ...prev,
+        {
+          lineId: crypto.randomUUID(),
+          itemId: cartPickedItem.id,
+          description: cartPickedItem.description,
+          quantity: 1,
+          unit: cartPickedItem.unit,
+          consumable: cartPickedItem.consumable,
+          unique_item: true,
+          tag: cartPickTag.trim(),
+        },
+      ]);
+      setCartPickTag('');
+      return;
+    }
+
+    setCart((prev) => {
+      const idx = prev.findIndex((l) => l.itemId === cartPickedItem.id && !l.unique_item);
+      if (idx === -1) {
+        return [
+          ...prev,
+          {
+            lineId: crypto.randomUUID(),
+            itemId: cartPickedItem.id,
+            description: cartPickedItem.description,
+            quantity: qty,
+            unit: cartPickedItem.unit,
+            consumable: cartPickedItem.consumable,
+            unique_item: false,
+          },
+        ];
+      }
+      const next = [...prev];
+      next[idx] = { ...next[idx], quantity: next[idx].quantity + qty };
+      return next;
+    });
+    setCartPickQty(1);
+  };
+
+  const updateCartLineQty = (lineId: string, delta: number) => {
+    setCart((prev) => {
+      const idx = prev.findIndex((l) => l.lineId === lineId);
+      if (idx < 0) return prev;
+      const line = prev[idx];
+      if (line.unique_item) return prev;
+      const item = products.find((p) => p.id === line.itemId);
+      if (!item) return prev;
+      const nextQty = line.quantity + delta;
+      if (nextQty <= 0) return prev.filter((l) => l.lineId !== lineId);
+      const others = prev
+        .filter((l) => l.itemId === line.itemId && l.lineId !== lineId)
+        .reduce((s, l) => s + l.quantity, 0);
+      if (nextQty + others > item.quantity_current) {
+        alert('Saldo insuficiente para aumentar esse item.');
+        return prev;
+      }
+      const next = [...prev];
+      next[idx] = { ...line, quantity: nextQty };
+      return next;
+    });
+  };
+
+  const processCartCheckout = async () => {
+    if (!cartEmployeeId) {
+      alert('Selecione o colaborador.');
+      return;
+    }
+    if (cart.length === 0) {
+      alert('Carrinho vazio.');
+      return;
+    }
+    setIsSubmitting(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      alert('Usuário não autenticado.');
+      setIsSubmitting(false);
+      return;
+    }
+
+    for (let i = 0; i < cart.length; i++) {
+      const line = cart[i];
+      const mvRes = await recordMovement(supabase, {
+        item_id: line.itemId,
+        employee_id: cartEmployeeId,
+        quantity: line.quantity,
+        type: 'OUT',
+        performed_by: user.id,
+        tag: line.tag || null,
+      });
+      if (!mvRes.ok) {
+        alert(`Erro na linha ${i + 1}: ${mvRes.message}`);
+        setIsSubmitting(false);
+        return;
+      }
+
+      if (!line.consumable) {
+        const { data: currentPos } = await supabase
+          .from('possession')
+          .select('quantity')
+          .eq('employee_id', cartEmployeeId)
+          .eq('item_id', line.itemId)
+          .maybeSingle();
+        const currentQty = Number(currentPos?.quantity ?? 0);
+        const posRes = await updatePossessionQuantity(
+          supabase,
+          cartEmployeeId,
+          line.itemId,
+          currentQty + line.quantity,
+          user.id
+        );
+        if (!posRes.ok) {
+          alert(`Erro ao atualizar carteira (${line.description}): ${posRes.message}`);
+          setIsSubmitting(false);
+          return;
+        }
+      }
+
+      const stockRes = await updateStock(supabase, line.itemId, -line.quantity);
+      if (!stockRes.ok) {
+        alert(`Erro ao atualizar estoque (${line.description}): ${stockRes.message}`);
+        setIsSubmitting(false);
+        return;
+      }
+    }
+
+    setCart([]);
+    setCartPickItemId('');
+    setCartPickQty(1);
+    setCartPickTag('');
+    setIsCartOpen(false);
+    setIsSubmitting(false);
+    await fetchProducts();
+  };
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -383,6 +585,15 @@ function InventoryContent() {
           <p className="text-slate-500 text-sm">Gestão de materiais, EPIs e ferramentas por descrição e categoria.</p>
         </div>
         <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setIsCartOpen(true)}
+            className="flex items-center gap-2 bg-secondary text-white px-4 py-2 rounded-lg hover:opacity-95 transition-all font-medium"
+            title="Retirada em lote por colaborador"
+          >
+            <ShoppingCart size={18} />
+            Carrinho
+          </button>
           <button
             type="button"
             onClick={openCategoryManager}
@@ -926,6 +1137,169 @@ function InventoryContent() {
           </div>
         </div>
       )}
+
+      {isCartOpen && (
+        <div className="fixed inset-0 bg-primary/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="p-6 border-b bg-slate-50 flex items-center justify-between">
+              <div>
+                <h3 className="text-xl font-bold text-primary">Carrinho de retirada</h3>
+                <p className="text-xs text-slate-500 mt-1">Retire varios itens de uma vez para o mesmo colaborador.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsCartOpen(false)}
+                className="p-2 hover:bg-slate-200 rounded-full"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 overflow-y-auto">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-bold uppercase text-slate-400 flex items-center gap-2 mb-1">
+                    <User size={14} className="text-secondary" />
+                    Colaborador
+                  </label>
+                  <select
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none font-medium"
+                    value={cartEmployeeId}
+                    onChange={(e) => setCartEmployeeId(e.target.value)}
+                  >
+                    <option value="">Selecione o colaborador...</option>
+                    {employees.map((e) => (
+                      <option key={e.id} value={e.id}>{e.full_name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="border rounded-xl p-4 bg-slate-50">
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-2">
+                  <select
+                    className="md:col-span-6 p-3 bg-white border border-slate-200 rounded-lg outline-none font-medium"
+                    value={cartPickItemId}
+                    onChange={(e) => {
+                      setCartPickItemId(e.target.value);
+                      setCartPickTag('');
+                      setCartPickQty(1);
+                    }}
+                  >
+                    <option value="">Item para adicionar...</option>
+                    {products.map((p) => (
+                      <option key={p.id} value={p.id} disabled={p.quantity_current <= 0}>
+                        {p.description} - saldo {p.quantity_current}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="number"
+                    min={1}
+                    disabled={Boolean(cartPickedItem?.unique_item)}
+                    className="md:col-span-2 p-3 bg-white border border-slate-200 rounded-lg outline-none font-bold disabled:opacity-60"
+                    value={cartPickedItem?.unique_item ? 1 : cartPickQty === 0 ? '' : cartPickQty}
+                    onChange={(e) => setCartPickQty(Number(e.target.value))}
+                  />
+                  {cartPickedItem?.unique_item && (
+                    <input
+                      type="text"
+                      placeholder="TAG obrigatoria"
+                      className="md:col-span-3 p-3 bg-white border-2 border-secondary/50 rounded-lg outline-none font-black"
+                      value={cartPickTag}
+                      onChange={(e) => setCartPickTag(e.target.value)}
+                    />
+                  )}
+                  <button
+                    type="button"
+                    onClick={addLineToCart}
+                    className="md:col-span-1 p-3 bg-secondary text-white rounded-lg font-bold hover:opacity-95 flex items-center justify-center"
+                    title="Adicionar ao carrinho"
+                  >
+                    <Plus size={16} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                {cart.length === 0 ? (
+                  <div className="text-sm text-slate-400 italic p-6 text-center border border-dashed rounded-xl">
+                    Carrinho vazio.
+                  </div>
+                ) : (
+                  cart.map((line) => (
+                    <div key={line.lineId} className="flex items-center justify-between bg-white border border-slate-100 rounded-xl px-3 py-2">
+                      <div className="min-w-0">
+                        <div className="font-bold text-primary text-sm truncate">{line.description}</div>
+                        <div className="text-[10px] text-slate-400 font-bold uppercase flex items-center gap-2">
+                          {line.unit}
+                          {line.tag && (
+                            <span className="inline-flex items-center gap-1 text-secondary">
+                              <Tag size={10} />
+                              {line.tag}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {!line.unique_item && (
+                          <button
+                            type="button"
+                            onClick={() => updateCartLineQty(line.lineId, -1)}
+                            className="p-2 hover:bg-slate-100 rounded"
+                          >
+                            <Minus size={14} />
+                          </button>
+                        )}
+                        <span className="font-black min-w-8 text-center">{line.quantity}</span>
+                        {!line.unique_item && (
+                          <button
+                            type="button"
+                            onClick={() => updateCartLineQty(line.lineId, 1)}
+                            className="p-2 hover:bg-slate-100 rounded"
+                          >
+                            <Plus size={14} />
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setCart((prev) => prev.filter((x) => x.lineId !== line.lineId))}
+                          className="p-2 text-red-500 hover:bg-red-50 rounded"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+            <div className="p-4 border-t bg-slate-50 flex items-center justify-between">
+              <div className="text-sm font-bold text-slate-600">
+                Itens: {cart.length} linhas / {cartTotalUnits} unidades
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCart([])}
+                  className="px-4 py-2 border border-slate-200 rounded-lg font-bold text-slate-500 hover:bg-white"
+                >
+                  Limpar
+                </button>
+                <button
+                  type="button"
+                  disabled={isSubmitting || cart.length === 0 || !cartEmployeeId}
+                  onClick={() => void processCartCheckout()}
+                  className="px-4 py-2 bg-primary text-white rounded-lg font-bold disabled:opacity-50"
+                >
+                  {isSubmitting ? 'Processando...' : 'Confirmar retirada'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <QuickMovementModal 
         isOpen={isQuickMovementOpen}
         item={quickMovementItem}
