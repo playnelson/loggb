@@ -32,6 +32,13 @@ interface Employee {
 
 const EPI_FICHA_STORAGE_KEY = 'loggb_epi_ficha_defaults';
 
+function formatMovementDateBr(iso: string | null | undefined) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+}
+
 type EpiFichaFormState = {
   companyName: string;
   companyCnpj: string;
@@ -53,6 +60,9 @@ export default function StaffPage() {
   // Modals for actions
   const [timelineEmployee, setTimelineEmployee] = useState<Employee | null>(null);
   const [movements, setMovements] = useState<any[]>([]);
+  const [timelineLoading, setTimelineLoading] = useState(false);
+  const [timelineHistorySearch, setTimelineHistorySearch] = useState('');
+  const [walletHistorySearch, setWalletHistorySearch] = useState('');
   const [walletEmployeeId, setWalletEmployeeId] = useState<string | null>(null);
   const [walletMovements, setWalletMovements] = useState<any[]>([]);
   const [walletLoading, setWalletLoading] = useState(false);
@@ -117,19 +127,7 @@ export default function StaffPage() {
     fetchEmployees();
   }, []);
 
-  const openTimeline = async (employee: Employee) => {
-    setTimelineEmployee(employee);
-    const { data } = await supabase
-      .from('movements')
-      .select('*, items(description, unit, consumable), tag')
-      .eq('employee_id', employee.id)
-      .order('created_at', { ascending: false })
-      .limit(30);
-    setMovements(data || []);
-  };
-
   const fetchAllEmployeeMovements = async (employeeId: string) => {
-    // best-effort full history for wallet panel (paginated by range)
     const pageSize = 1000;
     let from = 0;
     const all: any[] = [];
@@ -146,9 +144,25 @@ export default function StaffPage() {
       all.push(...chunk);
       if (chunk.length < pageSize) break;
       from += pageSize;
-      if (from > 50_000) break; // safety guard
+      if (from > 50_000) break;
     }
     return all;
+  };
+
+  const openTimeline = async (employee: Employee) => {
+    setTimelineEmployee(employee);
+    setTimelineHistorySearch('');
+    setTimelineLoading(true);
+    setMovements([]);
+    try {
+      const all = await fetchAllEmployeeMovements(employee.id);
+      setMovements(all);
+    } catch (err) {
+      console.error(err);
+      setMovements([]);
+    } finally {
+      setTimelineLoading(false);
+    }
   };
 
   const walletEmployee = useMemo(() => {
@@ -181,6 +195,7 @@ export default function StaffPage() {
     setWalletEmployeeId(employee.id);
     setWalletReturn(null);
     setReturnQty(0);
+    setWalletHistorySearch('');
     await reloadWallet(employee.id);
   };
 
@@ -197,8 +212,8 @@ export default function StaffPage() {
       `Gerado em: ${new Date().toLocaleString()}\n` +
       `--------------------------------------------------\n\n` +
       data.map((m: any) => {
-        const date = new Date(m.created_at).toLocaleString();
-        const type = m.type === 'IN' ? '[DEVOLUÇÃO]' : '[RETIRADA] ';
+        const date = formatMovementDateBr(m.created_at);
+        const type = m.type === 'IN' ? '[DEVOLUÇÃO]' : '[RETIRADA/RECEBIMENTO]';
         const tag = m.tag ? ` | TAG: ${String(m.tag)}` : '';
         return `${date} | ${type} | ${m.quantity}x ${m.items?.description}${tag}`;
       }).join('\n');
@@ -358,6 +373,27 @@ export default function StaffPage() {
     walletBalances.forEach((x) => map.set(String(x.item_id), Number(x.balance || 0)));
     return map;
   }, [walletBalances]);
+
+  const filteredTimelineMovements = useMemo(() => {
+    const q = timelineHistorySearch.trim().toLowerCase();
+    if (!q) return movements;
+    return movements.filter((m) => {
+      const desc = String(m.items?.description ?? '').toLowerCase();
+      const tag = String(m.tag ?? '').toLowerCase();
+      const unit = String(m.items?.unit ?? '').toLowerCase();
+      return desc.includes(q) || tag.includes(q) || unit.includes(q);
+    });
+  }, [movements, timelineHistorySearch]);
+
+  const filteredWalletMovements = useMemo(() => {
+    const q = walletHistorySearch.trim().toLowerCase();
+    if (!q) return walletMovements;
+    return walletMovements.filter((m) => {
+      const desc = String(m.items?.description ?? '').toLowerCase();
+      const tag = String(m.tag ?? '').toLowerCase();
+      return desc.includes(q) || tag.includes(q);
+    });
+  }, [walletMovements, walletHistorySearch]);
 
   const handleWalletReturn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -548,7 +584,7 @@ export default function StaffPage() {
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Colaborador</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Cargo</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Status</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Carteira de Ativos (EPIs / Diversos)</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Carteiras (só não consumíveis)</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Ações</th>
               </tr>
             </thead>
@@ -565,9 +601,7 @@ export default function StaffPage() {
                   <td colSpan={5} className="px-6 py-12 text-center text-slate-400">Nenhum funcionário encontrado.</td>
                 </tr>
               ) : (
-                filteredEmployees.map((e) => {
-                  const activePossessions = e.possession?.filter(p => p.quantity > 0 && !!p.items) || [];
-                  return (
+                filteredEmployees.map((e) => (
                     <tr key={e.id} className="hover:bg-slate-50 transition-colors group">
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
@@ -621,7 +655,7 @@ export default function StaffPage() {
                           <div>
                             <div className="flex items-center gap-1.5 mb-1.5">
                               <div className="w-1 h-3 bg-blue-500 rounded-full"></div>
-                              <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Demais Itens</span>
+                              <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Demais materiais</span>
                             </div>
                             <div className="flex flex-wrap gap-1.5">
                               {e.possession?.filter(p => p.quantity > 0 && !!p.items && !p.items.consumable && p.items.category !== 'EPI').length ? (
@@ -659,9 +693,9 @@ export default function StaffPage() {
                           </button>
                           <button 
                             type="button"
-                            onClick={() => openTimeline(e)}
+                            onClick={() => void openTimeline(e)}
                             className="text-slate-400 hover:text-secondary p-2 bg-slate-50 border border-slate-200 rounded-lg transition-all"
-                            title="Ver Histórico"
+                            title="Histórico completo (busca, retiradas e devoluções)"
                           >
                             <History size={16} />
                           </button>
@@ -669,15 +703,14 @@ export default function StaffPage() {
                             type="button"
                             onClick={() => void openWallet(e)}
                             className="text-slate-400 hover:text-secondary p-2 bg-slate-50 border border-slate-200 rounded-lg transition-all"
-                            title="Carteira completa (posse + consumíveis + histórico completo)"
+                            title="Carteiras (EPI + demais) e histórico — consumíveis só no histórico"
                           >
                             <Package size={16} />
                           </button>
                         </div>
                       </td>
                     </tr>
-                  );
-                })
+                ))
               )}
             </tbody>
           </table>
@@ -784,12 +817,14 @@ export default function StaffPage() {
       {timelineEmployee && (
         <div className="fixed inset-0 bg-primary/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden animate-in zoom-in duration-300">
-            <div className="p-6 border-b bg-slate-50 flex items-center justify-between">
+            <div className="p-6 border-b bg-slate-50 flex items-center justify-between shrink-0">
               <div>
                 <h3 className="text-xl font-bold text-primary">{timelineEmployee.full_name}</h3>
-                <p className="text-xs text-slate-500 mt-1 uppercase font-bold tracking-wider">Histórico de Movimentações (Últimas 30)</p>
+                <p className="text-xs text-slate-500 mt-1 font-medium">
+                  Histórico completo — retiradas (recebimento) e devoluções. Consumíveis aparecem apenas aqui.
+                </p>
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-2 shrink-0">
                 <button 
                   onClick={() => downloadFullHistory(timelineEmployee)}
                   className="flex items-center gap-2 text-primary bg-white border border-border px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-slate-100 transition-colors"
@@ -797,44 +832,97 @@ export default function StaffPage() {
                   <Download size={14} />
                   Baixar TXT
                 </button>
-                <button onClick={() => setTimelineEmployee(null)} className="p-2 hover:bg-slate-200 rounded-full">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTimelineEmployee(null);
+                    setTimelineHistorySearch('');
+                    setMovements([]);
+                  }}
+                  className="p-2 hover:bg-slate-200 rounded-full"
+                >
                   <X size={20} />
                 </button>
               </div>
             </div>
-            <div className="flex-1 overflow-y-auto p-6 bg-slate-50/30">
-              <div className="relative border-l-2 border-slate-100 ml-3 space-y-6">
-                {movements.length === 0 ? (
-                  <p className="text-center text-slate-400 py-8 italic ml-[-12px]">Nenhuma movimentação para este colaborador.</p>
-                ) : (
-                  movements.map((m) => (
-                    <div key={m.id} className="relative pl-6">
-                      <div className={`absolute left-[-9px] top-1 w-4 h-4 rounded-full border-2 border-white shadow-sm ${m.type === 'IN' ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                      <div className="bg-white p-4 rounded-xl border border-border shadow-sm">
-                        <div className="flex justify-between items-start mb-1">
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${m.type === 'IN' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>
-                            {m.type === 'IN' ? 'DEVOLUÇÃO' : 'RETIRADA'}
-                          </span>
-                          <span className="text-[10px] text-slate-400 font-mono">{new Date(m.created_at).toLocaleString()}</span>
-                        </div>
-                        <h4 className="font-bold text-primary text-sm leading-tight">{m.items?.description}</h4>
-                        {m.tag && (
-                          <div className="mt-2 inline-flex items-center gap-2 bg-secondary/10 border border-secondary/20 px-2 py-1 rounded-lg">
-                            <span className="text-[9px] font-black text-secondary uppercase tracking-wider">TAG</span>
-                            <span className="text-[11px] font-black text-primary font-mono tracking-wide">{String(m.tag)}</span>
-                          </div>
-                        )}
-                        <div className="flex items-center justify-between mt-2">
-                          <div className="flex flex-col">
-                            <span className="text-[10px] text-slate-400 font-bold uppercase">{m.items?.unit}</span>
-                          </div>
-                          <span className="text-sm font-black text-primary">x{m.quantity}</span>
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                )}
+            <div className="px-6 pt-4 pb-2 border-b bg-white shrink-0">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                <input
+                  type="search"
+                  placeholder="Buscar por item, TAG ou unidade..."
+                  className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-secondary/40"
+                  value={timelineHistorySearch}
+                  onChange={(ev) => setTimelineHistorySearch(ev.target.value)}
+                />
               </div>
+              <p className="text-[10px] text-slate-400 font-bold mt-2">
+                {timelineLoading
+                  ? 'Carregando…'
+                  : `${filteredTimelineMovements.length} de ${movements.length} registro(s)`}
+              </p>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6 bg-slate-50/30 min-h-0">
+              {timelineLoading ? (
+                <div className="flex items-center justify-center py-16 text-slate-400 text-sm">
+                  <Loader2 className="animate-spin mr-2" size={20} />
+                  Carregando histórico…
+                </div>
+              ) : (
+                <div className="relative border-l-2 border-slate-100 ml-3 space-y-6">
+                  {filteredTimelineMovements.length === 0 ? (
+                    <p className="text-center text-slate-400 py-8 italic ml-[-12px]">
+                      {movements.length === 0
+                        ? 'Nenhuma movimentação para este colaborador.'
+                        : 'Nenhum resultado para a busca.'}
+                    </p>
+                  ) : (
+                    filteredTimelineMovements.map((m) => {
+                      const isOut = String(m.type) === 'OUT';
+                      return (
+                        <div key={m.id} className="relative pl-6">
+                          <div
+                            className={`absolute left-[-9px] top-1 w-4 h-4 rounded-full border-2 border-white shadow-sm ${
+                              isOut ? 'bg-red-500' : 'bg-green-500'
+                            }`}
+                          />
+                          <div className="bg-white p-4 rounded-xl border border-border shadow-sm">
+                            <div className="flex flex-wrap justify-between items-start gap-2 mb-2">
+                              <span
+                                className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wide ${
+                                  isOut ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'
+                                }`}
+                              >
+                                {isOut ? 'Retirada (recebimento)' : 'Devolução'}
+                              </span>
+                              {m.items?.consumable && (
+                                <span className="text-[9px] font-black uppercase bg-amber-50 text-amber-800 px-2 py-0.5 rounded-full">
+                                  Consumível
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs font-black text-primary">
+                              {isOut ? 'Data da retirada: ' : 'Data da devolução: '}
+                              <span className="font-mono text-slate-700">{formatMovementDateBr(m.created_at)}</span>
+                            </p>
+                            <h4 className="font-bold text-primary text-sm leading-tight mt-2">{m.items?.description}</h4>
+                            {m.tag && (
+                              <div className="mt-2 inline-flex items-center gap-2 bg-secondary/10 border border-secondary/20 px-2 py-1 rounded-lg">
+                                <span className="text-[9px] font-black text-secondary uppercase tracking-wider">TAG</span>
+                                <span className="text-[11px] font-black text-primary font-mono tracking-wide">{String(m.tag)}</span>
+                              </div>
+                            )}
+                            <div className="flex items-center justify-between mt-3 pt-2 border-t border-slate-100">
+                              <span className="text-[10px] text-slate-400 font-bold uppercase">{m.items?.unit}</span>
+                              <span className="text-sm font-black text-primary">×{m.quantity}</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -846,7 +934,7 @@ export default function StaffPage() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in duration-300">
             <div className="p-6 border-b bg-slate-50 flex items-center justify-between shrink-0">
               <div>
-                <h3 className="text-xl font-bold text-primary">Carteira do colaborador</h3>
+                <h3 className="text-xl font-bold text-primary">Carteiras e histórico</h3>
                 <p className="text-xs text-slate-500 mt-1 font-medium">{walletEmployee?.full_name || '—'}</p>
               </div>
               <button
@@ -856,6 +944,7 @@ export default function StaffPage() {
                   setWalletError(null);
                   setWalletReturn(null);
                   setReturnQty(0);
+                  setWalletHistorySearch('');
                 }}
                 className="p-2 hover:bg-slate-200 rounded-full"
               >
@@ -863,32 +952,38 @@ export default function StaffPage() {
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+            <div className="flex-1 overflow-y-auto p-6 space-y-6 min-h-0">
               {walletError && (
                 <div className="p-3 bg-red-50 border border-red-100 text-red-700 rounded-xl text-xs font-bold">
                   {walletError}
                 </div>
               )}
 
+              <p className="text-[11px] text-slate-500 font-bold">
+                Carteiras mostram apenas materiais não consumíveis (EPI e demais). Consumíveis aparecem só no histórico abaixo.
+              </p>
+
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-                  <div className="p-4 border-b bg-slate-50 flex items-center justify-between">
-                    <div className="text-xs font-black text-primary uppercase">Itens em posse (não consumíveis)</div>
-                    <div className="text-xs font-bold text-slate-500">
-                      {(walletEmployee?.possession || []).filter((p) => p.quantity > 0 && !!p.items && !p.items.consumable).length}
+                  <div className="p-4 border-b bg-purple-50/80 flex items-center justify-between">
+                    <div className="text-xs font-black text-purple-900 uppercase tracking-wide">Carteira EPI</div>
+                    <div className="text-xs font-bold text-purple-800">
+                      {(walletEmployee?.possession || []).filter(
+                        (p) => p.quantity > 0 && !!p.items && !p.items.consumable && p.items.category === 'EPI'
+                      ).length}
                     </div>
                   </div>
                   <div className="p-4 space-y-2">
                     {(walletEmployee?.possession || [])
-                      .filter((p) => p.quantity > 0 && !!p.items && !p.items.consumable)
+                      .filter((p) => p.quantity > 0 && !!p.items && !p.items.consumable && p.items.category === 'EPI')
                       .map((p, idx) => (
-                        <div key={idx} className="flex items-center justify-between bg-slate-50 border border-slate-100 rounded-xl px-3 py-2">
+                        <div key={idx} className="flex items-center justify-between bg-purple-50/50 border border-purple-100 rounded-xl px-3 py-2">
                           <div className="min-w-0">
                             <div className="font-bold text-primary text-sm truncate">{p.items.description}</div>
                             <div className="text-[10px] text-slate-400 font-bold uppercase">{p.items.unit}</div>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <div className="text-sm font-black text-primary">x{p.quantity}</div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <div className="text-sm font-black text-primary">×{p.quantity}</div>
                             <button
                               type="button"
                               onClick={() => {
@@ -903,73 +998,73 @@ export default function StaffPage() {
                                 });
                                 setReturnQty(p.quantity);
                               }}
-                              className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-black text-slate-600 hover:bg-slate-50"
-                              title="Devolver (remove da carteira e devolve ao estoque)"
+                              className="px-3 py-1.5 bg-white border border-purple-200 rounded-lg text-xs font-black text-purple-800 hover:bg-purple-50"
+                              title="Devolver ao estoque"
                             >
                               Devolver
                             </button>
                           </div>
                         </div>
                       ))}
-                    {(walletEmployee?.possession || []).filter((p) => p.quantity > 0 && !!p.items && !p.items.consumable).length === 0 && (
-                      <div className="text-sm text-slate-400 italic">Sem itens não consumíveis em posse.</div>
-                    )}
+                    {(walletEmployee?.possession || []).filter(
+                      (p) => p.quantity > 0 && !!p.items && !p.items.consumable && p.items.category === 'EPI'
+                    ).length === 0 && <div className="text-sm text-slate-400 italic">Sem EPIs em posse.</div>}
                   </div>
                 </div>
 
                 <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-                  <div className="p-4 border-b bg-slate-50 flex items-center justify-between">
-                    <div className="text-xs font-black text-primary uppercase">Consumíveis (saldo retirado)</div>
-                    <div className="text-xs font-bold text-slate-500">{walletBalances.length}</div>
+                  <div className="p-4 border-b bg-blue-50/80 flex items-center justify-between">
+                    <div className="text-xs font-black text-blue-900 uppercase tracking-wide">Demais materiais em posse</div>
+                    <div className="text-xs font-bold text-blue-800">
+                      {(walletEmployee?.possession || []).filter(
+                        (p) => p.quantity > 0 && !!p.items && !p.items.consumable && p.items.category !== 'EPI'
+                      ).length}
+                    </div>
                   </div>
                   <div className="p-4 space-y-2">
-                    {walletLoading ? (
-                      <div className="text-slate-400 text-sm">
-                        <Loader2 className="animate-spin inline mr-2" size={16} />
-                        Carregando histórico completo…
-                      </div>
-                    ) : walletBalances.length === 0 ? (
-                      <div className="text-sm text-slate-400 italic">Sem saldo de consumíveis em aberto.</div>
-                    ) : (
-                      walletBalances.map((c) => (
-                        <div key={c.item_id} className="flex items-center justify-between bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
+                    {(walletEmployee?.possession || [])
+                      .filter((p) => p.quantity > 0 && !!p.items && !p.items.consumable && p.items.category !== 'EPI')
+                      .map((p, idx) => (
+                        <div key={idx} className="flex items-center justify-between bg-blue-50/50 border border-blue-100 rounded-xl px-3 py-2">
                           <div className="min-w-0">
-                            <div className="font-bold text-amber-900 text-sm truncate">{c.description}</div>
-                            <div className="text-[10px] text-amber-700 font-bold uppercase">{c.unit}</div>
+                            <div className="font-bold text-primary text-sm truncate">{p.items.description}</div>
+                            <div className="text-[10px] text-slate-400 font-bold uppercase">{p.items.unit}</div>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <div className="text-sm font-black text-amber-900">x{c.balance}</div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <div className="text-sm font-black text-primary">×{p.quantity}</div>
                             <button
                               type="button"
                               onClick={() => {
                                 if (!walletEmployeeId) return;
                                 setWalletReturn({
                                   employeeId: walletEmployeeId,
-                                  item_id: c.item_id,
-                                  description: c.description,
-                                  unit: c.unit,
-                                  consumable: true,
-                                  maxQty: c.balance,
+                                  item_id: p.item_id,
+                                  description: p.items.description,
+                                  unit: p.items.unit,
+                                  consumable: false,
+                                  maxQty: p.quantity,
                                 });
-                                setReturnQty(c.balance);
+                                setReturnQty(p.quantity);
                               }}
-                              className="px-3 py-1.5 bg-white border border-amber-200 rounded-lg text-xs font-black text-amber-800 hover:bg-amber-50"
-                              title="Registrar devolução de consumível (só estoque + histórico)"
+                              className="px-3 py-1.5 bg-white border border-blue-200 rounded-lg text-xs font-black text-blue-800 hover:bg-blue-50"
+                              title="Devolver ao estoque"
                             >
                               Devolver
                             </button>
                           </div>
                         </div>
-                      ))
-                    )}
+                      ))}
+                    {(walletEmployee?.possession || []).filter(
+                      (p) => p.quantity > 0 && !!p.items && !p.items.consumable && p.items.category !== 'EPI'
+                    ).length === 0 && <div className="text-sm text-slate-400 italic">Sem outros materiais em posse.</div>}
                   </div>
                 </div>
               </div>
 
               <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-                <div className="p-4 border-b bg-slate-50 flex items-center justify-between">
-                  <div className="text-xs font-black text-primary uppercase">Histórico completo</div>
-                  <div className="flex gap-2">
+                <div className="p-4 border-b bg-slate-50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div className="text-xs font-black text-primary uppercase">Histórico (todos os materiais)</div>
+                  <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
                       onClick={() => walletEmployee && void downloadFullHistory(walletEmployee)}
@@ -981,65 +1076,106 @@ export default function StaffPage() {
                     </button>
                   </div>
                 </div>
-                <div className="p-4">
+                <div className="p-4 border-b bg-white">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                    <input
+                      type="search"
+                      placeholder="Buscar item ou TAG no histórico..."
+                      className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-secondary/40"
+                      value={walletHistorySearch}
+                      onChange={(ev) => setWalletHistorySearch(ev.target.value)}
+                    />
+                  </div>
+                  <p className="text-[10px] text-slate-400 font-bold mt-2">
+                    {walletLoading
+                      ? 'Carregando…'
+                      : `${filteredWalletMovements.length} de ${walletMovements.length} registro(s) — datas de retirada ou devolução`}
+                  </p>
+                </div>
+                <div className="p-4 max-h-[min(50vh,420px)] overflow-y-auto">
                   {walletLoading ? (
-                    <div className="text-slate-400 text-sm">
+                    <div className="text-slate-400 text-sm py-8 text-center">
                       <Loader2 className="animate-spin inline mr-2" size={16} />
                       Carregando…
                     </div>
                   ) : (
                     <div className="space-y-2">
-                      {walletMovements.slice(0, 200).map((m) => (
-                        <div key={m.id} className="flex items-center justify-between bg-slate-50 border border-slate-100 rounded-xl px-3 py-2">
-                          <div className="min-w-0">
-                            <div className="text-[10px] font-black uppercase tracking-wider text-slate-400">
-                              {m.type === 'IN' ? 'DEVOLUÇÃO' : 'RETIRADA'} • {new Date(m.created_at).toLocaleString('pt-BR')}
-                            </div>
-                            <div className="font-bold text-primary text-sm truncate">
-                              {m.items?.description || '—'}
-                            </div>
-                            {m.tag && (
-                              <div className="mt-1 inline-flex items-center gap-2 bg-secondary/10 border border-secondary/20 px-2 py-1 rounded-lg">
-                                <span className="text-[9px] font-black text-secondary uppercase tracking-wider">TAG</span>
-                                <span className="text-[11px] font-black text-primary font-mono tracking-wide">{String(m.tag)}</span>
+                      {filteredWalletMovements.slice(0, 400).map((m) => {
+                        const isOut = String(m.type) === 'OUT';
+                        return (
+                          <div key={m.id} className="flex flex-wrap items-start justify-between gap-2 bg-slate-50 border border-slate-100 rounded-xl px-3 py-2">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2 mb-1">
+                                <span
+                                  className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase ${
+                                    isOut ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'
+                                  }`}
+                                >
+                                  {isOut ? 'Retirada (recebimento)' : 'Devolução'}
+                                </span>
+                                {m.items?.consumable && (
+                                  <span className="text-[9px] font-black uppercase bg-amber-50 text-amber-800 px-2 py-0.5 rounded-full">
+                                    Consumível
+                                  </span>
+                                )}
                               </div>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <div className="text-sm font-black text-primary">
-                              {m.type === 'IN' ? '+' : '-'}{m.quantity} <span className="text-xs text-slate-400">{m.items?.unit || ''}</span>
+                              <p className="text-[11px] font-bold text-slate-600">
+                                {isOut ? 'Data da retirada: ' : 'Data da devolução: '}
+                                <span className="font-mono font-normal">{formatMovementDateBr(m.created_at)}</span>
+                              </p>
+                              <div className="font-bold text-primary text-sm truncate mt-1">{m.items?.description || '—'}</div>
+                              {m.tag && (
+                                <div className="mt-1 inline-flex items-center gap-2 bg-secondary/10 border border-secondary/20 px-2 py-1 rounded-lg">
+                                  <span className="text-[9px] font-black text-secondary uppercase tracking-wider">TAG</span>
+                                  <span className="text-[11px] font-black text-primary font-mono tracking-wide">{String(m.tag)}</span>
+                                </div>
+                              )}
                             </div>
-                            {String(m.type) === 'OUT' && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const consumable = Boolean(m.items?.consumable);
-                                  const maxQty = consumable
-                                    ? (walletBalances.find((x) => x.item_id === String(m.item_id))?.balance ?? Number(m.quantity || 0))
-                                    : Number(m.quantity || 0);
-                                  if (!walletEmployeeId) return;
-                                  setWalletReturn({
-                                    employeeId: walletEmployeeId,
-                                    item_id: String(m.item_id),
-                                    description: String(m.items?.description || '—'),
-                                    unit: String(m.items?.unit || 'un'),
-                                    consumable,
-                                    maxQty: Math.max(1, Number(maxQty || 1)),
-                                  });
-                                  setReturnQty(Math.max(1, Math.min(Number(m.quantity || 1), Number(maxQty || 1))));
-                                }}
-                                className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-black text-slate-600 hover:bg-slate-50"
-                                title="Devolver a partir do histórico"
-                              >
-                                Devolver
-                              </button>
-                            )}
+                            <div className="flex items-center gap-2 shrink-0">
+                              <div className="text-sm font-black text-primary text-right">
+                                {isOut ? '−' : '+'}
+                                {m.quantity}{' '}
+                                <span className="text-xs text-slate-400">{m.items?.unit || ''}</span>
+                              </div>
+                              {isOut && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const consumable = Boolean(m.items?.consumable);
+                                    const maxQty = consumable
+                                      ? walletBalances.find((x) => x.item_id === String(m.item_id))?.balance ??
+                                        Number(m.quantity || 0)
+                                      : Number(m.quantity || 0);
+                                    if (!walletEmployeeId) return;
+                                    setWalletReturn({
+                                      employeeId: walletEmployeeId,
+                                      item_id: String(m.item_id),
+                                      description: String(m.items?.description || '—'),
+                                      unit: String(m.items?.unit || 'un'),
+                                      consumable,
+                                      maxQty: Math.max(1, Number(maxQty || 1)),
+                                    });
+                                    setReturnQty(Math.max(1, Math.min(Number(m.quantity || 1), Number(maxQty || 1))));
+                                  }}
+                                  className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-black text-slate-600 hover:bg-slate-50"
+                                  title="Registrar devolução"
+                                >
+                                  Devolver
+                                </button>
+                              )}
+                            </div>
                           </div>
+                        );
+                      })}
+                      {filteredWalletMovements.length > 400 && (
+                        <div className="text-[11px] text-amber-700 font-bold bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                          Mostrando 400 de {filteredWalletMovements.length} com o filtro atual. Afine a busca ou use “Baixar TXT”.
                         </div>
-                      ))}
-                      {walletMovements.length > 200 && (
-                        <div className="text-[11px] text-slate-400 font-bold">
-                          Mostrando 200 de {walletMovements.length} (use “Baixar TXT” para ver tudo).
+                      )}
+                      {!walletLoading && filteredWalletMovements.length === 0 && (
+                        <div className="text-sm text-slate-400 italic text-center py-6">
+                          {walletMovements.length === 0 ? 'Sem movimentações.' : 'Nenhum resultado para a busca.'}
                         </div>
                       )}
                     </div>
