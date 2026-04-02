@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 import { useCallback, useMemo, useRef, useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { recordMovement, updatePossessionQuantity, updateStock } from '@/lib/movements';
-import { Search, UserPlus, Mail, Phone, ExternalLink, X, FileUp, Filter, Package, AlertCircle, History, RotateCcw, Download, Loader2, ArrowLeft, FileText } from 'lucide-react';
+import { Search, UserPlus, Mail, Phone, ExternalLink, X, FileUp, Filter, Package, AlertCircle, History, RotateCcw, Download, Loader2, ArrowLeft, FileText, Trash2 } from 'lucide-react';
 import ImportSpreadsheet from '@/components/ImportSpreadsheet';
 import {
   downloadEpiFichaTxt,
@@ -51,6 +51,122 @@ type EpiFichaFormState = {
   responsibleName: string;
 };
 
+const EPI_DISCARD_TAG = 'DESCARTE';
+
+type EpiConsumableBalanceRow = { item_id: string; description: string; unit: string; balance: number };
+
+function isEpiConsumableItem(items: Possession['items'] | null | undefined): boolean {
+  return !!items && items.category === 'EPI' && !!items.consumable;
+}
+
+function movementIsEpiDiscard(m: { type?: string; tag?: string | null }): boolean {
+  return String(m.type) === 'IN' && String(m.tag || '').toUpperCase().includes('DESCARTE');
+}
+
+function mergeEpiWalletLines(
+  possession: Possession[] | undefined,
+  consumableRows: EpiConsumableBalanceRow[]
+): Array<{
+  key: string;
+  item_id: string;
+  description: string;
+  unit: string;
+  quantity: number;
+  consumable: boolean;
+}> {
+  const out: Array<{
+    key: string;
+    item_id: string;
+    description: string;
+    unit: string;
+    quantity: number;
+    consumable: boolean;
+  }> = [];
+  const skipConsumableAggFor = new Set<string>();
+  for (const p of possession || []) {
+    if (!p.items || p.quantity <= 0 || p.items.category !== 'EPI') continue;
+    out.push({
+      key: `p-${p.item_id}`,
+      item_id: p.item_id,
+      description: p.items.description,
+      unit: p.items.unit,
+      quantity: p.quantity,
+      consumable: !!p.items.consumable,
+    });
+    if (p.items.consumable) skipConsumableAggFor.add(p.item_id);
+  }
+  for (const c of consumableRows) {
+    if (skipConsumableAggFor.has(c.item_id) || c.balance <= 0) continue;
+    out.push({
+      key: `c-${c.item_id}`,
+      item_id: c.item_id,
+      description: c.description,
+      unit: c.unit,
+      quantity: c.balance,
+      consumable: true,
+    });
+  }
+  return out;
+}
+
+async function loadEpiConsumableBalancesMap(): Promise<Record<string, EpiConsumableBalanceRow[]>> {
+  const byEmp = new Map<string, Map<string, { description: string; unit: string; balance: number }>>();
+  let from = 0;
+  const pageSize = 1000;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const { data, error } = await supabase
+      .from('movements')
+      .select('employee_id, item_id, quantity, type, items(description, unit, consumable, category)')
+      .not('employee_id', 'is', null)
+      .order('created_at', { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) {
+      console.error('loadEpiConsumableBalancesMap', error);
+      break;
+    }
+    const chunk = data || [];
+    for (const row of chunk as Array<{
+      employee_id: string;
+      item_id: string;
+      quantity: number;
+      type: string;
+      items: Possession['items'] | null;
+    }>) {
+      if (!isEpiConsumableItem(row.items)) continue;
+      const empId = String(row.employee_id);
+      const itemId = String(row.item_id);
+      const qty = Number(row.quantity) || 0;
+      const delta = row.type === 'OUT' ? qty : -qty;
+      if (!byEmp.has(empId)) byEmp.set(empId, new Map());
+      const m = byEmp.get(empId)!;
+      const cur = m.get(itemId) || {
+        description: String(row.items!.description || '—'),
+        unit: String(row.items!.unit || 'un'),
+        balance: 0,
+      };
+      cur.balance += delta;
+      m.set(itemId, cur);
+    }
+    if (chunk.length < pageSize) break;
+    from += pageSize;
+    if (from > 100_000) break;
+  }
+  const result: Record<string, EpiConsumableBalanceRow[]> = {};
+  for (const [empId, m] of byEmp) {
+    const rows = Array.from(m.entries())
+      .filter(([, v]) => v.balance > 0)
+      .map(([item_id, v]) => ({
+        item_id,
+        description: v.description,
+        unit: v.unit,
+        balance: v.balance,
+      }));
+    if (rows.length) result[empId] = rows;
+  }
+  return result;
+}
+
 export default function StaffPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
@@ -78,6 +194,17 @@ export default function StaffPage() {
     unit: string;
     maxQty: number;
   } | null>(null);
+  const [epiConsumableByEmployee, setEpiConsumableByEmployee] = useState<
+    Record<string, EpiConsumableBalanceRow[]>
+  >({});
+  const [epiDiscard, setEpiDiscard] = useState<{
+    employeeId: string;
+    item_id: string;
+    description: string;
+    unit: string;
+    maxQty: number;
+  } | null>(null);
+  const [discardQty, setDiscardQty] = useState(0);
   const walletReqIdRef = useRef(0);
   const [returnItem, setReturnItem] = useState<{employeeId: string, item: Possession} | null>(null);
   const [returnQty, setReturnQty] = useState<number>(0);
@@ -119,8 +246,16 @@ export default function StaffPage() {
     if (error) {
       console.error('Error fetching employees:', error);
       setEmployees([]);
+      setEpiConsumableByEmployee({});
     } else {
       setEmployees(data || []);
+      try {
+        const map = await loadEpiConsumableBalancesMap();
+        setEpiConsumableByEmployee(map);
+      } catch (err) {
+        console.error(err);
+        setEpiConsumableByEmployee({});
+      }
     }
     setLoading(false);
   };
@@ -138,7 +273,7 @@ export default function StaffPage() {
     while (true) {
       const { data, error } = await supabase
         .from('movements')
-        .select('*, items(description, unit, consumable), tag')
+        .select('*, items(description, unit, consumable, category), tag')
         .eq('employee_id', employeeId)
         .order('created_at', { ascending: false })
         .range(from, from + pageSize - 1);
@@ -216,7 +351,12 @@ export default function StaffPage() {
       `--------------------------------------------------\n\n` +
       data.map((m: any) => {
         const date = formatMovementDateBr(m.created_at);
-        const type = m.type === 'IN' ? '[DEVOLUÇÃO]' : '[RETIRADA/RECEBIMENTO]';
+        const type =
+          m.type === 'IN'
+            ? movementIsEpiDiscard(m)
+              ? '[DESCARTE EPI]'
+              : '[DEVOLUÇÃO]'
+            : '[RETIRADA/RECEBIMENTO]';
         const tag = m.tag ? ` | TAG: ${String(m.tag)}` : '';
         return `${date} | ${type} | ${m.quantity}x ${m.items?.description}${tag}`;
       }).join('\n');
@@ -283,17 +423,21 @@ export default function StaffPage() {
       ? new Date(epiFichaForm.issuedAt + 'T12:00:00').toLocaleDateString('pt-BR')
       : new Date().toLocaleDateString('pt-BR');
 
-    const rows: FichaPossessionRow[] =
-      epiFichaEmployee.possession
-        ?.filter((p) => p.quantity > 0 && p.items && !p.items.consumable && p.items.category === 'EPI')
-        .map((p) => ({
-          description: p.items!.description,
-          unit: p.items!.unit,
-          quantity: p.quantity,
-        })) ?? [];
+    const merged = mergeEpiWalletLines(
+      epiFichaEmployee.possession,
+      epiConsumableByEmployee[epiFichaEmployee.id] || []
+    );
+    const rows: FichaPossessionRow[] = merged.map((row) => ({
+      description: row.description,
+      unit: row.unit,
+      quantity: row.quantity,
+      remark: row.consumable
+        ? 'EPI consumível — saldo em uso (descarte no quadro)'
+        : 'EPI não consumível — posse',
+    }));
 
     if (rows.length === 0) {
-      alert('Este colaborador não tem EPIs não consumíveis em posse para listar na ficha.');
+      alert('Este colaborador não tem itens na carteira de EPI (posse ou consumível em uso) para listar na ficha.');
       return;
     }
 
@@ -414,6 +558,37 @@ export default function StaffPage() {
     });
   }, [walletMovements, walletHistorySearch]);
 
+  const walletEpiConsumableFromMovements = useMemo((): EpiConsumableBalanceRow[] => {
+    const map = new Map<string, { description: string; unit: string; balance: number }>();
+    for (const m of walletMovements) {
+      const it = m.items;
+      if (!isEpiConsumableItem(it)) continue;
+      const id = String(m.item_id);
+      const qty = Number(m.quantity) || 0;
+      const d = m.type === 'OUT' ? qty : -qty;
+      const cur = map.get(id) || {
+        description: String(it.description || '—'),
+        unit: String(it.unit || 'un'),
+        balance: 0,
+      };
+      cur.balance += d;
+      map.set(id, cur);
+    }
+    return Array.from(map.entries())
+      .filter(([, v]) => v.balance > 0)
+      .map(([item_id, v]) => ({
+        item_id,
+        description: v.description,
+        unit: v.unit,
+        balance: v.balance,
+      }));
+  }, [walletMovements]);
+
+  const walletMergedEpiLines = useMemo(
+    () => mergeEpiWalletLines(walletEmployee?.possession, walletEpiConsumableFromMovements),
+    [walletEmployee, walletEpiConsumableFromMovements]
+  );
+
   const handleWalletReturn = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!walletReturn || returnQty <= 0) return;
@@ -469,6 +644,36 @@ export default function StaffPage() {
     }
   };
 
+  const handleEpiDiscardSubmit = async (ev: React.FormEvent) => {
+    ev.preventDefault();
+    if (!epiDiscard || discardQty <= 0) return;
+    setIsSubmitting(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setIsSubmitting(false);
+      return;
+    }
+    const empId = epiDiscard.employeeId;
+    const mvRes = await recordMovement(supabase, {
+      item_id: epiDiscard.item_id,
+      employee_id: empId,
+      quantity: discardQty,
+      type: 'IN',
+      performed_by: user.id,
+      tag: EPI_DISCARD_TAG,
+    });
+    if (!mvRes.ok) {
+      alert(mvRes.message);
+      setIsSubmitting(false);
+      return;
+    }
+    setEpiDiscard(null);
+    setDiscardQty(0);
+    setIsSubmitting(false);
+    await fetchEmployees();
+    if (walletEmployeeId === empId) await reloadWallet(empId);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
@@ -489,19 +694,22 @@ export default function StaffPage() {
     setIsSubmitting(false);
   };
 
-  const filteredEmployees = employees.filter(e => {
-    // Search matches name, role OR any item description in possession
-    const matchesSearch = e.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         (e.role && e.role.toLowerCase().includes(searchTerm.toLowerCase())) ||
-                         (e.possession?.some(p => p.items?.description.toLowerCase().includes(searchTerm.toLowerCase())));
-                         
+  const filteredEmployees = employees.filter((e) => {
+    const q = searchTerm.toLowerCase();
+    const epiExtra = epiConsumableByEmployee[e.id] || [];
+    const matchesSearch =
+      e.full_name.toLowerCase().includes(q) ||
+      (e.role && e.role.toLowerCase().includes(q)) ||
+      e.possession?.some((p) => p.items?.description.toLowerCase().includes(q)) ||
+      epiExtra.some((c) => c.description.toLowerCase().includes(q));
+
     const matchesStatus = statusFilter === 'Todos' || e.status === statusFilter;
-    
-    // Only count non-consumable items for the possession filter.
-    // Require `items` join to exist; otherwise avoid showing ghost entries.
-    const activePossessions = e.possession?.filter(p => p.quantity > 0 && !!p.items && !p.items.consumable) || [];
-    const matchesHasItems = !hasItemsFilter || activePossessions.length > 0;
-    
+
+    const activePossessions = e.possession?.filter((p) => p.quantity > 0 && !!p.items && !p.items.consumable) || [];
+    const hasEpiConsumableInUse = epiExtra.length > 0;
+    const matchesHasItems =
+      !hasItemsFilter || activePossessions.length > 0 || hasEpiConsumableInUse;
+
     return matchesSearch && matchesStatus && matchesHasItems;
   });
 
@@ -548,7 +756,7 @@ export default function StaffPage() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
           <input 
             type="text" 
-            placeholder="Buscar por nome ou cargo..." 
+            placeholder="Buscar por nome, cargo ou item (posse / EPI consumível)..." 
             className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-secondary/50 outline-none"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
@@ -579,7 +787,7 @@ export default function StaffPage() {
             }`}
           >
             <Package size={14} />
-            Com Itens em Posse
+            Com itens (posse ou EPI consumível)
           </button>
         </div>
       </div>
@@ -593,7 +801,7 @@ export default function StaffPage() {
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Colaborador</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Cargo</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Status</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Carteiras (só não consumíveis)</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Carteiras (EPI + demais)</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Ações</th>
               </tr>
             </thead>
@@ -610,7 +818,9 @@ export default function StaffPage() {
                   <td colSpan={5} className="px-6 py-12 text-center text-slate-400">Nenhum funcionário encontrado.</td>
                 </tr>
               ) : (
-                filteredEmployees.map((e) => (
+                filteredEmployees.map((e) => {
+                  const epiLines = mergeEpiWalletLines(e.possession, epiConsumableByEmployee[e.id] || []);
+                  return (
                     <tr key={e.id} className="hover:bg-slate-50 transition-colors group">
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
@@ -638,22 +848,54 @@ export default function StaffPage() {
                               <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Carteira de EPIs</span>
                             </div>
                             <div className="flex flex-wrap gap-1.5">
-                              {e.possession?.filter(p => p.quantity > 0 && !!p.items && !p.items.consumable && p.items.category === 'EPI').length ? (
-                                e.possession
-                                  .filter(p => p.quantity > 0 && !!p.items && !p.items.consumable && p.items.category === 'EPI')
-                                  .map((p, idx) => (
-                                    <div key={idx} className="flex items-center gap-2 bg-purple-50 border border-purple-100 px-2 py-1 rounded text-[10px] font-bold text-purple-700 group/p">
-                                      <span className="truncate max-w-[150px]">{p.items?.description}</span>
-                                      <span className="bg-purple-200/50 px-1 rounded">x{p.quantity}</span>
-                                      <button 
-                                        onClick={() => { setReturnItem({employeeId: e.id, item: p}); setReturnQty(p.quantity); }}
-                                        className="hover:text-red-500 transition-colors ml-1" 
-                                        title="Devolver Item"
+                              {epiLines.length ? (
+                                epiLines.map((row) => (
+                                  <div
+                                    key={row.key}
+                                    className="flex items-center gap-2 bg-purple-50 border border-purple-100 px-2 py-1 rounded text-[10px] font-bold text-purple-700 group/p"
+                                  >
+                                    <span className="truncate max-w-[150px]">{row.description}</span>
+                                    {row.consumable && (
+                                      <span className="text-[8px] font-black uppercase text-amber-800 bg-amber-100/80 px-1 rounded shrink-0">
+                                        cons.
+                                      </span>
+                                    )}
+                                    <span className="bg-purple-200/50 px-1 rounded shrink-0">×{row.quantity}</span>
+                                    {row.consumable ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setEpiDiscard({
+                                            employeeId: e.id,
+                                            item_id: row.item_id,
+                                            description: row.description,
+                                            unit: row.unit,
+                                            maxQty: row.quantity,
+                                          });
+                                          setDiscardQty(row.quantity);
+                                        }}
+                                        className="hover:text-amber-700 transition-colors ml-0.5"
+                                        title="Registrar descarte (troca/uso — não retorna ao estoque)"
+                                      >
+                                        <Trash2 size={10} />
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const p = e.possession?.find((x) => x.item_id === row.item_id);
+                                          if (!p) return;
+                                          setReturnItem({ employeeId: e.id, item: p });
+                                          setReturnQty(p.quantity);
+                                        }}
+                                        className="hover:text-red-500 transition-colors ml-0.5"
+                                        title="Devolver ao estoque"
                                       >
                                         <RotateCcw size={10} />
                                       </button>
-                                    </div>
-                                  ))
+                                    )}
+                                  </div>
+                                ))
                               ) : (
                                 <span className="text-[9px] text-slate-300 italic font-medium ml-2">Vazia</span>
                               )}
@@ -712,14 +954,15 @@ export default function StaffPage() {
                             type="button"
                             onClick={() => void openWallet(e)}
                             className="text-slate-400 hover:text-secondary p-2 bg-slate-50 border border-slate-200 rounded-lg transition-all"
-                            title="Carteiras (EPI + demais) e histórico — devolução de consumível no Almoxarifado"
+                            title="Carteiras (EPI + demais) e histórico — EPI consumível: descarte aqui; devolução ao estoque no Almoxarifado"
                           >
                             <Package size={16} />
                           </button>
                         </div>
                       </td>
                     </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -746,11 +989,11 @@ export default function StaffPage() {
             </div>
             <div className="p-6 space-y-4 overflow-y-auto">
               <p className="text-xs text-slate-600 leading-relaxed">
-                Gere dois arquivos <span className="font-bold">.txt</span> bem formatados: um só com{' '}
-                <span className="font-bold">EPIs</span> (categoria EPI, não consumíveis) e outro com{' '}
-                <span className="font-bold">ferramentas e demais materiais</span> não consumíveis (tudo que não é EPI).
-                Nome, função e CPF vêm do cadastro. Devoluções de <span className="font-bold">consumíveis</span> fazem-se
-                no <span className="font-bold">Almoxarifado</span>.
+                Gere dois arquivos <span className="font-bold">.txt</span> bem formatados: um com a{' '}
+                <span className="font-bold">carteira de EPI</span> (não consumíveis em posse e consumíveis com saldo em
+                uso) e outro com <span className="font-bold">ferramentas e demais materiais</span> não consumíveis (tudo
+                que não é EPI). Nome, função e CPF vêm do cadastro. Descarte de EPI consumível registra-se no quadro;
+                devolução de consumível ao estoque continua no <span className="font-bold">Almoxarifado</span>.
               </p>
               <div className="space-y-1">
                 <label className="text-xs font-bold uppercase text-slate-500">Nome da empresa *</label>
@@ -900,21 +1143,30 @@ export default function StaffPage() {
                   ) : (
                     filteredTimelineMovements.map((m) => {
                       const isOut = String(m.type) === 'OUT';
+                      const isDiscard = movementIsEpiDiscard(m);
                       return (
                         <div key={m.id} className="relative pl-6">
                           <div
                             className={`absolute left-[-9px] top-1 w-4 h-4 rounded-full border-2 border-white shadow-sm ${
-                              isOut ? 'bg-red-500' : 'bg-green-500'
+                              isOut ? 'bg-red-500' : isDiscard ? 'bg-amber-500' : 'bg-green-500'
                             }`}
                           />
                           <div className="bg-white p-4 rounded-xl border border-border shadow-sm">
                             <div className="flex flex-wrap justify-between items-start gap-2 mb-2">
                               <span
                                 className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wide ${
-                                  isOut ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'
+                                  isOut
+                                    ? 'bg-red-50 text-red-700'
+                                    : isDiscard
+                                      ? 'bg-amber-50 text-amber-900'
+                                      : 'bg-green-50 text-green-700'
                                 }`}
                               >
-                                {isOut ? 'Retirada (recebimento)' : 'Devolução'}
+                                {isOut
+                                  ? 'Retirada (recebimento)'
+                                  : isDiscard
+                                    ? 'Descarte (consumo — não retorna ao estoque)'
+                                    : 'Devolução'}
                               </span>
                               {m.items?.consumable && (
                                 <span className="text-[9px] font-black uppercase bg-amber-50 text-amber-800 px-2 py-0.5 rounded-full">
@@ -922,13 +1174,22 @@ export default function StaffPage() {
                                 </span>
                               )}
                             </div>
-                            {m.items?.consumable && (
+                            {m.items?.consumable && !isOut && !isDiscard && (
                               <p className="text-[10px] text-amber-800 font-bold mt-1">
                                 Devolução de consumível: use o Almoxarifado (entrada no estoque).
                               </p>
                             )}
+                            {m.items?.consumable && isDiscard && (
+                              <p className="text-[10px] text-amber-900 font-bold mt-1">
+                                Baixa de uso do colaborador; estoque do almoxarifado não é creditado.
+                              </p>
+                            )}
                             <p className="text-xs font-black text-primary">
-                              {isOut ? 'Data da retirada: ' : 'Data da devolução: '}
+                              {isOut
+                                ? 'Data da retirada: '
+                                : isDiscard
+                                  ? 'Data do descarte: '
+                                  : 'Data da devolução: '}
                               <span className="font-mono text-slate-700">{formatMovementDateBr(m.created_at)}</span>
                             </p>
                             <h4 className="font-bold text-primary text-sm leading-tight mt-2">{m.items?.description}</h4>
@@ -986,54 +1247,76 @@ export default function StaffPage() {
               )}
 
               <p className="text-[11px] text-slate-500 font-bold">
-                Carteiras mostram apenas materiais não consumíveis (EPI e demais). Consumíveis aparecem só no histórico abaixo.
+                Demais materiais: só não consumíveis em posse. Na carteira EPI entram também consumíveis com saldo em uso;
+                use <span className="text-purple-800">Descarte</span> para registrar troca/uso sem devolver ao estoque.
               </p>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
                   <div className="p-4 border-b bg-purple-50/80 flex items-center justify-between">
                     <div className="text-xs font-black text-purple-900 uppercase tracking-wide">Carteira EPI</div>
-                    <div className="text-xs font-bold text-purple-800">
-                      {(walletEmployee?.possession || []).filter(
-                        (p) => p.quantity > 0 && !!p.items && !p.items.consumable && p.items.category === 'EPI'
-                      ).length}
-                    </div>
+                    <div className="text-xs font-bold text-purple-800">{walletMergedEpiLines.length}</div>
                   </div>
                   <div className="p-4 space-y-2">
-                    {(walletEmployee?.possession || [])
-                      .filter((p) => p.quantity > 0 && !!p.items && !p.items.consumable && p.items.category === 'EPI')
-                      .map((p, idx) => (
-                        <div key={idx} className="flex items-center justify-between bg-purple-50/50 border border-purple-100 rounded-xl px-3 py-2">
-                          <div className="min-w-0">
-                            <div className="font-bold text-primary text-sm truncate">{p.items.description}</div>
-                            <div className="text-[10px] text-slate-400 font-bold uppercase">{p.items.unit}</div>
-                          </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            <div className="text-sm font-black text-primary">×{p.quantity}</div>
+                    {walletMergedEpiLines.map((row) => (
+                      <div
+                        key={row.key}
+                        className="flex items-center justify-between bg-purple-50/50 border border-purple-100 rounded-xl px-3 py-2"
+                      >
+                        <div className="min-w-0">
+                          <div className="font-bold text-primary text-sm truncate">{row.description}</div>
+                          <div className="text-[10px] text-slate-400 font-bold uppercase">{row.unit}</div>
+                          {row.consumable && (
+                            <div className="text-[9px] font-bold text-amber-800 mt-0.5">Consumível — saldo em uso</div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <div className="text-sm font-black text-primary">×{row.quantity}</div>
+                          {row.consumable ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!walletEmployeeId) return;
+                                setEpiDiscard({
+                                  employeeId: walletEmployeeId,
+                                  item_id: row.item_id,
+                                  description: row.description,
+                                  unit: row.unit,
+                                  maxQty: row.quantity,
+                                });
+                                setDiscardQty(row.quantity);
+                              }}
+                              className="px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-lg text-xs font-black text-amber-900 hover:bg-amber-100"
+                              title="Registrar descarte (não retorna ao estoque)"
+                            >
+                              Descarte
+                            </button>
+                          ) : (
                             <button
                               type="button"
                               onClick={() => {
                                 if (!walletEmployeeId) return;
                                 setWalletReturn({
                                   employeeId: walletEmployeeId,
-                                  item_id: p.item_id,
-                                  description: p.items.description,
-                                  unit: p.items.unit,
-                                  maxQty: p.quantity,
+                                  item_id: row.item_id,
+                                  description: row.description,
+                                  unit: row.unit,
+                                  maxQty: row.quantity,
                                 });
-                                setReturnQty(p.quantity);
+                                setReturnQty(row.quantity);
                               }}
                               className="px-3 py-1.5 bg-white border border-purple-200 rounded-lg text-xs font-black text-purple-800 hover:bg-purple-50"
                               title="Devolver ao estoque"
                             >
                               Devolver
                             </button>
-                          </div>
+                          )}
                         </div>
-                      ))}
-                    {(walletEmployee?.possession || []).filter(
-                      (p) => p.quantity > 0 && !!p.items && !p.items.consumable && p.items.category === 'EPI'
-                    ).length === 0 && <div className="text-sm text-slate-400 italic">Sem EPIs em posse.</div>}
+                      </div>
+                    ))}
+                    {walletMergedEpiLines.length === 0 && (
+                      <div className="text-sm text-slate-400 italic">Sem itens na carteira EPI.</div>
+                    )}
                   </div>
                 </div>
 
@@ -1114,7 +1397,7 @@ export default function StaffPage() {
                   <p className="text-[10px] text-slate-400 font-bold mt-2">
                     {walletLoading
                       ? 'Carregando…'
-                      : `${filteredWalletMovements.length} de ${walletMovements.length} registro(s). Consumíveis: devolver pelo Almoxarifado.`}
+                      : `${filteredWalletMovements.length} de ${walletMovements.length} registro(s). EPI consumível: descarte aqui; devolução ao estoque no Almoxarifado.`}
                   </p>
                 </div>
                 <div className="p-4 max-h-[min(50vh,420px)] overflow-y-auto">
@@ -1127,16 +1410,25 @@ export default function StaffPage() {
                     <div className="space-y-2">
                       {filteredWalletMovements.slice(0, 400).map((m) => {
                         const isOut = String(m.type) === 'OUT';
+                        const isDiscard = movementIsEpiDiscard(m);
                         return (
                           <div key={m.id} className="flex flex-wrap items-start justify-between gap-2 bg-slate-50 border border-slate-100 rounded-xl px-3 py-2">
                             <div className="min-w-0 flex-1">
                               <div className="flex flex-wrap items-center gap-2 mb-1">
                                 <span
                                   className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase ${
-                                    isOut ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'
+                                    isOut
+                                      ? 'bg-red-50 text-red-700'
+                                      : isDiscard
+                                        ? 'bg-amber-50 text-amber-900'
+                                        : 'bg-green-50 text-green-700'
                                   }`}
                                 >
-                                  {isOut ? 'Retirada (recebimento)' : 'Devolução'}
+                                  {isOut
+                                    ? 'Retirada (recebimento)'
+                                    : isDiscard
+                                      ? 'Descarte (consumo — não retorna ao estoque)'
+                                      : 'Devolução'}
                                 </span>
                                 {m.items?.consumable && (
                                   <span className="text-[9px] font-black uppercase bg-amber-50 text-amber-800 px-2 py-0.5 rounded-full">
@@ -1144,8 +1436,22 @@ export default function StaffPage() {
                                   </span>
                                 )}
                               </div>
+                              {m.items?.consumable && !isOut && !isDiscard && (
+                                <p className="text-[10px] text-amber-800 font-bold mb-1">
+                                  Devolução de consumível: use o Almoxarifado (entrada no estoque).
+                                </p>
+                              )}
+                              {m.items?.consumable && isDiscard && (
+                                <p className="text-[10px] text-amber-900 font-bold mb-1">
+                                  Baixa de uso do colaborador; estoque do almoxarifado não é creditado.
+                                </p>
+                              )}
                               <p className="text-[11px] font-bold text-slate-600">
-                                {isOut ? 'Data da retirada: ' : 'Data da devolução: '}
+                                {isOut
+                                  ? 'Data da retirada: '
+                                  : isDiscard
+                                    ? 'Data do descarte: '
+                                    : 'Data da devolução: '}
                                 <span className="font-mono font-normal">{formatMovementDateBr(m.created_at)}</span>
                               </p>
                               <div className="font-bold text-primary text-sm truncate mt-1">{m.items?.description || '—'}</div>
@@ -1251,6 +1557,62 @@ export default function StaffPage() {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {epiDiscard && (
+        <div className="fixed inset-0 bg-primary/40 backdrop-blur-sm z-[65] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in duration-300">
+            <div className="p-6 border-b border-border bg-amber-50/80">
+              <h3 className="text-xl font-bold text-primary">Descarte de EPI consumível</h3>
+              <p className="text-xs text-slate-600 mt-1 font-medium">{epiDiscard.description}</p>
+            </div>
+            <form onSubmit={handleEpiDiscardSubmit} className="p-6 space-y-4">
+              <div className="space-y-1">
+                <label className="text-xs font-bold uppercase text-slate-400">Quantidade descartada</label>
+                <div className="flex items-center gap-3">
+                  <input
+                    required
+                    type="number"
+                    min={1}
+                    max={epiDiscard.maxQty}
+                    className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-lg text-lg font-bold outline-none focus:ring-2 focus:ring-secondary/50"
+                    value={discardQty === 0 ? '' : discardQty}
+                    onChange={(ev) =>
+                      setDiscardQty(Math.min(epiDiscard.maxQty, Math.max(0, Number(ev.target.value))))
+                    }
+                    onFocus={(ev) => ev.target.select()}
+                  />
+                  <span className="text-sm font-bold text-slate-400">
+                    de {epiDiscard.maxQty} {epiDiscard.unit}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-600 font-bold leading-relaxed">
+                  Registra baixa de uso do colaborador (ex.: descartou um par e pegou outro novo). Não devolve ao estoque
+                  nem altera o saldo do almoxarifado.
+                </p>
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEpiDiscard(null);
+                    setDiscardQty(0);
+                  }}
+                  className="flex-1 p-3 border border-slate-200 rounded-xl font-bold text-slate-500 hover:bg-slate-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting || discardQty < 1}
+                  className="flex-1 p-3 bg-amber-700 text-white rounded-xl font-bold hover:bg-amber-800 shadow-lg disabled:opacity-50"
+                >
+                  {isSubmitting ? '…' : 'Confirmar descarte'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

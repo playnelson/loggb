@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 
 import { useState, useEffect, Suspense } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Search, Plus, AlertCircle, X, FileUp, Users, History, Edit, Trash2, Loader2, ArrowUpRight, ArrowDownLeft, Tags, ShoppingCart, User, Minus, Tag } from 'lucide-react';
+import { Search, Plus, AlertCircle, X, FileUp, Users, History, Edit, Trash2, Loader2, ArrowUpRight, ArrowDownLeft, Tags, ShoppingCart, User, Minus, Tag, Download } from 'lucide-react';
 import ImportSpreadsheet from '@/components/ImportSpreadsheet';
 import QuickMovementModal from '@/components/QuickMovementModal';
 import { itemCodeFromDescription } from '@/lib/itemCode';
@@ -25,11 +25,14 @@ interface PossessionDetail {
 
 interface Product {
   id: string;
+  code?: string | null;
   description: string;
   category: string;
   location: string;
   consumable: boolean;
   unique_item?: boolean;
+  /** TAG / identificador fixo no cadastro do item */
+  tag?: string | null;
   quantity_current: number;
   quantity_min: number;
   unit: string;
@@ -60,6 +63,24 @@ interface CartLine {
 }
 
 const FALLBACK_CATEGORIES = ['Ferramenta', 'EPI', 'Tubulação', 'Consumível'] as const;
+
+function escapeCsvCell(value: string): string {
+  const s = String(value ?? '');
+  if (/[;\n\r"]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+const emptyItemForm = () => ({
+  description: '',
+  category: 'Ferramenta',
+  location: '',
+  consumable: false,
+  unique_item: false,
+  quantity_current: 0,
+  quantity_min: 0,
+  unit: 'un',
+  tag: '',
+});
 
 function InventoryContent() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -96,16 +117,7 @@ function InventoryContent() {
   const [cartPickTag, setCartPickTag] = useState('');
 
   // Form states for NEW/EDIT
-  const [formData, setFormData] = useState({
-    description: '',
-    category: 'Ferramenta',
-    location: '',
-    consumable: false,
-    unique_item: false,
-    quantity_current: 0,
-    quantity_min: 0,
-    unit: 'un'
-  });
+  const [formData, setFormData] = useState(emptyItemForm);
 
   const fetchCategories = async () => {
     setCategoryError(null);
@@ -168,7 +180,7 @@ function InventoryContent() {
     const { data, error } = await supabase
       .from('items')
       .select(
-        'id, description, category, location, consumable, unique_item, quantity_current, quantity_min, unit, updated_at, possession (id, quantity, employees (full_name))'
+        'id, code, description, category, location, consumable, unique_item, tag, quantity_current, quantity_min, unit, updated_at, possession (id, quantity, employees (full_name))'
       )
       .order('description', { ascending: true });
 
@@ -361,7 +373,15 @@ function InventoryContent() {
     const { error } = await supabase
       .from('items')
       .update({
-        ...formData,
+        description: formData.description,
+        category: formData.category,
+        location: formData.location,
+        consumable: formData.consumable,
+        unique_item: formData.unique_item,
+        quantity_current: formData.quantity_current,
+        quantity_min: formData.quantity_min,
+        unit: formData.unit,
+        tag: formData.tag.trim() || null,
         code: itemCodeFromDescription(formData.description),
       })
       .eq('id', editingItem.id);
@@ -380,7 +400,15 @@ function InventoryContent() {
     setIsSubmitting(true);
 
     const finalData = {
-      ...formData,
+      description: formData.description,
+      category: formData.category,
+      location: formData.location,
+      consumable: formData.consumable,
+      unique_item: formData.unique_item,
+      quantity_current: formData.quantity_current,
+      quantity_min: formData.quantity_min,
+      unit: formData.unit,
+      tag: formData.tag.trim() || null,
       code: itemCodeFromDescription(formData.description),
     };
 
@@ -393,16 +421,7 @@ function InventoryContent() {
       alert(`Erro ao cadastrar item: ${error.message}`);
     } else {
       setIsModalOpen(false);
-      setFormData({
-        description: '',
-        category: 'Ferramenta',
-        location: '',
-        consumable: false,
-        unique_item: false,
-        quantity_current: 0,
-        quantity_min: 0,
-        unit: 'un'
-      });
+      setFormData(emptyItemForm());
       // eslint-disable-next-line @typescript-eslint/no-floating-promises
       fetchProducts();
     }
@@ -412,6 +431,66 @@ function InventoryContent() {
   const filteredProducts = products.filter(p =>
     p.description.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const handleDownloadInventory = () => {
+    if (products.length === 0) {
+      alert('Não há itens para exportar.');
+      return;
+    }
+    const header = [
+      'Descrição',
+      'Código',
+      'Categoria',
+      'Local',
+      'Unidade',
+      'Consumível',
+      'Item único',
+      'TAG (cadastro)',
+      'Estoque almox.',
+      'Em posse (detalhe)',
+      'Em posse (soma)',
+      'Mínimo',
+      'Total físico',
+    ];
+    const lines = [header.map(escapeCsvCell).join(';')];
+    for (const p of products) {
+      const posTotal = p.possession?.reduce((acc, curr) => acc + curr.quantity, 0) || 0;
+      const posDetail =
+        (p.possession || [])
+          .filter((pos) => pos.quantity > 0)
+          .map((pos) => {
+            const name = possessionEmployeeName(pos.employees) || '—';
+            return `${name}: ${pos.quantity}`;
+          })
+          .join(' | ') || '—';
+      const row = [
+        p.description,
+        p.code ?? '',
+        p.category,
+        p.location ?? '',
+        p.unit,
+        p.consumable ? 'Sim' : 'Não',
+        p.unique_item ? 'Sim' : 'Não',
+        p.tag ?? '',
+        String(p.quantity_current),
+        posDetail,
+        String(posTotal),
+        String(p.quantity_min),
+        String(p.quantity_current + posTotal),
+      ];
+      lines.push(row.map(escapeCsvCell).join(';'));
+    }
+    const bom = '\uFEFF';
+    const csv = bom + lines.join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const stamp = new Date().toISOString().slice(0, 10);
+    a.download = `inventario_almoxarifado_${stamp}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const cartPickedItem = products.find((p) => p.id === cartPickItemId) || null;
   const cartTotalUnits = cart.reduce((acc, line) => acc + line.quantity, 0);
@@ -596,6 +675,16 @@ function InventoryContent() {
           </button>
           <button
             type="button"
+            onClick={handleDownloadInventory}
+            disabled={loading || products.length === 0}
+            className="flex items-center gap-2 bg-white text-primary border border-slate-200 px-4 py-2 rounded-lg hover:bg-slate-50 transition-all font-medium disabled:opacity-50"
+            title="CSV: todos os itens, saldo no almoxarifado e materiais sob cautela (em posse), por colaborador"
+          >
+            <Download size={18} className="text-secondary" />
+            Baixar inventário
+          </button>
+          <button
+            type="button"
             onClick={openCategoryManager}
             className="flex items-center gap-2 bg-white text-primary border border-slate-200 px-4 py-2 rounded-lg hover:bg-slate-50 transition-all font-medium"
             title="Criar, editar e excluir categorias"
@@ -611,7 +700,11 @@ function InventoryContent() {
             Importar
           </button>
           <button 
-            onClick={() => setIsModalOpen(true)}
+            onClick={() => {
+              setEditingItem(null);
+              setFormData(emptyItemForm());
+              setIsModalOpen(true);
+            }}
             className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-slate-800 transition-all font-medium"
           >
             <Plus size={18} />
@@ -768,14 +861,14 @@ function InventoryContent() {
             <tbody className="divide-y divide-border text-sm">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-slate-400">
+                  <td colSpan={8} className="px-6 py-12 text-center text-slate-400">
                     <Loader2 className="animate-spin inline mr-2" size={20} />
                     Carregando inventário...
                   </td>
                 </tr>
               ) : filteredProducts.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-slate-400">Nenhum item encontrado.</td>
+                  <td colSpan={8} className="px-6 py-12 text-center text-slate-400">Nenhum item encontrado.</td>
                 </tr>
               ) : (
                 filteredProducts.map((p) => {
@@ -788,6 +881,12 @@ function InventoryContent() {
                       <td className="px-6 py-4">
                         <div className="font-bold text-primary text-base">{p.description}</div>
                         <div className="text-[10px] text-slate-400 uppercase font-bold tracking-tight">{p.location || 'Sem local definido'} • {p.unit}</div>
+                        {p.tag ? (
+                          <div className="text-[10px] text-slate-500 font-mono mt-1 flex items-center gap-1">
+                            <Tag size={10} className="shrink-0 text-slate-400" />
+                            {p.tag}
+                          </div>
+                        ) : null}
                       </td>
                       <td className="px-6 py-4 text-xs text-center border-x border-slate-50">
                         <span className={`px-2 py-1 rounded-md font-bold text-[10px] uppercase tracking-tighter ${p.consumable ? 'bg-green-50 text-green-600' : 'bg-slate-50 text-slate-400'}`}>
@@ -892,7 +991,8 @@ function InventoryContent() {
                                 unique_item: Boolean(p.unique_item),
                                 quantity_current: p.quantity_current,
                                 quantity_min: p.quantity_min,
-                                unit: p.unit
+                                unit: p.unit,
+                                tag: p.tag ?? '',
                               });
                             }}
                             className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-blue-500"
@@ -1077,6 +1177,24 @@ function InventoryContent() {
                     onChange={(e) => setFormData({...formData, location: e.target.value})}
                   />
                 </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold uppercase text-slate-400 flex items-center gap-1.5">
+                  <Tag size={14} className="text-secondary" />
+                  TAG (cadastro do item)
+                </label>
+                <input
+                  type="text"
+                  placeholder="Opcional: patrimônio, lote, código interno…"
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none text-sm font-mono"
+                  value={formData.tag}
+                  onChange={(e) => setFormData({ ...formData, tag: e.target.value })}
+                />
+                <p className="text-[10px] text-slate-400 font-bold leading-relaxed">
+                  Identificador fixo deste material no cadastro. Na retirada de item único, a TAG da movimentação continua
+                  sendo informada no carrinho ou na saída rápida.
+                </p>
               </div>
 
               <div className="grid grid-cols-2 gap-4 pt-2">

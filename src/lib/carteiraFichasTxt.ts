@@ -23,6 +23,8 @@ export type FichaPossessionRow = {
   quantity: number;
   /** Usado na ficha de ferramentas / demais materiais */
   category?: string;
+  /** Texto curto na ficha de EPI (ex.: tipo de controle) */
+  remark?: string;
 };
 
 const LINE_WIDTH = 78;
@@ -95,8 +97,9 @@ function kv(label: string, value: string) {
 function buildFooter(kind: 'epi' | 'ferramentas') {
   const note =
     kind === 'epi'
-      ? 'Relação de EPIs não consumíveis em posse do colaborador, conforme cadastro do sistema na data acima. ' +
-        'Documento para uso interno e arquivo; complemente conforme política da empresa e NR aplicável.'
+      ? 'Relação de EPIs do colaborador: não consumíveis em posse e consumíveis com saldo retirado (em uso). ' +
+        'Descarte de EPI consumível é registrado no sistema (não retorna ao estoque). ' +
+        'Documento para uso interno; complemente conforme política da empresa e NR aplicável.'
       : 'Relação de ferramentas e demais materiais não consumíveis (exceto categoria EPI) em posse do colaborador, ' +
         'conforme cadastro do sistema na data acima. Documento para uso interno e arquivo.';
 
@@ -168,7 +171,8 @@ export function buildEpiFichaTxtContent(
     );
     parts.push(`  ${repeatChar('─', nW)} ${repeatChar('─', dW)} ${repeatChar('─', uW)} ${repeatChar('─', qW)}`);
     rows.forEach((r, i) => {
-      const descLines = wrapLine(r.description, dW);
+      const descSource = r.remark ? `${r.description} — ${r.remark}` : r.description;
+      const descLines = wrapLine(descSource, dW);
       descLines.forEach((line, li) => {
         const num = li === 0 ? String(i + 1) : '';
         const qty = li === 0 ? String(r.quantity) : '';
