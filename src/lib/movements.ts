@@ -47,7 +47,35 @@ export async function updateStock(
   delta: number
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   const { error } = await supabase.rpc('update_stock', { p_item_id: itemId, p_quantity: delta });
-  if (error) return { ok: false, message: error.message || 'Erro ao atualizar estoque.' };
+  if (!error) return { ok: true };
+
+  // RPC ausente, RLS ou permissão: tenta o mesmo efeito lendo e gravando em `items`.
+  const rpcMsg = error.message || '';
+  const { data: row, error: selErr } = await supabase
+    .from('items')
+    .select('quantity_current')
+    .eq('id', itemId)
+    .maybeSingle();
+
+  if (selErr) {
+    return {
+      ok: false,
+      message: rpcMsg || selErr.message || 'Erro ao atualizar estoque.',
+    };
+  }
+  if (!row) {
+    return { ok: false, message: 'Item não encontrado para atualizar o estoque.' };
+  }
+
+  const next = Number(row.quantity_current ?? 0) + delta;
+  if (!Number.isFinite(next) || next < 0) {
+    return { ok: false, message: 'Saldo em estoque inválido após a operação.' };
+  }
+
+  const { error: upErr } = await supabase.from('items').update({ quantity_current: next }).eq('id', itemId);
+  if (upErr) {
+    return { ok: false, message: upErr.message || rpcMsg || 'Erro ao atualizar estoque.' };
+  }
   return { ok: true };
 }
 

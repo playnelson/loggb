@@ -132,6 +132,22 @@ export default function QuickMovementModal({
     };
     if (isUnique) movePayload.tag = tag.trim();
 
+    // 1b. Antes de gravar movimento: validar carteira (evita histórico IN sem entrada no estoque).
+    if (!item.consumable && selectedEmployee && mode === 'IN') {
+      const { data: currentPosPre } = await supabase
+        .from('possession')
+        .select('quantity')
+        .eq('employee_id', selectedEmployee)
+        .eq('item_id', item.id)
+        .maybeSingle();
+      const preQty = Number(currentPosPre?.quantity ?? 0);
+      if (preQty < effectiveQty) {
+        setError('Esse colaborador não tem essa quantidade na carteira para devolver.');
+        setLoading(false);
+        return;
+      }
+    }
+
     const moveError = await insertMovement(movePayload);
 
     if (moveError) {
@@ -168,10 +184,17 @@ export default function QuickMovementModal({
       }
     }
 
-    // 3. Update stock quantity via RPC
+    // 3. Update stock quantity via RPC (com fallback em movements.ts)
     const rpcQty = mode === 'IN' ? effectiveQty : -effectiveQty;
     const stockRes = await updateStock(supabase, item.id, rpcQty);
-    if (!stockRes.ok) console.error('Stock update error:', stockRes.message);
+    if (!stockRes.ok) {
+      setError(
+        stockRes.message ||
+          'Movimentação registrada, mas o estoque não pôde ser atualizado. Revise o saldo e o histórico ou peça suporte.'
+      );
+      setLoading(false);
+      return;
+    }
 
     setSuccess(true);
     setLoading(false);

@@ -116,7 +116,14 @@ export default function MovementPage() {
 
     // 3. Update stock quantity locally and in DB (RPC should handle DB if set up, elsewhere manual)
     const stockRes = await updateStock(supabase, selectedProduct, -quantity);
-    if (!stockRes.ok) console.error(stockRes.message);
+    if (!stockRes.ok) {
+      alert(
+        `Estoque não foi atualizado: ${stockRes.message}\n` +
+          'A retirada pode já constar no histórico e na carteira. Verifique o saldo em Inventário ou use “Ajustar estoque” se precisar corrigir.'
+      );
+      setLoading(false);
+      return;
+    }
 
     setSuccess(true);
     setLoading(false);

@@ -323,7 +323,12 @@ export default function StaffPage() {
 
     // 3) Stock +
     const stockRes = await updateStock(supabase, returnItem.item.item_id, returnQty);
-    if (!stockRes.ok) console.error(stockRes.message);
+    if (!stockRes.ok) {
+      alert(
+        `Estoque não foi atualizado: ${stockRes.message}\n` +
+          'O histórico registrou a devolução e a carteira já foi descontada, mas o saldo em estoque não mudou. Use “Ajustar estoque” em Inventário se precisar corrigir.'
+      );
+    }
 
     setReturnItem(null);
     setIsSubmitting(false);
@@ -404,7 +409,12 @@ export default function StaffPage() {
 
     // 3) stock +
     const stockRes = await updateStock(supabase, walletReturn.item_id, returnQty);
-    if (!stockRes.ok) console.error(stockRes.message);
+    if (!stockRes.ok) {
+      alert(
+        `Estoque não foi atualizado: ${stockRes.message}\n` +
+          'A devolução já está no histórico (e a carteira, quando for o caso, já foi atualizada), mas o saldo em estoque não mudou. Use “Ajustar estoque” em Inventário se precisar corrigir.'
+      );
+    }
 
     setWalletReturn(null);
     setIsSubmitting(false);

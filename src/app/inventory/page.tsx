@@ -9,6 +9,7 @@ import { Search, Plus, AlertCircle, X, FileUp, Users, History, Edit, Trash2, Loa
 import ImportSpreadsheet from '@/components/ImportSpreadsheet';
 import QuickMovementModal from '@/components/QuickMovementModal';
 import { itemCodeFromDescription } from '@/lib/itemCode';
+import { updateStock } from '@/lib/movements';
 
 function possessionEmployeeName(
   employees: { full_name: string } | { full_name: string }[] | null | undefined
@@ -292,8 +293,12 @@ function InventoryContent() {
       return;
     }
 
-    const { error: stockError } = await supabase.rpc('update_stock', { p_item_id: adjustItem.id, p_quantity: qty });
-    if (stockError) console.error(stockError);
+    const stockRes = await updateStock(supabase, adjustItem.id, qty);
+    if (!stockRes.ok) {
+      alert(`Erro ao atualizar estoque: ${stockRes.message}`);
+      setIsSubmitting(false);
+      return;
+    }
 
     setAdjustItem(null);
     setAdjustQty(0);
