@@ -7,7 +7,11 @@ import { supabase } from '@/lib/supabase';
 import { recordMovement, updatePossessionQuantity, updateStock } from '@/lib/movements';
 import { Search, UserPlus, Mail, Phone, ExternalLink, X, FileUp, Filter, Package, AlertCircle, History, RotateCcw, Download, Loader2, ArrowLeft, FileText } from 'lucide-react';
 import ImportSpreadsheet from '@/components/ImportSpreadsheet';
-import { downloadEpiFichaPdf } from '@/lib/epiFichaPdf';
+import {
+  downloadEpiFichaTxt,
+  downloadFerramentasFichaTxt,
+  type FichaPossessionRow,
+} from '@/lib/carteiraFichasTxt';
 
 interface Possession {
   item_id: string;
@@ -72,7 +76,6 @@ export default function StaffPage() {
     item_id: string;
     description: string;
     unit: string;
-    consumable: boolean;
     maxQty: number;
   } | null>(null);
   const walletReqIdRef = useRef(0);
@@ -249,8 +252,28 @@ export default function StaffPage() {
     setEpiFichaEmployee(employee);
   };
 
-  const handleDownloadEpiFicha = (e: React.FormEvent) => {
-    e.preventDefault();
+  const persistFichaDefaults = () => {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem(
+      EPI_FICHA_STORAGE_KEY,
+      JSON.stringify({
+        companyName: epiFichaForm.companyName,
+        companyCnpj: epiFichaForm.companyCnpj,
+        branchOrDept: epiFichaForm.branchOrDept,
+        responsibleName: epiFichaForm.responsibleName,
+      })
+    );
+  };
+
+  const fichaMetaFromForm = (issuedLabel: string) => ({
+    companyName: epiFichaForm.companyName,
+    companyCnpj: epiFichaForm.companyCnpj,
+    branchOrDept: epiFichaForm.branchOrDept,
+    issuedAtLabel: issuedLabel,
+    responsibleName: epiFichaForm.responsibleName,
+  });
+
+  const handleDownloadEpiTxt = () => {
     if (!epiFichaEmployee) return;
     if (!epiFichaForm.companyName.trim()) {
       alert('Informe o nome da empresa (razão social ou nome fantasia).');
@@ -260,49 +283,69 @@ export default function StaffPage() {
       ? new Date(epiFichaForm.issuedAt + 'T12:00:00').toLocaleDateString('pt-BR')
       : new Date().toLocaleDateString('pt-BR');
 
-    const epiRows =
+    const rows: FichaPossessionRow[] =
       epiFichaEmployee.possession
-        ?.filter(
-          (p) =>
-            p.quantity > 0 &&
-            !p.items?.consumable &&
-            p.items?.category === 'EPI'
-        )
-        .map((p) => [
-          p.items?.description ?? '—',
-          p.items?.unit ?? '—',
-          String(p.quantity),
-        ] as [string, string, string]) ?? [];
+        ?.filter((p) => p.quantity > 0 && p.items && !p.items.consumable && p.items.category === 'EPI')
+        .map((p) => ({
+          description: p.items!.description,
+          unit: p.items!.unit,
+          quantity: p.quantity,
+        })) ?? [];
 
-    downloadEpiFichaPdf(
+    if (rows.length === 0) {
+      alert('Este colaborador não tem EPIs não consumíveis em posse para listar na ficha.');
+      return;
+    }
+
+    downloadEpiFichaTxt(
       {
         full_name: epiFichaEmployee.full_name,
         role: epiFichaEmployee.role,
         cpf: epiFichaEmployee.cpf,
         department: epiFichaEmployee.department,
       },
-      epiRows,
-      {
-        companyName: epiFichaForm.companyName,
-        companyCnpj: epiFichaForm.companyCnpj,
-        branchOrDept: epiFichaForm.branchOrDept,
-        issuedAtLabel: issued,
-        responsibleName: epiFichaForm.responsibleName,
-      }
+      rows,
+      fichaMetaFromForm(issued)
     );
+    persistFichaDefaults();
+  };
 
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(
-        EPI_FICHA_STORAGE_KEY,
-        JSON.stringify({
-          companyName: epiFichaForm.companyName,
-          companyCnpj: epiFichaForm.companyCnpj,
-          branchOrDept: epiFichaForm.branchOrDept,
-          responsibleName: epiFichaForm.responsibleName,
-        })
-      );
+  const handleDownloadFerramentasTxt = () => {
+    if (!epiFichaEmployee) return;
+    if (!epiFichaForm.companyName.trim()) {
+      alert('Informe o nome da empresa (razão social ou nome fantasia).');
+      return;
     }
-    setEpiFichaEmployee(null);
+    const issued = epiFichaForm.issuedAt
+      ? new Date(epiFichaForm.issuedAt + 'T12:00:00').toLocaleDateString('pt-BR')
+      : new Date().toLocaleDateString('pt-BR');
+
+    const rows: FichaPossessionRow[] =
+      epiFichaEmployee.possession
+        ?.filter((p) => p.quantity > 0 && p.items && !p.items.consumable && p.items.category !== 'EPI')
+        .map((p) => ({
+          description: p.items!.description,
+          unit: p.items!.unit,
+          quantity: p.quantity,
+          category: p.items!.category || '—',
+        })) ?? [];
+
+    if (rows.length === 0) {
+      alert('Este colaborador não tem ferramentas ou demais materiais (não EPI) em posse para listar na ficha.');
+      return;
+    }
+
+    downloadFerramentasFichaTxt(
+      {
+        full_name: epiFichaEmployee.full_name,
+        role: epiFichaEmployee.role,
+        cpf: epiFichaEmployee.cpf,
+        department: epiFichaEmployee.department,
+      },
+      rows,
+      fichaMetaFromForm(issued)
+    );
+    persistFichaDefaults();
   };
 
   const handleReturn = async (e: React.FormEvent) => {
@@ -350,30 +393,6 @@ export default function StaffPage() {
     fetchEmployees();
   };
 
-  const walletBalances = useMemo(() => {
-    // compute "saldo" for consumables by item: OUT - IN
-    const map = new Map<string, { description: string; unit: string; balance: number }>();
-    for (const m of walletMovements) {
-      const it = m.items;
-      if (!it?.consumable) continue;
-      const key = String(m.item_id);
-      const prev = map.get(key) || { description: String(it.description || '—'), unit: String(it.unit || 'un'), balance: 0 };
-      const qty = Number(m.quantity || 0);
-      const delta = String(m.type) === 'OUT' ? qty : -qty;
-      map.set(key, { ...prev, balance: prev.balance + delta });
-    }
-    return Array.from(map.entries())
-      .map(([item_id, v]) => ({ item_id, ...v }))
-      .filter((x) => x.balance > 0)
-      .sort((a, b) => b.balance - a.balance);
-  }, [walletMovements]);
-
-  const walletBalanceByItemId = useMemo(() => {
-    const map = new Map<string, number>();
-    walletBalances.forEach((x) => map.set(String(x.item_id), Number(x.balance || 0)));
-    return map;
-  }, [walletBalances]);
-
   const filteredTimelineMovements = useMemo(() => {
     const q = timelineHistorySearch.trim().toLowerCase();
     if (!q) return movements;
@@ -399,13 +418,6 @@ export default function StaffPage() {
     e.preventDefault();
     if (!walletReturn || returnQty <= 0) return;
 
-    if (walletReturn.consumable) {
-      const curBal = walletBalanceByItemId.get(String(walletReturn.item_id)) || 0;
-      if (returnQty > curBal) {
-        alert(`Quantidade maior que o saldo em aberto (${curBal}).`);
-        return;
-      }
-    }
     setIsSubmitting(true);
 
     const { data: { user } } = await supabase.auth.getUser();
@@ -425,22 +437,19 @@ export default function StaffPage() {
       return;
     }
 
-    // 2) non-consumable: possession update
-    if (!walletReturn.consumable) {
-      const { data: currentPos } = await supabase
-        .from('possession')
-        .select('quantity')
-        .eq('employee_id', walletReturn.employeeId)
-        .eq('item_id', walletReturn.item_id)
-        .maybeSingle();
-      const cur = Number(currentPos?.quantity || 0);
-      const next = cur - returnQty;
-      const posRes = await updatePossessionQuantity(supabase, walletReturn.employeeId, walletReturn.item_id, next, user.id);
-      if (!posRes.ok) {
-        alert(posRes.message);
-        setIsSubmitting(false);
-        return;
-      }
+    const { data: currentPos } = await supabase
+      .from('possession')
+      .select('quantity')
+      .eq('employee_id', walletReturn.employeeId)
+      .eq('item_id', walletReturn.item_id)
+      .maybeSingle();
+    const cur = Number(currentPos?.quantity || 0);
+    const next = cur - returnQty;
+    const posRes = await updatePossessionQuantity(supabase, walletReturn.employeeId, walletReturn.item_id, next, user.id);
+    if (!posRes.ok) {
+      alert(posRes.message);
+      setIsSubmitting(false);
+      return;
     }
 
     // 3) stock +
@@ -687,7 +696,7 @@ export default function StaffPage() {
                             type="button"
                             onClick={() => openEpiFichaModal(e)}
                             className="text-slate-400 hover:text-secondary p-2 bg-slate-50 border border-slate-200 rounded-lg transition-all"
-                            title="Ficha de EPI (PDF)"
+                            title="Fichas EPI e ferramentas (.txt)"
                           >
                             <FileText size={16} />
                           </button>
@@ -703,7 +712,7 @@ export default function StaffPage() {
                             type="button"
                             onClick={() => void openWallet(e)}
                             className="text-slate-400 hover:text-secondary p-2 bg-slate-50 border border-slate-200 rounded-lg transition-all"
-                            title="Carteiras (EPI + demais) e histórico — consumíveis só no histórico"
+                            title="Carteiras (EPI + demais) e histórico — devolução de consumível no Almoxarifado"
                           >
                             <Package size={16} />
                           </button>
@@ -717,13 +726,13 @@ export default function StaffPage() {
         </div>
       </div>
 
-      {/* Modal Ficha de EPI */}
+      {/* Modal Fichas EPI / Ferramentas (TXT) */}
       {epiFichaEmployee && (
         <div className="fixed inset-0 bg-primary/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in duration-300">
             <div className="p-6 border-b bg-slate-50 flex items-center justify-between shrink-0">
               <div>
-                <h3 className="text-xl font-bold text-primary">Ficha de EPI</h3>
+                <h3 className="text-xl font-bold text-primary">Fichas em TXT</h3>
                 <p className="text-xs text-slate-500 mt-1 font-medium">{epiFichaEmployee.full_name}</p>
               </div>
               <button
@@ -735,10 +744,13 @@ export default function StaffPage() {
                 <X size={20} />
               </button>
             </div>
-            <form onSubmit={handleDownloadEpiFicha} className="p-6 space-y-4 overflow-y-auto">
+            <div className="p-6 space-y-4 overflow-y-auto">
               <p className="text-xs text-slate-600 leading-relaxed">
-                Ajuste os dados do empregador abaixo; o PDF incluirá os EPIs em posse deste colaborador
-                (categoria EPI, não consumíveis). Nome, função e CPF vêm do cadastro.
+                Gere dois arquivos <span className="font-bold">.txt</span> bem formatados: um só com{' '}
+                <span className="font-bold">EPIs</span> (categoria EPI, não consumíveis) e outro com{' '}
+                <span className="font-bold">ferramentas e demais materiais</span> não consumíveis (tudo que não é EPI).
+                Nome, função e CPF vêm do cadastro. Devoluções de <span className="font-bold">consumíveis</span> fazem-se
+                no <span className="font-bold">Almoxarifado</span>.
               </p>
               <div className="space-y-1">
                 <label className="text-xs font-bold uppercase text-slate-500">Nome da empresa *</label>
@@ -792,23 +804,32 @@ export default function StaffPage() {
                   />
                 </div>
               </div>
-              <div className="flex gap-3 pt-2">
+              <div className="flex flex-col gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => handleDownloadEpiTxt()}
+                  className="w-full p-3 bg-purple-700 text-white rounded-xl font-bold hover:bg-purple-800 flex items-center justify-center gap-2"
+                >
+                  <Download size={16} />
+                  Baixar ficha de EPI (.txt)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDownloadFerramentasTxt()}
+                  className="w-full p-3 bg-blue-700 text-white rounded-xl font-bold hover:bg-blue-800 flex items-center justify-center gap-2"
+                >
+                  <Download size={16} />
+                  Baixar ficha de ferramentas (.txt)
+                </button>
                 <button
                   type="button"
                   onClick={() => setEpiFichaEmployee(null)}
-                  className="flex-1 p-3 border border-slate-200 rounded-xl font-bold text-slate-500 hover:bg-slate-50"
+                  className="w-full p-3 border border-slate-200 rounded-xl font-bold text-slate-500 hover:bg-slate-50"
                 >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 p-3 bg-primary text-white rounded-xl font-bold hover:bg-slate-800 flex items-center justify-center gap-2"
-                >
-                  <Download size={16} />
-                  Baixar PDF
+                  Fechar
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
@@ -901,6 +922,11 @@ export default function StaffPage() {
                                 </span>
                               )}
                             </div>
+                            {m.items?.consumable && (
+                              <p className="text-[10px] text-amber-800 font-bold mt-1">
+                                Devolução de consumível: use o Almoxarifado (entrada no estoque).
+                              </p>
+                            )}
                             <p className="text-xs font-black text-primary">
                               {isOut ? 'Data da retirada: ' : 'Data da devolução: '}
                               <span className="font-mono text-slate-700">{formatMovementDateBr(m.created_at)}</span>
@@ -993,7 +1019,6 @@ export default function StaffPage() {
                                   item_id: p.item_id,
                                   description: p.items.description,
                                   unit: p.items.unit,
-                                  consumable: false,
                                   maxQty: p.quantity,
                                 });
                                 setReturnQty(p.quantity);
@@ -1041,7 +1066,6 @@ export default function StaffPage() {
                                   item_id: p.item_id,
                                   description: p.items.description,
                                   unit: p.items.unit,
-                                  consumable: false,
                                   maxQty: p.quantity,
                                 });
                                 setReturnQty(p.quantity);
@@ -1090,7 +1114,7 @@ export default function StaffPage() {
                   <p className="text-[10px] text-slate-400 font-bold mt-2">
                     {walletLoading
                       ? 'Carregando…'
-                      : `${filteredWalletMovements.length} de ${walletMovements.length} registro(s) — datas de retirada ou devolução`}
+                      : `${filteredWalletMovements.length} de ${walletMovements.length} registro(s). Consumíveis: devolver pelo Almoxarifado.`}
                   </p>
                 </div>
                 <div className="p-4 max-h-[min(50vh,420px)] overflow-y-auto">
@@ -1138,28 +1162,23 @@ export default function StaffPage() {
                                 {m.quantity}{' '}
                                 <span className="text-xs text-slate-400">{m.items?.unit || ''}</span>
                               </div>
-                              {isOut && (
+                              {isOut && !m.items?.consumable && (
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    const consumable = Boolean(m.items?.consumable);
-                                    const maxQty = consumable
-                                      ? walletBalances.find((x) => x.item_id === String(m.item_id))?.balance ??
-                                        Number(m.quantity || 0)
-                                      : Number(m.quantity || 0);
+                                    const maxQty = Number(m.quantity || 0);
                                     if (!walletEmployeeId) return;
                                     setWalletReturn({
                                       employeeId: walletEmployeeId,
                                       item_id: String(m.item_id),
                                       description: String(m.items?.description || '—'),
                                       unit: String(m.items?.unit || 'un'),
-                                      consumable,
-                                      maxQty: Math.max(1, Number(maxQty || 1)),
+                                      maxQty: Math.max(1, maxQty || 1),
                                     });
-                                    setReturnQty(Math.max(1, Math.min(Number(m.quantity || 1), Number(maxQty || 1))));
+                                    setReturnQty(Math.max(1, Math.min(Number(m.quantity || 1), Math.max(1, maxQty || 1))));
                                   }}
                                   className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-black text-slate-600 hover:bg-slate-50"
-                                  title="Registrar devolução"
+                                  title="Devolver ao estoque (não consumível)"
                                 >
                                   Devolver
                                 </button>
@@ -1209,7 +1228,7 @@ export default function StaffPage() {
                         <span className="text-sm font-bold text-slate-400">de {walletReturn.maxQty}</span>
                       </div>
                       <div className="text-[11px] text-slate-500 font-bold">
-                        {walletReturn.consumable ? 'Consumível: devolução atualiza estoque e histórico.' : 'Não consumível: remove da carteira e devolve ao estoque.'}
+                        Remove da carteira do colaborador e devolve ao estoque (material não consumível).
                       </div>
                     </div>
                     <div className="flex gap-2 pt-4">
