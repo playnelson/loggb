@@ -30,7 +30,22 @@ interface Movement {
   };
   employees?: {
     full_name: string;
-  };
+  } | null;
+  work_sites?: {
+    name: string;
+    kind: string;
+  } | null;
+}
+
+function movementCounterpartyLabel(m: Movement): string {
+  const emp = m.employees?.full_name;
+  if (emp) return emp;
+  const ws = m.work_sites;
+  if (ws?.name) {
+    const k = ws.kind === 'sede' ? 'Sede' : 'Canteiro';
+    return `${k}: ${ws.name}`;
+  }
+  return 'Almoxarifado / ajuste';
 }
 
 export default function HistoryPage() {
@@ -71,7 +86,7 @@ export default function HistoryPage() {
       const slice = itemIds.slice(i, i + chunkSize);
       let q = supabase
         .from('movements')
-        .select('*, items(description, unit), employees(full_name)')
+        .select('*, items(description, unit), employees(full_name), work_sites(name, kind)')
         .in('item_id', slice)
         .order('created_at', { ascending: false });
 
@@ -109,7 +124,8 @@ export default function HistoryPage() {
     return movements.filter((m) => {
       const item = (m.items?.description || '').toLowerCase();
       const emp = (m.employees?.full_name || '').toLowerCase();
-      return item.includes(searchLower) || emp.includes(searchLower);
+      const site = (m.work_sites?.name || '').toLowerCase();
+      return item.includes(searchLower) || emp.includes(searchLower) || site.includes(searchLower);
     });
   }, [movements, searchLower]);
 
@@ -120,12 +136,12 @@ export default function HistoryPage() {
   };
 
   const downloadCSV = () => {
-    const headers = ['Data', 'Tipo', 'Material', 'Funcionário', 'Quantidade', 'Unidade'];
+    const headers = ['Data', 'Tipo', 'Material', 'Colaborador / local', 'Quantidade', 'Unidade'];
     const rows = filteredMovements.map(m => [
       new Date(m.created_at).toLocaleString(),
       m.type === 'IN' ? 'Entrada' : 'Saída',
       m.items?.description,
-      m.employees?.full_name || 'N/A',
+      movementCounterpartyLabel(m),
       m.quantity,
       m.items?.unit
     ]);
@@ -168,7 +184,7 @@ export default function HistoryPage() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
             <input 
               type="text" 
-              placeholder="Buscar por material ou funcionário..." 
+              placeholder="Buscar por material, colaborador ou local..." 
               className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-secondary/50 outline-none transition-all"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -211,7 +227,7 @@ export default function HistoryPage() {
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Data / Hora</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Tipo</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Material</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Colaborador</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Colaborador / local</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Qtd.</th>
               </tr>
             </thead>
@@ -263,16 +279,12 @@ export default function HistoryPage() {
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      {move.employees ? (
-                        <div className="flex items-center gap-2">
-                          <div className="w-6 h-6 bg-slate-100 rounded-full flex items-center justify-center text-[10px] font-bold text-secondary">
-                            {move.employees.full_name.charAt(0)}
-                          </div>
-                          <span className="text-sm font-medium text-slate-600">{move.employees.full_name}</span>
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 bg-slate-100 rounded-full flex items-center justify-center text-[10px] font-bold text-secondary">
+                          {movementCounterpartyLabel(move).charAt(0)}
                         </div>
-                      ) : (
-                        <span className="text-xs text-slate-300 italic">Sistema / Almoxarifado</span>
-                      )}
+                        <span className="text-sm font-medium text-slate-600">{movementCounterpartyLabel(move)}</span>
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right">
                       <span className={`text-sm font-black ${move.type === 'IN' ? 'text-green-600' : 'text-red-600'}`}>

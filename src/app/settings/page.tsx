@@ -100,6 +100,16 @@ export default function SettingsPage() {
       if (rOrd.error) parts.push(`Pedidos: ${rOrd.error.message}`);
       else parts.push(`Pedidos: ${rOrd.data?.length ?? 0}.`);
 
+      const rSites = await supabase.from('work_sites').update({ user_id: uid }).is('user_id', null).select('id');
+      if (!rSites.error) {
+        parts.push(`Sedes/canteiros: ${rSites.data?.length ?? 0}.`);
+      } else {
+        const em = String(rSites.error.message || '').toLowerCase();
+        if (!em.includes('does not exist') && rSites.error.code !== '42P01') {
+          parts.push(`Sedes/canteiros: ${rSites.error.message}`);
+        }
+      }
+
       setClaimMessage(parts.join(' '));
     } catch (e: unknown) {
       setClaimMessage(e instanceof Error ? e.message : 'Falha ao vincular dados.');

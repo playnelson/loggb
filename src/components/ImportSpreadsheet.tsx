@@ -5,7 +5,8 @@ import * as XLSX from 'xlsx';
 import { supabase } from '@/lib/supabase';
 import { itemCodeFromDescription } from '@/lib/itemCode';
 import { recordMovement, updatePossessionQuantity, updateStock } from '@/lib/movements';
-import { FileUp, Loader2, CheckCircle2, AlertCircle, X, Info, Users, Package } from 'lucide-react';
+import { FileUp, Loader2, CheckCircle2, AlertCircle, X, Info, Users, Package, Download } from 'lucide-react';
+import { downloadInventoryImportTemplate } from '@/lib/inventoryImportTemplate';
 
 type ImportMode = 'inventory' | 'movement';
 
@@ -428,6 +429,22 @@ export default function ImportSpreadsheet({
       </div>
 
       <div className="space-y-6">
+        {progress.status === 'idle' && mode === 'inventory' && (
+          <div className="rounded-xl border border-teal-200 bg-gradient-to-br from-teal-50/90 to-white p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="text-xs text-teal-900 font-medium leading-relaxed">
+              <p className="font-black uppercase tracking-wide text-[10px] text-teal-800 mb-1">Modelo oficial</p>
+              <p>Baixe a planilha formatada (duas abas: Materiais + Instruções) e preencha conforme o guia.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => downloadInventoryImportTemplate()}
+              className="shrink-0 flex items-center justify-center gap-2 px-4 py-2.5 bg-teal-700 text-white rounded-lg font-bold text-sm hover:bg-teal-800 shadow-md shadow-teal-900/10"
+            >
+              <Download size={18} />
+              Baixar modelo .xlsx
+            </button>
+          </div>
+        )}
         {progress.status === 'idle' && (
           <div className="border-2 border-dashed border-slate-200 rounded-xl p-10 text-center hover:border-secondary transition-colors group cursor-pointer relative bg-slate-50/50">
             <input 

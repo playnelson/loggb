@@ -2,20 +2,37 @@
 
 export const dynamic = 'force-dynamic';
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, Suspense, useCallback } from 'react';
+import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
-import { Search, Plus, AlertCircle, X, FileUp, Users, History, Edit, Trash2, Loader2, ArrowUpRight, ArrowDownLeft, Tags, ShoppingCart, User, Minus, Tag, Download } from 'lucide-react';
+import { Search, Plus, AlertCircle, X, FileUp, Users, History, Edit, Trash2, Loader2, ArrowUpRight, ArrowDownLeft, Tags, ShoppingCart, User, Minus, Tag, Download, MapPin } from 'lucide-react';
 import ImportSpreadsheet from '@/components/ImportSpreadsheet';
 import QuickMovementModal from '@/components/QuickMovementModal';
 import { itemCodeFromDescription } from '@/lib/itemCode';
-import { recordMovement, updatePossessionQuantity, updateStock } from '@/lib/movements';
+import { recordMovement, updatePossessionQuantity, updateSitePossessionQuantity, updateStock } from '@/lib/movements';
 import { fetchTenantItems, isLikelyMissingColumn } from '@/lib/tenantItems';
+import { downloadInventoryImportTemplate } from '@/lib/inventoryImportTemplate';
 
 function possessionEmployeeName(
   employees: { full_name: string } | { full_name: string }[] | null | undefined
 ): string | undefined {
   if (!employees) return undefined;
   return Array.isArray(employees) ? employees[0]?.full_name : employees.full_name;
+}
+
+function movementCounterpartyLabel(move: {
+  employees?: { full_name: string } | null;
+  work_sites?: { name: string; kind: string } | { name: string; kind: string }[] | null;
+}): string {
+  const emp = move.employees && !Array.isArray(move.employees) ? move.employees.full_name : undefined;
+  if (emp) return emp;
+  const ws = move.work_sites;
+  const site = Array.isArray(ws) ? ws[0] : ws;
+  if (site?.name) {
+    const k = site.kind === 'sede' ? 'Sede' : 'Canteiro';
+    return `${k}: ${site.name}`;
+  }
+  return 'Almoxarifado / ajuste';
 }
 
 interface PossessionDetail {
@@ -113,6 +130,9 @@ function InventoryContent() {
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [cartEmployeeId, setCartEmployeeId] = useState('');
+  const [cartDestination, setCartDestination] = useState<'employee' | 'site'>('employee');
+  const [cartWorkSiteId, setCartWorkSiteId] = useState('');
+  const [workSites, setWorkSites] = useState<Array<{ id: string; name: string; kind: string }>>([]);
   const [cartPickItemId, setCartPickItemId] = useState('');
   const [cartPickQty, setCartPickQty] = useState(1);
   const [cartPickTag, setCartPickTag] = useState('');
@@ -218,6 +238,26 @@ function InventoryContent() {
     setEmployees(actives);
   };
 
+  const fetchWorkSites = useCallback(async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setWorkSites([]);
+      return;
+    }
+    const { data, error } = await supabase
+      .from('work_sites')
+      .select('id, name, kind')
+      .eq('user_id', user.id)
+      .eq('active', true)
+      .order('name', { ascending: true });
+    if (error) {
+      console.warn('work_sites:', error);
+      setWorkSites([]);
+      return;
+    }
+    setWorkSites((data || []) as Array<{ id: string; name: string; kind: string }>);
+  }, []);
+
   useEffect(() => {
     // eslint-disable-next-line @typescript-eslint/no-floating-promises
     fetchProducts();
@@ -225,7 +265,9 @@ function InventoryContent() {
     fetchCategories();
     // eslint-disable-next-line @typescript-eslint/no-floating-promises
     fetchEmployees();
-  }, []);
+    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+    fetchWorkSites();
+  }, [fetchWorkSites]);
 
   const categoryNames = categories?.map((c) => c.name) ?? [...FALLBACK_CATEGORIES];
   const categoryOptions = Array.from(
@@ -324,7 +366,7 @@ function InventoryContent() {
     setHistoryItem(item);
     const { data } = await supabase
       .from('movements')
-      .select('*, employees(full_name)')
+      .select('*, employees(full_name), work_sites(name, kind)')
       .eq('item_id', item.id)
       .order('created_at', { ascending: false })
       .limit(30);
@@ -542,61 +584,60 @@ function InventoryContent() {
   const cartPickedItem = products.find((p) => p.id === cartPickItemId) || null;
   const cartTotalUnits = cart.reduce((acc, line) => acc + line.quantity, 0);
 
-  const addLineToCart = () => {
-    if (!cartPickedItem) return;
-    const isUnique = Boolean(cartPickedItem.unique_item);
-    const qty = isUnique ? 1 : Math.max(1, Math.floor(Number(cartPickQty || 1)));
-    if (isUnique && !cartPickTag.trim()) {
-      alert('Informe a TAG para item único.');
-      return;
+  const appendProductToCart = useCallback((product: Product, quantity: number, tag: string): boolean => {
+    const isUnique = Boolean(product.unique_item);
+    const qty = isUnique ? 1 : Math.max(1, Math.floor(Number(quantity || 1)));
+    const t = tag.trim();
+
+    if (isUnique && !t) {
+      return false;
     }
 
     const inCartQty = cart
-      .filter((l) => l.itemId === cartPickedItem.id)
+      .filter((l) => l.itemId === product.id)
       .reduce((s, l) => s + l.quantity, 0);
-    if (qty + inCartQty > cartPickedItem.quantity_current) {
+    if (qty + inCartQty > product.quantity_current) {
       alert('Quantidade no carrinho maior que o saldo atual do estoque.');
-      return;
+      return false;
     }
 
     if (isUnique) {
-      const normalizedTag = cartPickTag.trim().toLowerCase();
+      const normalizedTag = t.toLowerCase();
       const duplicatedTag = cart.some(
-        (l) => l.itemId === cartPickedItem.id && (l.tag || '').trim().toLowerCase() === normalizedTag
+        (l) => l.itemId === product.id && (l.tag || '').trim().toLowerCase() === normalizedTag
       );
       if (duplicatedTag) {
         alert('Essa TAG já está no carrinho.');
-        return;
+        return false;
       }
       setCart((prev) => [
         ...prev,
         {
           lineId: crypto.randomUUID(),
-          itemId: cartPickedItem.id,
-          description: cartPickedItem.description,
+          itemId: product.id,
+          description: product.description,
           quantity: 1,
-          unit: cartPickedItem.unit,
-          consumable: cartPickedItem.consumable,
+          unit: product.unit,
+          consumable: product.consumable,
           unique_item: true,
-          tag: cartPickTag.trim(),
+          tag: t,
         },
       ]);
-      setCartPickTag('');
-      return;
+      return true;
     }
 
     setCart((prev) => {
-      const idx = prev.findIndex((l) => l.itemId === cartPickedItem.id && !l.unique_item);
+      const idx = prev.findIndex((l) => l.itemId === product.id && !l.unique_item);
       if (idx === -1) {
         return [
           ...prev,
           {
             lineId: crypto.randomUUID(),
-            itemId: cartPickedItem.id,
-            description: cartPickedItem.description,
+            itemId: product.id,
+            description: product.description,
             quantity: qty,
-            unit: cartPickedItem.unit,
-            consumable: cartPickedItem.consumable,
+            unit: product.unit,
+            consumable: product.consumable,
             unique_item: false,
           },
         ];
@@ -605,7 +646,39 @@ function InventoryContent() {
       next[idx] = { ...next[idx], quantity: next[idx].quantity + qty };
       return next;
     });
+    return true;
+  }, [cart]);
+
+  const addItemToCartFromRow = useCallback(
+    (product: Product) => {
+      if (product.quantity_current <= 0) {
+        alert('Sem saldo disponível no almoxarifado para retirada.');
+        return;
+      }
+      if (product.unique_item) {
+        setCartPickItemId(product.id);
+        setCartPickQty(1);
+        setCartPickTag('');
+        void fetchWorkSites();
+        setIsCartOpen(true);
+        return;
+      }
+      appendProductToCart(product, 1, '');
+    },
+    [appendProductToCart, fetchWorkSites]
+  );
+
+  const addLineToCart = () => {
+    if (!cartPickedItem) return;
+    if (cartPickedItem.unique_item && !cartPickTag.trim()) {
+      alert('Informe a TAG para item único.');
+      return;
+    }
+    const qty = cartPickedItem.unique_item ? 1 : Math.max(1, Math.floor(Number(cartPickQty || 1)));
+    const ok = appendProductToCart(cartPickedItem, qty, cartPickTag);
+    if (!ok) return;
     setCartPickQty(1);
+    setCartPickTag('');
   };
 
   const updateCartLineQty = (lineId: string, delta: number) => {
@@ -632,8 +705,12 @@ function InventoryContent() {
   };
 
   const processCartCheckout = async () => {
-    if (!cartEmployeeId) {
+    if (cartDestination === 'employee' && !cartEmployeeId) {
       alert('Selecione o colaborador.');
+      return;
+    }
+    if (cartDestination === 'site' && !cartWorkSiteId) {
+      alert('Selecione o canteiro ou sede de destino.');
       return;
     }
     if (cart.length === 0) {
@@ -652,7 +729,8 @@ function InventoryContent() {
       const line = cart[i];
       const mvRes = await recordMovement(supabase, {
         item_id: line.itemId,
-        employee_id: cartEmployeeId,
+        employee_id: cartDestination === 'employee' ? cartEmployeeId : null,
+        work_site_id: cartDestination === 'site' ? cartWorkSiteId : null,
         quantity: line.quantity,
         type: 'OUT',
         performed_by: user.id,
@@ -665,24 +743,46 @@ function InventoryContent() {
       }
 
       if (!line.consumable) {
-        const { data: currentPos } = await supabase
-          .from('possession')
-          .select('quantity')
-          .eq('employee_id', cartEmployeeId)
-          .eq('item_id', line.itemId)
-          .maybeSingle();
-        const currentQty = Number(currentPos?.quantity ?? 0);
-        const posRes = await updatePossessionQuantity(
-          supabase,
-          cartEmployeeId,
-          line.itemId,
-          currentQty + line.quantity,
-          user.id
-        );
-        if (!posRes.ok) {
-          alert(`Erro ao atualizar carteira (${line.description}): ${posRes.message}`);
-          setIsSubmitting(false);
-          return;
+        if (cartDestination === 'employee') {
+          const { data: currentPos } = await supabase
+            .from('possession')
+            .select('quantity')
+            .eq('employee_id', cartEmployeeId)
+            .eq('item_id', line.itemId)
+            .maybeSingle();
+          const currentQty = Number(currentPos?.quantity ?? 0);
+          const posRes = await updatePossessionQuantity(
+            supabase,
+            cartEmployeeId,
+            line.itemId,
+            currentQty + line.quantity,
+            user.id
+          );
+          if (!posRes.ok) {
+            alert(`Erro ao atualizar carteira (${line.description}): ${posRes.message}`);
+            setIsSubmitting(false);
+            return;
+          }
+        } else {
+          const { data: currentSp } = await supabase
+            .from('site_possession')
+            .select('quantity')
+            .eq('site_id', cartWorkSiteId)
+            .eq('item_id', line.itemId)
+            .maybeSingle();
+          const cur = Number(currentSp?.quantity ?? 0);
+          const spRes = await updateSitePossessionQuantity(
+            supabase,
+            cartWorkSiteId,
+            line.itemId,
+            cur + line.quantity,
+            user.id
+          );
+          if (!spRes.ok) {
+            alert(`Erro ao atualizar estoque no local (${line.description}): ${spRes.message}`);
+            setIsSubmitting(false);
+            return;
+          }
         }
       }
 
@@ -713,12 +813,20 @@ function InventoryContent() {
         <div className="flex gap-2">
           <button
             type="button"
-            onClick={() => setIsCartOpen(true)}
-            className="flex items-center gap-2 bg-secondary text-white px-4 py-2 rounded-lg hover:opacity-95 transition-all font-medium"
-            title="Retirada em lote por colaborador"
+            onClick={() => {
+              void fetchWorkSites();
+              setIsCartOpen(true);
+            }}
+            className="relative flex items-center gap-2 bg-secondary text-white px-4 py-2 rounded-lg hover:opacity-95 transition-all font-medium"
+            title="Monte a retirada e depois escolha o colaborador"
           >
             <ShoppingCart size={18} />
             Carrinho
+            {cart.length > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-5 px-1 bg-amber-400 text-amber-950 text-[11px] font-black rounded-full flex items-center justify-center border-2 border-white shadow-sm">
+                {cart.length}
+              </span>
+            )}
           </button>
           <button
             type="button"
@@ -738,6 +846,15 @@ function InventoryContent() {
           >
             <Tags size={18} className="text-secondary" />
             Categorias
+          </button>
+          <button
+            type="button"
+            onClick={() => downloadInventoryImportTemplate()}
+            className="flex items-center gap-2 bg-white text-primary border border-teal-200 px-4 py-2 rounded-lg hover:bg-teal-50 transition-all font-medium"
+            title="Planilha .xlsx formatada com instruções e colunas reconhecidas pelo importador"
+          >
+            <Download size={18} className="text-teal-600" />
+            Modelo importação
           </button>
           <button 
             onClick={() => setIsImportModalOpen(true)}
@@ -902,20 +1019,21 @@ function InventoryContent() {
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Total</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Mínimo</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Categoria</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Carrinho</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border text-sm">
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="px-6 py-12 text-center text-slate-400">
+                  <td colSpan={9} className="px-6 py-12 text-center text-slate-400">
                     <Loader2 className="animate-spin inline mr-2" size={20} />
                     Carregando inventário...
                   </td>
                 </tr>
               ) : filteredProducts.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-6 py-12 text-center text-slate-400">Nenhum item encontrado.</td>
+                  <td colSpan={9} className="px-6 py-12 text-center text-slate-400">Nenhum item encontrado.</td>
                 </tr>
               ) : (
                 filteredProducts.map((p) => {
@@ -993,6 +1111,21 @@ function InventoryContent() {
                           </span>
 
                         </div>
+                      </td>
+                      <td className="px-6 py-4 text-center border-x border-slate-50/80">
+                        <button
+                          type="button"
+                          disabled={p.quantity_current <= 0}
+                          onClick={() => addItemToCartFromRow(p)}
+                          className="inline-flex items-center justify-center p-2.5 rounded-xl bg-teal-50 text-teal-700 border border-teal-200/80 hover:bg-teal-100 hover:border-teal-300 disabled:opacity-35 disabled:pointer-events-none transition-colors"
+                          title={
+                            p.unique_item
+                              ? 'Abre o carrinho para adicionar com TAG (item único)'
+                              : 'Adicionar 1 unidade ao carrinho'
+                          }
+                        >
+                          <ShoppingCart size={18} strokeWidth={2.25} />
+                        </button>
                       </td>
                       <td className="px-6 py-4 text-right">
                         <div className="flex justify-end gap-1">
@@ -1090,7 +1223,7 @@ function InventoryContent() {
                       </div>
                       <div className="flex-1">
                         <div className="flex justify-between items-start">
-                          <p className="font-bold text-primary">{move.employees?.full_name}</p>
+                          <p className="font-bold text-primary">{movementCounterpartyLabel(move)}</p>
                           <span className="text-[10px] bg-white px-2 py-1 rounded-md border text-slate-400 font-mono">
                             {new Date(move.created_at).toLocaleString()}
                           </span>
@@ -1309,7 +1442,9 @@ function InventoryContent() {
             <div className="p-6 border-b bg-slate-50 flex items-center justify-between">
               <div>
                 <h3 className="text-xl font-bold text-primary">Carrinho de retirada</h3>
-                <p className="text-xs text-slate-500 mt-1">Retire varios itens de uma vez para o mesmo colaborador.</p>
+                <p className="text-xs text-slate-500 mt-1">
+                  Some itens na grade; depois escolha se a saída é para um colaborador ou para um canteiro/sede e confirme.
+                </p>
               </div>
               <button
                 type="button"
@@ -1321,22 +1456,75 @@ function InventoryContent() {
             </div>
 
             <div className="p-6 space-y-4 overflow-y-auto">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs font-bold uppercase text-slate-400 flex items-center gap-2 mb-1">
-                    <User size={14} className="text-secondary" />
-                    Colaborador
-                  </label>
-                  <select
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none font-medium"
-                    value={cartEmployeeId}
-                    onChange={(e) => setCartEmployeeId(e.target.value)}
+              <div className="space-y-3">
+                <label className="text-xs font-bold uppercase text-slate-400">Destino da saída</label>
+                <div className="flex p-1 bg-slate-100 rounded-xl max-w-md">
+                  <button
+                    type="button"
+                    onClick={() => setCartDestination('employee')}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-bold transition-all ${
+                      cartDestination === 'employee' ? 'bg-white text-primary shadow-sm' : 'text-slate-500'
+                    }`}
                   >
-                    <option value="">Selecione o colaborador...</option>
-                    {employees.map((e) => (
-                      <option key={e.id} value={e.id}>{e.full_name}</option>
-                    ))}
-                  </select>
+                    <User size={16} />
+                    Colaborador
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCartDestination('site')}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-bold transition-all ${
+                      cartDestination === 'site' ? 'bg-white text-primary shadow-sm' : 'text-slate-500'
+                    }`}
+                  >
+                    <MapPin size={16} />
+                    Canteiro / sede
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {cartDestination === 'employee' ? (
+                    <div>
+                      <label className="text-xs font-bold uppercase text-slate-400 flex items-center gap-2 mb-1">
+                        <User size={14} className="text-secondary" />
+                        Colaborador
+                      </label>
+                      <select
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none font-medium"
+                        value={cartEmployeeId}
+                        onChange={(e) => setCartEmployeeId(e.target.value)}
+                      >
+                        <option value="">Selecione o colaborador...</option>
+                        {employees.map((e) => (
+                          <option key={e.id} value={e.id}>{e.full_name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="text-xs font-bold uppercase text-slate-400 flex items-center gap-2 mb-1">
+                        <MapPin size={14} className="text-secondary" />
+                        Local
+                      </label>
+                      <select
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none font-medium"
+                        value={cartWorkSiteId}
+                        onChange={(e) => setCartWorkSiteId(e.target.value)}
+                      >
+                        <option value="">Selecione o canteiro ou sede...</option>
+                        {workSites.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.kind === 'sede' ? 'Sede' : 'Canteiro'}: {s.name}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="mt-2 text-[11px] text-slate-500">
+                        Cadastre locais em{' '}
+                        <Link href="/sites" className="text-secondary font-bold underline underline-offset-2">
+                          Sedes e canteiros
+                        </Link>
+                        .
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1453,11 +1641,20 @@ function InventoryContent() {
                 </button>
                 <button
                   type="button"
-                  disabled={isSubmitting || cart.length === 0 || !cartEmployeeId}
+                  disabled={
+                    isSubmitting ||
+                    cart.length === 0 ||
+                    (cartDestination === 'employee' && !cartEmployeeId) ||
+                    (cartDestination === 'site' && !cartWorkSiteId)
+                  }
                   onClick={() => void processCartCheckout()}
                   className="px-4 py-2 bg-primary text-white rounded-lg font-bold disabled:opacity-50"
                 >
-                  {isSubmitting ? 'Processando...' : 'Confirmar retirada'}
+                  {isSubmitting
+                    ? 'Processando...'
+                    : cartDestination === 'site'
+                      ? 'Confirmar envio ao local'
+                      : 'Confirmar retirada'}
                 </button>
               </div>
             </div>

@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
-import { Plus, Search, Trash2, ArrowLeft, ArrowRight } from 'lucide-react';
+import { Plus, Search, Trash2, ArrowLeft, ArrowRight, GripVertical } from 'lucide-react';
 import type { EmployeeLite, PurchaseOrderItemRow, PurchaseOrderRow, PurchaseStage } from '@/lib/purchaseOrders';
 import { PURCHASE_STAGES, isPurchaseStage } from '@/lib/purchaseOrders';
 import { PurchaseOrderFormModal } from '@/components/PurchaseOrderFormModal';
@@ -18,6 +18,8 @@ export default function Home() {
   const [search, setSearch] = useState('');
   const [stageFilter, setStageFilter] = useState<'Todos' | PurchaseStage>('Todos');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [draggingOrderId, setDraggingOrderId] = useState<string | null>(null);
+  const [dropTargetStage, setDropTargetStage] = useState<PurchaseStage | null>(null);
   const parseStageFilter = (v: string): 'Todos' | PurchaseStage => (v === 'Todos' ? 'Todos' : (v as PurchaseStage));
 
   const fetchOrders = async () => {
@@ -185,6 +187,22 @@ export default function Home() {
     }
   };
 
+  const patchOrder = async (id: string, patch: { notes?: string | null; requester_employee_id?: string }) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, ...patch } : o)));
+    const { error } = await supabase
+      .from('purchase_orders')
+      .update(patch)
+      .eq('id', id)
+      .eq('user_id', user.id);
+    if (error) {
+      alert(`Erro ao salvar: ${error.message}`);
+      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+      fetchOrders();
+    }
+  };
+
   const deleteRequest = async (id: string) => {
     if (!confirm('Excluir este pedido? (Não apaga itens do almoxarifado)')) return;
     const { data: { user } } = await supabase.auth.getUser();
@@ -267,7 +285,7 @@ export default function Home() {
             {loading ? 'Carregando…' : `${filtered.length} pedidos`}
           </div>
           <div className="text-[10px] text-slate-400 font-bold">
-            Dica: use o dropdown do card para mudar de coluna.
+            Edite solicitante e observações no card; arraste entre colunas ou use o estágio.
           </div>
         </div>
 
@@ -275,11 +293,32 @@ export default function Home() {
           <div className="min-w-[1100px] grid grid-cols-6 gap-4 p-4">
             {PURCHASE_STAGES.map((stage) => {
               const items = byStage.get(stage) || [];
+              const isDropTarget = dropTargetStage === stage;
               return (
-                <div key={stage} className="bg-slate-50/60 border border-slate-100 rounded-2xl p-3 flex flex-col min-h-[420px]">
+                <div
+                  key={stage}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    setDropTargetStage(stage);
+                  }}
+                  onDragLeave={() => setDropTargetStage((cur) => (cur === stage ? null : cur))}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setDropTargetStage(null);
+                    const id = e.dataTransfer.getData('application/loggb-order-id') || e.dataTransfer.getData('text/plain');
+                    if (!id) return;
+                    void updateStage(id, stage);
+                  }}
+                  className={`rounded-2xl p-3 flex flex-col min-h-[420px] border-2 transition-colors ${
+                    isDropTarget
+                      ? 'bg-slate-200/80 border-slate-500 ring-2 ring-slate-400/50'
+                      : 'bg-slate-50 border-slate-200/90'
+                  }`}
+                >
                   <div className="flex items-center justify-between mb-3">
-                    <div className="text-[11px] font-black text-primary uppercase tracking-tight">{stage}</div>
-                    <div className="text-[10px] font-bold text-slate-400 bg-white border border-slate-200 px-2 py-0.5 rounded-full">
+                    <div className="text-[11px] font-black text-slate-700 uppercase tracking-tight">{stage}</div>
+                    <div className="text-[10px] font-bold text-slate-600 bg-slate-200/90 border border-slate-300 px-2 py-0.5 rounded-full">
                       {items.length}
                     </div>
                   </div>
@@ -289,12 +328,12 @@ export default function Home() {
                       {Array(3)
                         .fill(0)
                         .map((_, i) => (
-                          <div key={i} className="h-24 bg-white/60 rounded-xl border border-slate-100 animate-pulse" />
+                          <div key={i} className="h-28 bg-slate-200/50 rounded-xl border border-slate-200 animate-pulse" />
                         ))}
                     </div>
                   ) : items.length === 0 ? (
-                    <div className="flex-1 flex items-center justify-center text-slate-300 text-xs font-bold italic">
-                      Vazio
+                    <div className="flex-1 flex items-center justify-center text-slate-400 text-xs font-bold italic border border-dashed border-slate-300 rounded-xl py-8">
+                      Solte aqui
                     </div>
                   ) : (
                     <div className="space-y-3">
@@ -306,82 +345,151 @@ export default function Home() {
                         const qtyReq = lineItems.reduce((acc, it) => acc + (it.quantity_requested || 0), 0);
                         const qtyRec = lineItems.reduce((acc, it) => acc + (it.quantity_received || 0), 0);
                         const progress = qtyReq > 0 ? Math.min(100, Math.round((qtyRec / qtyReq) * 100)) : 0;
-                        const requesterName = employeeNameById.get(o.requester_employee_id) || '—';
                         const title = `Pedido (${itemCount} itens)`;
-                        const subtitle = `${requesterName} • ${qtyRec}/${qtyReq} recebidos`;
-                        const desc = (o.notes || '').trim();
                         return (
                           <div
                             key={o.id}
-                            className="bg-white rounded-xl border border-slate-100 shadow-sm hover:shadow-md transition-all p-3"
+                            draggable
+                            onDragOver={(e) => {
+                              e.preventDefault();
+                              e.dataTransfer.dropEffect = 'move';
+                            }}
+                            onDrop={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setDropTargetStage(null);
+                              const draggedId =
+                                e.dataTransfer.getData('application/loggb-order-id') ||
+                                e.dataTransfer.getData('text/plain');
+                              if (!draggedId) return;
+                              void updateStage(draggedId, stage);
+                            }}
+                            onDragStart={(e) => {
+                              e.dataTransfer.setData('application/loggb-order-id', o.id);
+                              e.dataTransfer.setData('text/plain', o.id);
+                              e.dataTransfer.effectAllowed = 'move';
+                              setDraggingOrderId(o.id);
+                            }}
+                            onDragEnd={() => {
+                              setDraggingOrderId(null);
+                              setDropTargetStage(null);
+                            }}
+                            className={`rounded-xl border border-slate-300 bg-slate-100 p-3 shadow-sm transition-all ${
+                              draggingOrderId === o.id ? 'opacity-60 ring-2 ring-slate-500 scale-[0.98]' : 'hover:border-slate-400'
+                            }`}
                           >
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="min-w-0">
-                                <div className="font-bold text-primary text-sm truncate">{title}</div>
-                                <div className="text-[11px] text-slate-500 font-medium truncate">
-                                  {subtitle || '—'}
-                                </div>
-                                {desc && (
-                                  <div className="text-[10px] text-slate-400 font-bold truncate mt-1">
-                                    {desc}
+                            <div className="flex items-start gap-1.5">
+                              <div
+                                className="mt-0.5 text-slate-500 cursor-grab active:cursor-grabbing shrink-0 p-0.5"
+                                title="Arrastar para outra coluna"
+                              >
+                                <GripVertical size={18} />
+                              </div>
+                              <div className="min-w-0 flex-1 space-y-2">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <div className="font-bold text-slate-800 text-sm truncate">{title}</div>
+                                    <div className="text-[11px] text-slate-600 font-medium">
+                                      {qtyRec}/{qtyReq} recebidos · {progress}%
+                                    </div>
                                   </div>
-                                )}
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => void deleteRequest(o.id)}
-                                className="p-2 hover:bg-slate-50 rounded-lg text-slate-300 hover:text-red-500 shrink-0"
-                                title="Excluir pedido"
-                              >
-                                <Trash2 size={16} />
-                              </button>
-                            </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => void deleteRequest(o.id)}
+                                    className="p-2 rounded-lg text-slate-500 hover:bg-slate-200/80 hover:text-red-600 shrink-0"
+                                    title="Excluir pedido"
+                                  >
+                                    <Trash2 size={16} />
+                                  </button>
+                                </div>
 
-                            <div className="mt-2 flex items-center justify-between gap-2">
-                              <div className="text-[11px] font-mono text-slate-500">
-                                {progress}% recebido
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <Link
-                                  href={`/orders/${o.id}`}
-                                  className="text-[10px] text-slate-400 font-bold hover:text-secondary hover:underline"
-                                  title="Abrir na lista de pedidos"
-                                >
-                                  Abrir
-                                </Link>
-                              </div>
-                            </div>
+                                <div>
+                                  <label className="text-[9px] font-black text-slate-500 uppercase tracking-wide block mb-0.5">
+                                    Solicitante
+                                  </label>
+                                  <select
+                                    className="w-full bg-white/95 border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-slate-400/40"
+                                    value={o.requester_employee_id}
+                                    onChange={(e) =>
+                                      void patchOrder(o.id, { requester_employee_id: e.target.value })
+                                    }
+                                  >
+                                    {employees.length === 0 ? (
+                                      <option value={o.requester_employee_id}>—</option>
+                                    ) : (
+                                      <>
+                                        {!employees.some((e) => e.id === o.requester_employee_id) ? (
+                                          <option value={o.requester_employee_id}>Solicitante (fora da lista)</option>
+                                        ) : null}
+                                        {employees.map((emp) => (
+                                          <option key={emp.id} value={emp.id}>
+                                            {emp.full_name}
+                                          </option>
+                                        ))}
+                                      </>
+                                    )}
+                                  </select>
+                                </div>
 
-                            <div className="mt-3 flex items-center gap-2">
-                              <select
-                                className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-slate-700 outline-none"
-                                value={o.stage}
-                                onChange={(e) => void updateStage(o.id, e.target.value as PurchaseStage)}
-                              >
-                                {PURCHASE_STAGES.map((s) => (
-                                  <option key={s} value={s}>
-                                    {s}
-                                  </option>
-                                ))}
-                              </select>
-                              <button
-                                type="button"
-                                disabled={!prev}
-                                onClick={() => prev && void updateStage(o.id, prev)}
-                                className="p-2 bg-white border border-slate-200 rounded-lg text-slate-400 hover:text-primary disabled:opacity-40"
-                                title="Voltar estágio"
-                              >
-                                <ArrowLeft size={16} />
-                              </button>
-                              <button
-                                type="button"
-                                disabled={!next}
-                                onClick={() => next && void updateStage(o.id, next)}
-                                className="p-2 bg-white border border-slate-200 rounded-lg text-slate-400 hover:text-primary disabled:opacity-40"
-                                title="Avançar estágio"
-                              >
-                                <ArrowRight size={16} />
-                              </button>
+                                <div>
+                                  <label className="text-[9px] font-black text-slate-500 uppercase tracking-wide block mb-0.5">
+                                    Observações
+                                  </label>
+                                  <textarea
+                                    defaultValue={o.notes ?? ''}
+                                    rows={2}
+                                    className="w-full resize-y min-h-[44px] bg-white/95 border border-slate-300 rounded-lg px-2 py-1.5 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-slate-400/40 placeholder:text-slate-400"
+                                    placeholder="Notas do pedido…"
+                                    onBlur={(e) => {
+                                      const v = e.target.value.trim();
+                                      const next = v || null;
+                                      if (next !== (o.notes ?? null)) void patchOrder(o.id, { notes: next });
+                                    }}
+                                  />
+                                </div>
+
+                                <div className="flex items-center justify-between gap-2 pt-0.5">
+                                  <Link
+                                    href={`/orders/${o.id}`}
+                                    className="text-[10px] font-bold text-slate-600 hover:text-slate-900 underline underline-offset-2"
+                                    title="Editar linhas do pedido"
+                                  >
+                                    Abrir itens e detalhes
+                                  </Link>
+                                </div>
+
+                                <div className="flex items-center gap-2 pt-1 border-t border-slate-300/60">
+                                  <select
+                                    className="flex-1 bg-white/95 border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-slate-400/40"
+                                    value={o.stage}
+                                    onChange={(e) => void updateStage(o.id, e.target.value as PurchaseStage)}
+                                  >
+                                    {PURCHASE_STAGES.map((s) => (
+                                      <option key={s} value={s}>
+                                        {s}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <button
+                                    type="button"
+                                    disabled={!prev}
+                                    onClick={() => prev && void updateStage(o.id, prev)}
+                                    className="p-2 bg-white/95 border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-200 disabled:opacity-40"
+                                    title="Estágio anterior"
+                                  >
+                                    <ArrowLeft size={16} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={!next}
+                                    onClick={() => next && void updateStage(o.id, next)}
+                                    className="p-2 bg-white/95 border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-200 disabled:opacity-40"
+                                    title="Próximo estágio"
+                                  >
+                                    <ArrowRight size={16} />
+                                  </button>
+                                </div>
+                              </div>
                             </div>
                           </div>
                         );

@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
-import { recordMovement, updateStock, updatePossessionQuantity } from '@/lib/movements';
+import { recordMovement, updateStock, updatePossessionQuantity, updateSitePossessionQuantity } from '@/lib/movements';
 import { 
   X, 
   ArrowUpRight, 
@@ -12,7 +12,8 @@ import {
   Loader2, 
   CheckCircle2,
   AlertCircle,
-  Tag
+  Tag,
+  MapPin
 } from 'lucide-react';
 
 interface Product {
@@ -28,6 +29,14 @@ interface Employee {
   id: string;
   full_name: string;
 }
+
+interface WorkSiteOption {
+  id: string;
+  name: string;
+  kind: string;
+}
+
+type CounterpartyKind = 'employee' | 'site';
 
 interface QuickMovementModalProps {
   item: Product | null;
@@ -45,8 +54,11 @@ export default function QuickMovementModal({
   initialMode = 'OUT'
 }: QuickMovementModalProps) {
   const [mode, setMode] = useState<'IN' | 'OUT'>(initialMode);
+  const [counterparty, setCounterparty] = useState<CounterpartyKind>('employee');
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [workSites, setWorkSites] = useState<WorkSiteOption[]>([]);
   const [selectedEmployee, setSelectedEmployee] = useState('');
+  const [selectedSiteId, setSelectedSiteId] = useState('');
   const [quantity, setQuantity] = useState(1);
   const [tag, setTag] = useState('');
   const [loading, setLoading] = useState(false);
@@ -68,30 +80,62 @@ export default function QuickMovementModal({
     setEmployees(data || []);
   }, []);
 
+  const fetchWorkSites = useCallback(async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setWorkSites([]);
+      return;
+    }
+    const { data, error } = await supabase
+      .from('work_sites')
+      .select('id, name, kind')
+      .eq('user_id', user.id)
+      .eq('active', true)
+      .order('name', { ascending: true });
+    if (error) {
+      console.warn('work_sites:', error);
+      setWorkSites([]);
+      return;
+    }
+    setWorkSites((data || []) as WorkSiteOption[]);
+  }, []);
+
   useEffect(() => {
     if (isOpen) {
       setMode(initialMode);
+      setCounterparty('employee');
       setQuantity(1);
       setSelectedEmployee('');
+      setSelectedSiteId('');
       setTag('');
       setSuccess(false);
       setError(null);
       void fetchEmployees();
+      void fetchWorkSites();
     }
-  }, [isOpen, initialMode, fetchEmployees]);
+  }, [isOpen, initialMode, fetchEmployees, fetchWorkSites]);
 
   const needsEmployee = useMemo(() => {
-    if (!item) return false;
-    // OUT: always require employee for audit + wallet panel.
+    if (!item || counterparty !== 'employee') return false;
     if (mode === 'OUT') return true;
-    // IN: require employee only when the item affects wallet (non-consumable / unique).
     return !item.consumable;
-  }, [item, mode]);
+  }, [item, mode, counterparty]);
+
+  const needsSite = useMemo(() => {
+    if (!item || counterparty !== 'site') return false;
+    if (mode === 'OUT') return true;
+    return !item.consumable;
+  }, [item, mode, counterparty]);
 
   const showEmployeeOptionalOnIn = useMemo(() => {
-    if (!item) return false;
+    if (!item || counterparty !== 'employee') return false;
     return mode === 'IN' && item.consumable;
-  }, [item, mode]);
+  }, [item, mode, counterparty]);
+
+  const showSiteOptionalOnIn = useMemo(() => {
+    if (!item || counterparty !== 'site') return false;
+    return mode === 'IN' && item.consumable;
+  }, [item, mode, counterparty]);
 
   const isUnique = Boolean(item?.unique_item);
 
@@ -99,12 +143,31 @@ export default function QuickMovementModal({
 
   const validate = useCallback((): string | null => {
     if (!item) return 'Item inválido.';
-    if (needsEmployee && !selectedEmployee) return mode === 'IN' ? 'Selecione quem está devolvendo.' : 'Selecione um colaborador para a saída.';
+    if (counterparty === 'employee') {
+      if (needsEmployee && !selectedEmployee) return mode === 'IN' ? 'Selecione quem está devolvendo.' : 'Selecione um colaborador para a saída.';
+    } else {
+      if (needsSite && !selectedSiteId) return mode === 'IN' ? 'Selecione o local de onde vem a devolução.' : 'Selecione o canteiro ou sede de destino.';
+      if (showSiteOptionalOnIn && !selectedSiteId) {
+        /* entrada consumível sem local: permitido */
+      }
+    }
     if (effectiveQty <= 0) return 'Quantidade deve ser maior que zero.';
     if (mode === 'OUT' && effectiveQty > item.quantity_current) return 'Quantidade maior do que o saldo atual.';
     if (isUnique && !tag.trim()) return 'Informe a TAG do item único.';
     return null;
-  }, [item, needsEmployee, selectedEmployee, mode, effectiveQty, isUnique, tag]);
+  }, [
+    item,
+    counterparty,
+    needsEmployee,
+    needsSite,
+    showSiteOptionalOnIn,
+    selectedEmployee,
+    selectedSiteId,
+    mode,
+    effectiveQty,
+    isUnique,
+    tag,
+  ]);
 
   const insertMovement = useCallback(async (payload: Record<string, unknown>) => {
     const res = await recordMovement(supabase, payload as any);
@@ -132,29 +195,53 @@ export default function QuickMovementModal({
       return;
     }
 
+    const employeeForMove =
+      counterparty === 'employee' && (needsEmployee || (showEmployeeOptionalOnIn && selectedEmployee))
+        ? selectedEmployee
+        : null;
+    const siteForMove =
+      counterparty === 'site' && (needsSite || (showSiteOptionalOnIn && selectedSiteId)) ? selectedSiteId : null;
+
     // 1. Record Movement
     const movePayload: Record<string, unknown> = {
       item_id: item.id,
-      employee_id: (needsEmployee || (showEmployeeOptionalOnIn && selectedEmployee)) ? selectedEmployee : null,
+      employee_id: employeeForMove,
+      work_site_id: siteForMove,
       type: mode,
       quantity: effectiveQty,
       performed_by: user.id,
     };
     if (isUnique) movePayload.tag = tag.trim();
 
-    // 1b. Antes de gravar movimento: validar carteira (evita histórico IN sem entrada no estoque).
-    if (!item.consumable && selectedEmployee && mode === 'IN') {
-      const { data: currentPosPre } = await supabase
-        .from('possession')
-        .select('quantity')
-        .eq('employee_id', selectedEmployee)
-        .eq('item_id', item.id)
-        .maybeSingle();
-      const preQty = Number(currentPosPre?.quantity ?? 0);
-      if (preQty < effectiveQty) {
-        setError('Esse colaborador não tem essa quantidade na carteira para devolver.');
-        setLoading(false);
-        return;
+    // 1b. Antes de gravar: validar carteira (colaborador ou local).
+    if (!item.consumable && mode === 'IN') {
+      if (counterparty === 'employee' && selectedEmployee) {
+        const { data: currentPosPre } = await supabase
+          .from('possession')
+          .select('quantity')
+          .eq('employee_id', selectedEmployee)
+          .eq('item_id', item.id)
+          .maybeSingle();
+        const preQty = Number(currentPosPre?.quantity ?? 0);
+        if (preQty < effectiveQty) {
+          setError('Esse colaborador não tem essa quantidade na carteira para devolver.');
+          setLoading(false);
+          return;
+        }
+      }
+      if (counterparty === 'site' && selectedSiteId) {
+        const { data: sitePre } = await supabase
+          .from('site_possession')
+          .select('quantity')
+          .eq('site_id', selectedSiteId)
+          .eq('item_id', item.id)
+          .maybeSingle();
+        const preSite = Number(sitePre?.quantity ?? 0);
+        if (preSite < effectiveQty) {
+          setError('Esse local não tem essa quantidade registrada para devolução ao almoxarifado.');
+          setLoading(false);
+          return;
+        }
       }
     }
 
@@ -166,10 +253,8 @@ export default function QuickMovementModal({
       return;
     }
 
-    // 2. Update Possession (wallet)
-    // - Consumível: não mexe na carteira (só estoque + histórico).
-    // - Não consumível / Item único: OUT adiciona na carteira; IN remove da carteira.
-    if (!item.consumable && selectedEmployee) {
+    // 2. Update Possession (colaborador) ou estoque no local (canteiro/sede)
+    if (!item.consumable && counterparty === 'employee' && selectedEmployee) {
       const { data: currentPos } = await supabase
         .from('possession')
         .select('quantity')
@@ -189,6 +274,28 @@ export default function QuickMovementModal({
       const posRes = await updatePossessionQuantity(supabase, selectedEmployee, item.id, nextQty, user.id);
       if (!posRes.ok) {
         setError(posRes.message);
+        setLoading(false);
+        return;
+      }
+    }
+
+    if (!item.consumable && counterparty === 'site' && selectedSiteId) {
+      const { data: currentSp } = await supabase
+        .from('site_possession')
+        .select('quantity')
+        .eq('site_id', selectedSiteId)
+        .eq('item_id', item.id)
+        .maybeSingle();
+      const cur = Number(currentSp?.quantity ?? 0);
+      const nextSite = mode === 'OUT' ? cur + effectiveQty : cur - effectiveQty;
+      if (mode === 'IN' && nextSite < 0) {
+        setError('Esse local não tem essa quantidade registrada para devolução ao almoxarifado.');
+        setLoading(false);
+        return;
+      }
+      const spRes = await updateSitePossessionQuantity(supabase, selectedSiteId, item.id, nextSite, user.id);
+      if (!spRes.ok) {
+        setError(spRes.message);
         setLoading(false);
         return;
       }
@@ -272,7 +379,33 @@ export default function QuickMovementModal({
                 </button>
               </div>
 
-              {(needsEmployee || showEmployeeOptionalOnIn) && (
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase text-slate-400">Destino / origem</label>
+                <div className="flex p-1 bg-slate-100 rounded-xl">
+                  <button
+                    type="button"
+                    onClick={() => setCounterparty('employee')}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-bold transition-all ${
+                      counterparty === 'employee' ? 'bg-white text-primary shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                  >
+                    <User size={16} />
+                    Colaborador
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCounterparty('site')}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-bold transition-all ${
+                      counterparty === 'site' ? 'bg-white text-primary shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                  >
+                    <MapPin size={16} />
+                    Canteiro / sede
+                  </button>
+                </div>
+              </div>
+
+              {counterparty === 'employee' && (needsEmployee || showEmployeeOptionalOnIn) && (
                 <div className="space-y-2">
                   <label className="text-xs font-bold uppercase text-slate-400 flex items-center gap-2">
                     <User size={14} className="text-secondary" />
@@ -298,6 +431,44 @@ export default function QuickMovementModal({
                   {showEmployeeOptionalOnIn && (
                     <div className="text-[10px] text-slate-400 font-bold">
                       Se você escolher um colaborador, a devolução ficará registrada no painel dele.
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {counterparty === 'site' && (needsSite || showSiteOptionalOnIn) && (
+                <div className="space-y-2">
+                  <label className="text-xs font-bold uppercase text-slate-400 flex items-center gap-2">
+                    <MapPin size={14} className="text-secondary" />
+                    {mode === 'IN'
+                      ? (showSiteOptionalOnIn ? 'Retorno do local (opcional)' : 'De qual local vem a devolução?')
+                      : 'Enviar para qual local?'}
+                  </label>
+                  <select
+                    required={needsSite}
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-secondary/20 outline-none font-medium"
+                    value={selectedSiteId}
+                    onChange={(e) => setSelectedSiteId(e.target.value)}
+                  >
+                    <option value="">
+                      {mode === 'IN'
+                        ? (showSiteOptionalOnIn ? 'Somente almoxarifado (sem local)' : 'Selecione o canteiro ou sede...')
+                        : 'Selecione o canteiro ou sede...'}
+                    </option>
+                    {workSites.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.kind === 'sede' ? 'Sede' : 'Canteiro'}: {s.name}
+                      </option>
+                    ))}
+                  </select>
+                  {workSites.length === 0 && (
+                    <div className="text-[10px] text-amber-700 font-bold">
+                      Nenhum local ativo. Cadastre em Sedes e canteiros no menu.
+                    </div>
+                  )}
+                  {showSiteOptionalOnIn && (
+                    <div className="text-[10px] text-slate-400 font-bold">
+                      Consumíveis podem entrar sem vínculo a local; itens de carteira no local exigem seleção.
                     </div>
                   )}
                 </div>

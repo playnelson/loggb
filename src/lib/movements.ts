@@ -7,6 +7,7 @@ export type MovementType = 'IN' | 'OUT';
 export type RecordMovementInput = {
   item_id: string;
   employee_id: string | null;
+  work_site_id?: string | null;
   quantity: number;
   type: MovementType;
   performed_by: string;
@@ -25,16 +26,29 @@ export async function recordMovement(
     performed_by: input.performed_by,
   };
   if (input.tag) payload.tag = input.tag;
+  if (input.work_site_id) payload.work_site_id = input.work_site_id;
 
   const { error: err1 } = await supabase.from('movements').insert([payload]);
   if (!err1) return { ok: true };
 
-  const msg = String(err1.message || '');
+  const msg = String(err1.message || '').toLowerCase();
   // If DB doesn't have optional column yet, retry without it.
-  if (input.tag && msg.toLowerCase().includes('column') && msg.toLowerCase().includes('tag')) {
+  if (input.tag && msg.includes('column') && msg.includes('tag')) {
     const { tag: _tag, ...withoutTag } = payload as { tag?: unknown };
     const { error: err2 } = await supabase.from('movements').insert([withoutTag]);
     if (!err2) return { ok: true };
+    return { ok: false, message: err2.message || 'Erro ao registrar movimentação.' };
+  }
+  if (input.work_site_id && msg.includes('column') && msg.includes('work_site')) {
+    const { work_site_id: _ws, ...withoutSite } = payload as { work_site_id?: unknown };
+    const { error: err2 } = await supabase.from('movements').insert([withoutSite]);
+    if (!err2) {
+      return {
+        ok: false,
+        message:
+          'A coluna work_site_id não existe em movements. Execute o script supabase/work_sites.sql no Supabase.',
+      };
+    }
     return { ok: false, message: err2.message || 'Erro ao registrar movimentação.' };
   }
 
@@ -95,6 +109,28 @@ export async function updatePossessionQuantity(
     .from('possession')
     .upsert({ employee_id: employeeId, item_id: itemId, quantity: nextQty, user_id: userId }, { onConflict: 'employee_id,item_id' });
   if (error) return { ok: false, message: error.message || 'Erro ao atualizar carteira.' };
+  return { ok: true };
+}
+
+export async function updateSitePossessionQuantity(
+  supabase: SupabaseClient,
+  siteId: string,
+  itemId: string,
+  nextQty: number,
+  userId: string
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  if (nextQty <= 0) {
+    const { error } = await supabase.from('site_possession').delete().match({ site_id: siteId, item_id: itemId });
+    if (error) return { ok: false, message: error.message || 'Erro ao atualizar estoque no local.' };
+    return { ok: true };
+  }
+  const { error } = await supabase
+    .from('site_possession')
+    .upsert(
+      { site_id: siteId, item_id: itemId, quantity: nextQty, user_id: userId },
+      { onConflict: 'site_id,item_id' }
+    );
+  if (error) return { ok: false, message: error.message || 'Erro ao atualizar estoque no local.' };
   return { ok: true };
 }
 

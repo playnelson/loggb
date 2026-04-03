@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Package, Users, LayoutDashboard, LogOut, Settings, History, ShoppingCart, ClipboardCheck } from 'lucide-react';
+import { Package, Users, LayoutDashboard, LogOut, Settings, History, ShoppingCart, ClipboardCheck, MapPin } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useRouter, usePathname } from 'next/navigation';
 
@@ -12,6 +12,7 @@ export function Sidebar() {
     { name: 'Dashboard', icon: <LayoutDashboard size={20} />, href: '/' },
     { name: 'Almoxarifado', icon: <Package size={20} />, href: '/inventory' },
     { name: 'Colaboradores', icon: <Users size={20} />, href: '/staff' },
+    { name: 'Sedes e canteiros', icon: <MapPin size={20} />, href: '/sites' },
     { name: 'Pedidos', icon: <ShoppingCart size={20} />, href: '/orders' },
     { name: 'Recebidos', icon: <ClipboardCheck size={20} />, href: '/received' },
     { name: 'Histórico', icon: <History size={20} />, href: '/history' },
