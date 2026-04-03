@@ -22,7 +22,10 @@ export function isPurchaseStage(v: string): v is PurchaseStage {
 export type PurchaseOrderRow = {
   id: string;
   requester_employee_id: string;
-  stage: PurchaseStage;
+  /** Legado + exibição em listas; preferir coluna do kanban quando existir. */
+  stage: PurchaseStage | string;
+  title: string | null;
+  kanban_column_id: string | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -40,6 +43,7 @@ export type PurchaseOrderItemRow = {
   quantity_received: number;
   received_at: string | null;
   notes: string | null;
+  ca_number: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -52,7 +56,7 @@ export type EmployeeLite = {
 
 export type NewOrderForm = {
   requester_employee_id: string;
-  stage: PurchaseStage;
+  kanban_column_id: string;
   notes: string;
   items: Array<{
     product_url: string;
@@ -62,6 +66,7 @@ export type NewOrderForm = {
     unit: string;
     quantity_requested: number;
     notes: string;
+    ca_number: string;
   }>;
 };
 

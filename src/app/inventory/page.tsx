@@ -11,7 +11,9 @@ import QuickMovementModal from '@/components/QuickMovementModal';
 import { itemCodeFromDescription } from '@/lib/itemCode';
 import { recordMovement, updatePossessionQuantity, updateSitePossessionQuantity, updateStock } from '@/lib/movements';
 import { fetchTenantItems, isLikelyMissingColumn } from '@/lib/tenantItems';
+import { fetchCaEpiByNumber } from '@/lib/caEpiClient';
 import { downloadInventoryImportTemplate } from '@/lib/inventoryImportTemplate';
+import { MlProductAutocomplete } from '@/components/MlProductAutocomplete';
 
 function possessionEmployeeName(
   employees: { full_name: string } | { full_name: string }[] | null | undefined
@@ -51,6 +53,8 @@ interface Product {
   unique_item?: boolean;
   /** TAG / identificador fixo no cadastro do item */
   tag?: string | null;
+  /** Número do CA (EPI), opcional */
+  ca_number?: string | null;
   quantity_current: number;
   quantity_min: number;
   unit: string;
@@ -98,6 +102,7 @@ const emptyItemForm = () => ({
   quantity_min: 0,
   unit: 'un',
   tag: '',
+  ca_number: '',
 });
 
 function InventoryContent() {
@@ -139,6 +144,7 @@ function InventoryContent() {
 
   // Form states for NEW/EDIT
   const [formData, setFormData] = useState(emptyItemForm);
+  const [caPullLoading, setCaPullLoading] = useState(false);
 
   const fetchCategories = async () => {
     setCategoryError(null);
@@ -451,17 +457,20 @@ function InventoryContent() {
       unit: formData.unit,
       code: itemCodeFromDescription(formData.description),
     };
+    const tagVal = formData.tag.trim() || null;
+    const caNorm = formData.ca_number.replace(/\D/g, '') || null;
 
-    let error = (
-      await supabase
-        .from('items')
-        .update({ ...basePatch, tag: formData.tag.trim() || null })
-        .eq('id', editingItem.id)
-        .eq('user_id', user.id)
-    ).error;
+    let patch: Record<string, unknown> = { ...basePatch, tag: tagVal, ca_number: caNorm };
+    let error = (await supabase.from('items').update(patch).eq('id', editingItem.id).eq('user_id', user.id)).error;
 
     if (error?.message && isLikelyMissingColumn(error.message, 'tag')) {
-      error = (await supabase.from('items').update(basePatch).eq('id', editingItem.id).eq('user_id', user.id)).error;
+      const { tag: _t, ...noTag } = patch;
+      patch = noTag;
+      error = (await supabase.from('items').update(patch).eq('id', editingItem.id).eq('user_id', user.id)).error;
+    }
+    if (error?.message && isLikelyMissingColumn(error.message, 'ca_number')) {
+      const { ca_number: _c, ...noCa } = patch;
+      error = (await supabase.from('items').update(noCa).eq('id', editingItem.id).eq('user_id', user.id)).error;
     }
 
     if (error) {
@@ -494,15 +503,26 @@ function InventoryContent() {
       quantity_min: formData.quantity_min,
       unit: formData.unit,
       tag: formData.tag.trim() || null,
+      ca_number: formData.ca_number.replace(/\D/g, '') || null,
       code: itemCodeFromDescription(formData.description),
       user_id: user.id,
     };
 
-    let { error } = await supabase.from('items').insert([finalData]);
-
+    let row: Record<string, unknown> = { ...finalData };
+    let { error } = await supabase.from('items').insert([row]);
     if (error?.message && isLikelyMissingColumn(error.message, 'tag')) {
-      const { tag: _t, ...withoutTag } = finalData;
-      ({ error } = await supabase.from('items').insert([withoutTag]));
+      const { tag: _t, ...noTag } = row;
+      row = noTag;
+      ({ error } = await supabase.from('items').insert([row]));
+    }
+    if (error?.message && isLikelyMissingColumn(error.message, 'ca_number')) {
+      const { ca_number: _c, ...noCa } = row;
+      row = noCa;
+      ({ error } = await supabase.from('items').insert([row]));
+    }
+    if (error?.message && isLikelyMissingColumn(error.message, 'tag')) {
+      const { tag: _t2, ...minimal } = row;
+      ({ error } = await supabase.from('items').insert([minimal]));
     }
 
     if (error) {
@@ -517,9 +537,43 @@ function InventoryContent() {
     setIsSubmitting(false);
   };
 
-  const filteredProducts = products.filter(p =>
-    p.description.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const q = searchTerm.toLowerCase().trim();
+  const filteredProducts = products.filter((p) => {
+    if (!q) return true;
+    if (p.description.toLowerCase().includes(q)) return true;
+    const caDigits = (p.ca_number ?? '').replace(/\D/g, '');
+    const qDigits = q.replace(/\D/g, '');
+    if (qDigits.length > 0 && caDigits.includes(qDigits)) return true;
+    return (p.ca_number ?? '').toLowerCase().includes(q);
+  });
+
+  const pullDescriptionFromCa = async () => {
+    const raw = formData.ca_number.replace(/\D/g, '');
+    if (raw.length < 4) {
+      alert('Informe o número do CA (mín. 4 dígitos).');
+      return;
+    }
+    setCaPullLoading(true);
+    try {
+      const res = await fetchCaEpiByNumber(raw);
+      if (!res.ok) {
+        let msg = res.error ?? 'CA não encontrado.';
+        if (res.hint) msg += `\n\n${res.hint}`;
+        if (res.officialUrl) msg += `\n\nConsulta manual: ${res.officialUrl}`;
+        alert(msg);
+        return;
+      }
+      if (res.label) {
+        setFormData((fd) => ({
+          ...fd,
+          ca_number: raw,
+          description: fd.description.trim() ? fd.description : res.label!,
+        }));
+      }
+    } finally {
+      setCaPullLoading(false);
+    }
+  };
 
   const handleDownloadInventory = () => {
     if (products.length === 0) {
@@ -529,6 +583,7 @@ function InventoryContent() {
     const header = [
       'Descrição',
       'Código',
+      'CA (EPI)',
       'Categoria',
       'Local',
       'Unidade',
@@ -555,6 +610,7 @@ function InventoryContent() {
       const row = [
         p.description,
         p.code ?? '',
+        p.ca_number ?? '',
         p.category,
         p.location ?? '',
         p.unit,
@@ -998,7 +1054,7 @@ function InventoryContent() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
           <input 
             type="text" 
-            placeholder="Buscar por descrição..." 
+            placeholder="Buscar por descrição ou número do CA..." 
             className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary/50 focus:border-secondary transition-all"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
@@ -1013,6 +1069,7 @@ function InventoryContent() {
             <thead className="bg-slate-50 border-b border-border">
               <tr>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Descrição do Material</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center whitespace-nowrap">CA</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Consumível?</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Estoque</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Em Posse</th>
@@ -1026,14 +1083,14 @@ function InventoryContent() {
             <tbody className="divide-y divide-border text-sm">
               {loading ? (
                 <tr>
-                  <td colSpan={9} className="px-6 py-12 text-center text-slate-400">
+                  <td colSpan={10} className="px-6 py-12 text-center text-slate-400">
                     <Loader2 className="animate-spin inline mr-2" size={20} />
                     Carregando inventário...
                   </td>
                 </tr>
               ) : filteredProducts.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-6 py-12 text-center text-slate-400">Nenhum item encontrado.</td>
+                  <td colSpan={10} className="px-6 py-12 text-center text-slate-400">Nenhum item encontrado.</td>
                 </tr>
               ) : (
                 filteredProducts.map((p) => {
@@ -1052,6 +1109,18 @@ function InventoryContent() {
                             {p.tag}
                           </div>
                         ) : null}
+                      </td>
+                      <td className="px-4 py-4 text-center text-xs font-mono text-slate-600 whitespace-nowrap">
+                        {p.ca_number ? (
+                          <Link
+                            href={`/ca-consulta?ca=${encodeURIComponent(String(p.ca_number).replace(/\D/g, ''))}`}
+                            className="text-teal-700 font-bold hover:underline"
+                          >
+                            {p.ca_number}
+                          </Link>
+                        ) : (
+                          <span className="text-slate-300">—</span>
+                        )}
                       </td>
                       <td className="px-6 py-4 text-xs text-center border-x border-slate-50">
                         <span className={`px-2 py-1 rounded-md font-bold text-[10px] uppercase tracking-tighter ${p.consumable ? 'bg-green-50 text-green-600' : 'bg-slate-50 text-slate-400'}`}>
@@ -1173,6 +1242,7 @@ function InventoryContent() {
                                 quantity_min: p.quantity_min,
                                 unit: p.unit,
                                 tag: p.tag ?? '',
+                                ca_number: p.ca_number ?? '',
                               });
                             }}
                             className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-blue-500"
@@ -1244,8 +1314,8 @@ function InventoryContent() {
       {/* Modal Cadastro/Edição */}
       {(isModalOpen || editingItem) && (
         <div className="fixed inset-0 bg-primary/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in duration-300">
-            <div className="p-6 border-b border-border flex items-center justify-between bg-slate-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[92vh] flex flex-col overflow-hidden animate-in zoom-in duration-300">
+            <div className="p-6 border-b border-border flex items-center justify-between bg-slate-50 shrink-0">
               <h2 className="text-xl font-bold text-primary">
                 {editingItem ? 'Editar Material' : 'Novo Material'}
               </h2>
@@ -1257,7 +1327,7 @@ function InventoryContent() {
               </button>
             </div>
             
-            <form onSubmit={editingItem ? handleEditSubmit : handleSubmit} className="p-6 space-y-4">
+            <form onSubmit={editingItem ? handleEditSubmit : handleSubmit} className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
               <div className="grid grid-cols-2 gap-4">
 
                 <div className="space-y-1">
@@ -1277,18 +1347,13 @@ function InventoryContent() {
               </div>
 
               <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-xs font-bold uppercase text-slate-400">Descrição do Produto</label>
-                  <input 
-                    required
-                    type="text" 
-                    placeholder="Nome detalhado do item..."
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none font-bold"
-                    value={formData.description}
-                    onChange={(e) => setFormData({...formData, description: e.target.value})}
-                  />
-                </div>
-                <div className="space-y-3 pt-6">
+                <MlProductAutocomplete
+                  label="Descrição do Produto"
+                  value={formData.description}
+                  onChange={(v) => setFormData({ ...formData, description: v })}
+                  required
+                />
+                <div className="col-span-2 flex flex-wrap items-center gap-x-8 gap-y-3 pt-1">
                   <div className="flex items-center gap-3">
                     <input 
                       type="checkbox" 
@@ -1332,6 +1397,36 @@ function InventoryContent() {
                     </label>
                   </div>
                 </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold uppercase text-slate-400">CA (EPI) — opcional</label>
+                <div className="flex gap-2 mt-1">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none text-sm font-mono"
+                    placeholder="Ex.: 12345"
+                    value={formData.ca_number}
+                    onChange={(e) => setFormData({ ...formData, ca_number: e.target.value })}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void pullDescriptionFromCa()}
+                    disabled={caPullLoading}
+                    className="px-3 py-2 bg-teal-50 border border-teal-200 rounded-lg font-bold text-teal-800 hover:bg-teal-100 disabled:opacity-50 flex items-center gap-1 shrink-0"
+                    title="Preencher descrição pelo CA (configure CA_EPI_API_BASE)"
+                  >
+                    {caPullLoading ? <Loader2 className="animate-spin" size={16} /> : <Search size={16} />}
+                    CA
+                  </button>
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Com a descrição vazia, o nome padronizado da API preenche o campo.{' '}
+                  <Link href="/ca-consulta" className="text-teal-700 font-bold hover:underline">
+                    Consulta CA
+                  </Link>
+                </p>
               </div>
 
               <div className="grid grid-cols-2 gap-4">

@@ -4,8 +4,9 @@ import { useEffect, useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { supabase } from '@/lib/supabase';
 import { FileUp, Loader2, Plus, X } from 'lucide-react';
-import type { EmployeeLite, PurchaseStage } from '@/lib/purchaseOrders';
-import { PURCHASE_STAGES, clampNumber } from '@/lib/purchaseOrders';
+import type { EmployeeLite } from '@/lib/purchaseOrders';
+import { clampNumber } from '@/lib/purchaseOrders';
+import { ensureKanbanColumnsSeeded, type KanbanColumnRow } from '@/lib/kanbanColumns';
 
 type ImportItem = {
   product_name: string;
@@ -52,8 +53,9 @@ export function PurchaseOrderImportModal({
   onSaved: () => void;
 }) {
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
+  const [columns, setColumns] = useState<KanbanColumnRow[]>([]);
   const [requesterId, setRequesterId] = useState('');
-  const [stage, setStage] = useState<PurchaseStage>('Rascunho');
+  const [kanbanColumnId, setKanbanColumnId] = useState('');
   const [orderNotes, setOrderNotes] = useState('');
   const [items, setItems] = useState<ImportItem[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -65,18 +67,22 @@ export function PurchaseOrderImportModal({
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         setEmployees([]);
+        setColumns([]);
         return;
       }
-      const { data, error: empError } = await supabase
-        .from('employees')
-        .select('id, full_name, status')
-        .eq('user_id', user.id)
-        .order('full_name', { ascending: true });
-      if (empError) {
-        console.error('Error fetching employees:', empError);
+      const [empRes, colSeed] = await Promise.all([
+        supabase
+          .from('employees')
+          .select('id, full_name, status')
+          .eq('user_id', user.id)
+          .order('full_name', { ascending: true }),
+        ensureKanbanColumnsSeeded(supabase, user.id),
+      ]);
+      if (empRes.error) {
+        console.error('Error fetching employees:', empRes.error);
         setEmployees([]);
       } else {
-        const list: EmployeeLite[] = (data || []).map((r: unknown) => {
+        const list: EmployeeLite[] = (empRes.data || []).map((r: unknown) => {
           const row = r as Record<string, unknown>;
           return {
             id: String(row.id),
@@ -86,11 +92,17 @@ export function PurchaseOrderImportModal({
         });
         setEmployees(list);
       }
+      setColumns(colSeed.columns);
+      const first = colSeed.columns[0]?.id ?? '';
+      setKanbanColumnId((cur) => cur || first);
     };
     run();
   }, [isOpen]);
 
-  const canSubmit = useMemo(() => requesterId && items.length > 0, [requesterId, items.length]);
+  const canSubmit = useMemo(
+    () => requesterId && items.length > 0 && !!kanbanColumnId,
+    [requesterId, items.length, kanbanColumnId]
+  );
 
   if (!isOpen) return null;
 
@@ -160,14 +172,24 @@ export function PurchaseOrderImportModal({
       return;
     }
 
+    const col = columns.find((c) => c.id === kanbanColumnId) || columns[0];
+    if (!col) {
+      setError('Nenhuma coluna do quadro. Rode o SQL kanban_and_ca.sql.');
+      setIsSubmitting(false);
+      return;
+    }
+
     const { data: orderData, error: orderError } = await supabase
       .from('purchase_orders')
       .insert([
         {
           user_id: user.id,
           requester_employee_id: requesterId,
-          stage,
+          kanban_column_id: col.id,
+          stage: col.title,
           notes: orderNotes.trim() || null,
+          title: null,
+          updated_at: new Date().toISOString(),
         },
       ])
       .select('id')
@@ -202,7 +224,7 @@ export function PurchaseOrderImportModal({
     onClose();
     onSaved();
     setRequesterId('');
-    setStage('Rascunho');
+    setKanbanColumnId(columns[0]?.id ?? '');
     setOrderNotes('');
     setItems([]);
     setIsSubmitting(false);
@@ -247,15 +269,15 @@ export function PurchaseOrderImportModal({
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-bold uppercase text-slate-500">Estágio</label>
+              <label className="text-xs font-bold uppercase text-slate-500">Coluna do quadro</label>
               <select
                 className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none text-sm font-medium"
-                value={stage}
-                onChange={(e) => setStage(e.target.value as PurchaseStage)}
+                value={kanbanColumnId}
+                onChange={(e) => setKanbanColumnId(e.target.value)}
               >
-                {PURCHASE_STAGES.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
+                {columns.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.title}
                   </option>
                 ))}
               </select>

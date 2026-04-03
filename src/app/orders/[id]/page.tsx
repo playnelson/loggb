@@ -6,10 +6,16 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { ArrowLeft, Loader2, Plus, Trash2, Wand2, Link as LinkIcon, Save, Sheet } from 'lucide-react';
-import type { EmployeeLite, PurchaseOrderItemRow, PurchaseOrderRow, PurchaseStage } from '@/lib/purchaseOrders';
-import { PURCHASE_STAGES, clampNumber, isPurchaseStage } from '@/lib/purchaseOrders';
+import { ArrowLeft, Loader2, Plus, Trash2, Wand2, Link as LinkIcon, Save, Sheet, Search } from 'lucide-react';
+import type { EmployeeLite, PurchaseOrderItemRow, PurchaseOrderRow } from '@/lib/purchaseOrders';
+import { clampNumber } from '@/lib/purchaseOrders';
 import { downloadOrdersSpreadsheet } from '@/lib/ordersExport';
+import {
+  ensureKanbanColumnsSeeded,
+  resolveColumnIdForOrder,
+  type KanbanColumnRow,
+} from '@/lib/kanbanColumns';
+import { fetchCaEpiByNumber } from '@/lib/caEpiClient';
 
 function OrderDetailContent() {
   const params = useParams<{ id: string }>();
@@ -19,12 +25,15 @@ function OrderDetailContent() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [linkLoadingIdx, setLinkLoadingIdx] = useState<number | null>(null);
+  const [caLoadingIdx, setCaLoadingIdx] = useState<number | null>(null);
 
   const [items, setItems] = useState<PurchaseOrderItemRow[]>([]);
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
+  const [columns, setColumns] = useState<KanbanColumnRow[]>([]);
   const [order, setOrder] = useState<PurchaseOrderRow | null>(null);
 
-  const [orderStage, setOrderStage] = useState<PurchaseStage>('Rascunho');
+  const [orderColumnId, setOrderColumnId] = useState<string>('');
+  const [orderTitle, setOrderTitle] = useState<string>('');
   const [requesterId, setRequesterId] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
 
@@ -39,9 +48,12 @@ function OrderDetailContent() {
       return;
     }
 
+    const seeded = await ensureKanbanColumnsSeeded(supabase, user.id);
+    setColumns(seeded.columns);
+
     const { data: o, error: oErr } = await supabase
       .from('purchase_orders')
-      .select('id, user_id, requester_employee_id, stage, notes, created_at, updated_at')
+      .select('id, user_id, requester_employee_id, stage, title, kanban_column_id, notes, created_at, updated_at')
       .eq('id', orderId)
       .single();
     if (oErr || !o) {
@@ -57,11 +69,12 @@ function OrderDetailContent() {
       setLoading(false);
       return;
     }
-    const stageRaw = String(oRow.stage ?? '');
     const row: PurchaseOrderRow = {
       id: String(oRow.id),
       requester_employee_id: String(oRow.requester_employee_id),
-      stage: isPurchaseStage(stageRaw) ? stageRaw : 'Rascunho',
+      stage: String(oRow.stage ?? ''),
+      title: (oRow.title as string) ?? null,
+      kanban_column_id: oRow.kanban_column_id ? String(oRow.kanban_column_id) : null,
       notes: (oRow.notes as string) ?? null,
       created_at: String(oRow.created_at),
       updated_at: String(oRow.updated_at),
@@ -69,7 +82,9 @@ function OrderDetailContent() {
 
     const { data: it, error: itErr } = await supabase
       .from('purchase_order_items')
-      .select('id, order_id, product_name, product_url, vendor, product_price, unit, quantity_requested, quantity_received, received_at, notes, created_at, updated_at')
+      .select(
+        'id, order_id, product_name, product_url, vendor, product_price, unit, quantity_requested, quantity_received, received_at, notes, ca_number, created_at, updated_at'
+      )
       .eq('order_id', orderId)
       .order('created_at', { ascending: true });
     if (itErr) {
@@ -89,6 +104,7 @@ function OrderDetailContent() {
         quantity_received: Number(row.quantity_received ?? 0),
         received_at: (row.received_at as string) ?? null,
         notes: (row.notes as string) ?? null,
+        ca_number: row.ca_number != null ? String(row.ca_number) : null,
         created_at: String(row.created_at),
         updated_at: String(row.updated_at),
       };
@@ -111,7 +127,9 @@ function OrderDetailContent() {
     setEmployees(empList);
     setItems(itemList);
     setOrder(row);
-    setOrderStage(row.stage);
+    const cid = resolveColumnIdForOrder(row, seeded.columns);
+    setOrderColumnId(cid || seeded.columns[0]?.id || '');
+    setOrderTitle(row.title || '');
     setRequesterId(row.requester_employee_id);
     setNotes(row.notes || '');
 
@@ -139,13 +157,22 @@ function OrderDetailContent() {
     }
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
+    const col = columns.find((c) => c.id === orderColumnId) || columns[0];
+    if (!col) {
+      alert('Coluna do quadro inválida.');
+      setSaving(false);
+      return;
+    }
     setSaving(true);
     const { error } = await supabase
       .from('purchase_orders')
       .update({
         requester_employee_id: requesterId,
-        stage: orderStage,
+        kanban_column_id: col.id,
+        stage: col.title,
+        title: orderTitle.trim() || null,
         notes: notes.trim() || null,
+        updated_at: new Date().toISOString(),
       })
       .eq('id', orderId)
       .eq('user_id', user.id);
@@ -233,6 +260,34 @@ function OrderDetailContent() {
     }
   };
 
+  const pullFromCa = async (id: string, idx: number) => {
+    const it = items.find((x) => x.id === id);
+    const raw = (it?.ca_number || '').replace(/\D/g, '');
+    if (raw.length < 4) {
+      alert('Informe o CA (mín. 4 dígitos).');
+      return;
+    }
+    setCaLoadingIdx(idx);
+    try {
+      const res = await fetchCaEpiByNumber(raw);
+      if (!res.ok) {
+        let msg = res.error ?? 'Falha na consulta.';
+        if (res.hint) msg += `\n\n${res.hint}`;
+        alert(msg);
+        return;
+      }
+      if (res.label) {
+        const cur = items.find((x) => x.id === id);
+        await updateItem(id, {
+          ca_number: raw,
+          product_name: cur?.product_name || res.label,
+        });
+      }
+    } finally {
+      setCaLoadingIdx(null);
+    }
+  };
+
   if (!orderId) return null;
 
   return (
@@ -295,7 +350,17 @@ function OrderDetailContent() {
       ) : (
         <>
           <div className="bg-white p-6 rounded-2xl border border-border shadow-sm space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1 md:col-span-2">
+                <label className="text-xs font-bold uppercase text-slate-500">Título no quadro (opcional)</label>
+                <input
+                  type="text"
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none text-sm font-bold"
+                  value={orderTitle}
+                  onChange={(e) => setOrderTitle(e.target.value)}
+                  placeholder="Ex.: Compra EPI obra norte"
+                />
+              </div>
               <div className="space-y-1">
                 <label className="text-xs font-bold uppercase text-slate-500">Solicitante (Funcionário) *</label>
                 <select
@@ -314,21 +379,21 @@ function OrderDetailContent() {
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs font-bold uppercase text-slate-500">Estágio</label>
+                <label className="text-xs font-bold uppercase text-slate-500">Coluna do quadro</label>
                 <select
                   className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none text-sm font-medium"
-                  value={orderStage}
-                  onChange={(e) => setOrderStage(e.target.value as PurchaseStage)}
+                  value={orderColumnId}
+                  onChange={(e) => setOrderColumnId(e.target.value)}
                 >
-                  {PURCHASE_STAGES.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
+                  {columns.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.title}
                     </option>
                   ))}
                 </select>
               </div>
 
-              <div className="space-y-1">
+              <div className="space-y-1 md:col-span-2">
                 <label className="text-xs font-bold uppercase text-slate-500">Observações</label>
                 <input
                   type="text"
@@ -357,6 +422,7 @@ function OrderDetailContent() {
               <table className="w-full text-left border-collapse">
                 <thead className="bg-slate-50 border-b border-border">
                   <tr>
+                    <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">CA</th>
                     <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Produto</th>
                     <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Fornecedor</th>
                     <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Un</th>
@@ -369,13 +435,34 @@ function OrderDetailContent() {
                 <tbody className="divide-y divide-border">
                   {items.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-6 py-10 text-center text-slate-400 italic">
+                      <td colSpan={8} className="px-6 py-10 text-center text-slate-400 italic">
                         Nenhum item. Clique em “Adicionar item”.
                       </td>
                     </tr>
                   ) : (
                     items.map((it, idx) => (
                       <tr key={it.id} className="hover:bg-slate-50 transition-colors">
+                        <td className="px-6 py-4 align-top w-36">
+                          <div className="flex gap-1">
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              className="w-full min-w-0 p-2 bg-slate-50 border border-slate-200 rounded-lg outline-none text-xs font-mono"
+                              placeholder="CA"
+                              value={it.ca_number || ''}
+                              onChange={(e) => void updateItem(it.id, { ca_number: e.target.value || null })}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => void pullFromCa(it.id, idx)}
+                              disabled={caLoadingIdx === idx}
+                              className="shrink-0 p-2 bg-teal-50 border border-teal-200 rounded-lg text-teal-800 disabled:opacity-50"
+                              title="Nome pelo CA"
+                            >
+                              {caLoadingIdx === idx ? <Loader2 className="animate-spin" size={14} /> : <Search size={14} />}
+                            </button>
+                          </div>
+                        </td>
                         <td className="px-6 py-4">
                           <div className="space-y-2">
                             <input

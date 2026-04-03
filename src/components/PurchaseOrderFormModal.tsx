@@ -2,9 +2,11 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Loader2, Plus, Trash2, Wand2, X } from 'lucide-react';
-import type { EmployeeLite, NewOrderForm, PurchaseStage } from '@/lib/purchaseOrders';
-import { PURCHASE_STAGES, clampNumber } from '@/lib/purchaseOrders';
+import { Loader2, Plus, Trash2, Wand2, X, Search } from 'lucide-react';
+import type { EmployeeLite, NewOrderForm } from '@/lib/purchaseOrders';
+import { clampNumber } from '@/lib/purchaseOrders';
+import { ensureKanbanColumnsSeeded, type KanbanColumnRow } from '@/lib/kanbanColumns';
+import { fetchCaEpiByNumber } from '@/lib/caEpiClient';
 
 function emptyItem() {
   return {
@@ -15,6 +17,7 @@ function emptyItem() {
     unit: 'un',
     quantity_requested: 1,
     notes: '',
+    ca_number: '',
   };
 }
 
@@ -22,22 +25,25 @@ export function PurchaseOrderFormModal({
   isOpen,
   onClose,
   onSaved,
-  initialStage = 'Rascunho',
+  initialKanbanColumnId = '',
   title = 'Novo Pedido',
 }: {
   isOpen: boolean;
   onClose: () => void;
   onSaved: () => void;
-  initialStage?: PurchaseStage;
+  /** Coluna inicial no quadro (UUID). */
+  initialKanbanColumnId?: string;
   title?: string;
 }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [linkLoadingIdx, setLinkLoadingIdx] = useState<number | null>(null);
+  const [caLoadingIdx, setCaLoadingIdx] = useState<number | null>(null);
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
+  const [columns, setColumns] = useState<KanbanColumnRow[]>([]);
 
   const [form, setForm] = useState<NewOrderForm>({
     requester_employee_id: '',
-    stage: initialStage,
+    kanban_column_id: initialKanbanColumnId,
     notes: '',
     items: [emptyItem()],
   });
@@ -48,38 +54,52 @@ export function PurchaseOrderFormModal({
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         setEmployees([]);
+        setColumns([]);
         return;
       }
-      const { data, error } = await supabase
-        .from('employees')
-        .select('id, full_name, status')
-        .eq('user_id', user.id)
-        .order('full_name', { ascending: true });
-      if (error) {
-        console.error('Error fetching employees:', error);
+      const [empRes, colSeed] = await Promise.all([
+        supabase
+          .from('employees')
+          .select('id, full_name, status')
+          .eq('user_id', user.id)
+          .order('full_name', { ascending: true }),
+        ensureKanbanColumnsSeeded(supabase, user.id),
+      ]);
+      if (empRes.error) {
+        console.error('Error fetching employees:', empRes.error);
         setEmployees([]);
       } else {
-        const list: EmployeeLite[] = (data || []).map((r: unknown) => {
-          const row = r as Record<string, unknown>;
-          return {
-            id: String(row.id),
-            full_name: String(row.full_name ?? ''),
-            status: row.status ? String(row.status) : undefined,
-          };
-        });
-        setEmployees(list);
+        setEmployees(
+          (empRes.data || []).map((r: unknown) => {
+            const row = r as Record<string, unknown>;
+            return {
+              id: String(row.id),
+              full_name: String(row.full_name ?? ''),
+              status: row.status ? String(row.status) : undefined,
+            };
+          })
+        );
       }
+      setColumns(colSeed.columns);
+      const firstCol = colSeed.columns[0]?.id ?? '';
+      setForm((f) => ({
+        ...f,
+        kanban_column_id: initialKanbanColumnId || firstCol || f.kanban_column_id,
+      }));
     };
     run();
-  }, [isOpen]);
+  }, [isOpen, initialKanbanColumnId]);
 
   const canSubmit = useMemo(() => {
     if (!form.requester_employee_id) return false;
+    if (!form.kanban_column_id) return false;
     if (!form.items.length) return false;
     return form.items.every((it) => it.quantity_requested > 0);
   }, [form]);
 
   if (!isOpen) return null;
+
+  const columnTitle = (id: string) => columns.find((c) => c.id === id)?.title ?? 'Rascunho';
 
   const pullFromLink = async (idx: number) => {
     const url = form.items[idx]?.product_url.trim();
@@ -113,6 +133,39 @@ export function PurchaseOrderFormModal({
     }
   };
 
+  const pullFromCa = async (idx: number) => {
+    const raw = form.items[idx]?.ca_number?.replace(/\D/g, '') ?? '';
+    if (raw.length < 4) {
+      alert('Informe o número do CA (mín. 4 dígitos).');
+      return;
+    }
+    setCaLoadingIdx(idx);
+    try {
+      const res = await fetchCaEpiByNumber(raw);
+      if (!res.ok) {
+        let msg = res.error ?? 'CA não encontrado.';
+        if (res.hint) msg += `\n\n${res.hint}`;
+        if (res.officialUrl) msg += `\n\nConsulta manual: ${res.officialUrl}`;
+        alert(msg);
+        return;
+      }
+      if (res.label) {
+        setForm((f) => {
+          const next = { ...f, items: [...f.items] };
+          const cur = next.items[idx] || emptyItem();
+          next.items[idx] = {
+            ...cur,
+            ca_number: raw,
+            product_name: cur.product_name || res.label!,
+          };
+          return next;
+        });
+      }
+    } finally {
+      setCaLoadingIdx(null);
+    }
+  };
+
   const createOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSubmit) return;
@@ -125,11 +178,16 @@ export function PurchaseOrderFormModal({
       return;
     }
 
+    const stageTitle = columnTitle(form.kanban_column_id);
+
     const orderPayload = {
       user_id: user.id,
       requester_employee_id: form.requester_employee_id,
-      stage: form.stage,
+      kanban_column_id: form.kanban_column_id,
+      stage: stageTitle,
       notes: form.notes.trim() || null,
+      title: null as string | null,
+      updated_at: new Date().toISOString(),
     };
 
     const { data: orderData, error: orderError } = await supabase
@@ -154,11 +212,11 @@ export function PurchaseOrderFormModal({
       quantity_requested: clampNumber(Number(it.quantity_requested), 1, 1_000_000),
       quantity_received: 0,
       notes: it.notes.trim() || null,
+      ca_number: it.ca_number.replace(/\D/g, '') || null,
     }));
 
     const { error: itemsError } = await supabase.from('purchase_order_items').insert(itemsPayload);
     if (itemsError) {
-      // best-effort rollback: delete the order (will cascade delete items if any inserted)
       await supabase.from('purchase_orders').delete().eq('id', orderData.id);
       alert(`Erro ao adicionar itens: ${itemsError.message}`);
       setIsSubmitting(false);
@@ -169,7 +227,7 @@ export function PurchaseOrderFormModal({
     onSaved();
     setForm({
       requester_employee_id: '',
-      stage: initialStage,
+      kanban_column_id: initialKanbanColumnId || columns[0]?.id || '',
       notes: '',
       items: [emptyItem()],
     });
@@ -206,17 +264,22 @@ export function PurchaseOrderFormModal({
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-bold uppercase text-slate-500">Estágio</label>
+              <label className="text-xs font-bold uppercase text-slate-500">Coluna do quadro</label>
               <select
                 className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none text-sm font-medium"
-                value={form.stage}
-                onChange={(e) => setForm((f) => ({ ...f, stage: e.target.value as PurchaseStage }))}
+                value={form.kanban_column_id}
+                onChange={(e) => setForm((f) => ({ ...f, kanban_column_id: e.target.value }))}
+                required
               >
-                {PURCHASE_STAGES.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
+                {columns.length === 0 ? (
+                  <option value="">Configure o quadro (SQL kanban_and_ca.sql)</option>
+                ) : (
+                  columns.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.title}
+                    </option>
+                  ))
+                )}
               </select>
             </div>
           </div>
@@ -260,6 +323,38 @@ export function PurchaseOrderFormModal({
                   >
                     <Trash2 size={16} />
                   </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold uppercase text-slate-500">CA (EPI) — opcional</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none text-sm font-mono"
+                        placeholder="Ex.: 12345"
+                        value={it.ca_number}
+                        onChange={(e) =>
+                          setForm((f) => {
+                            const next = { ...f, items: [...f.items] };
+                            next.items[idx] = { ...next.items[idx], ca_number: e.target.value };
+                            return next;
+                          })
+                        }
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void pullFromCa(idx)}
+                        disabled={caLoadingIdx === idx}
+                        className="px-3 py-2 bg-teal-50 border border-teal-200 rounded-lg font-bold text-teal-800 hover:bg-teal-100 disabled:opacity-50 flex items-center gap-1"
+                        title="Preencher nome pelo CA (requer CA_EPI_API_BASE)"
+                      >
+                        {caLoadingIdx === idx ? <Loader2 className="animate-spin" size={16} /> : <Search size={16} />}
+                        CA
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -434,4 +529,3 @@ export function PurchaseOrderFormModal({
     </div>
   );
 }
-

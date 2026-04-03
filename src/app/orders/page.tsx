@@ -7,23 +7,32 @@ import { supabase } from '@/lib/supabase';
 import { Plus, Search, Loader2, Trash2, ExternalLink, Download, FileUp, Sheet } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import type { EmployeeLite, PurchaseOrderItemRow, PurchaseOrderRow, PurchaseStage } from '@/lib/purchaseOrders';
-import { PURCHASE_STAGES, isPurchaseStage } from '@/lib/purchaseOrders';
+import type { EmployeeLite, PurchaseOrderItemRow, PurchaseOrderRow } from '@/lib/purchaseOrders';
 import { PurchaseOrderFormModal } from '@/components/PurchaseOrderFormModal';
 import { PurchaseOrderImportModal, downloadOrdersTemplate } from '@/components/PurchaseOrderImportModal';
 import { downloadOrdersSpreadsheet } from '@/lib/ordersExport';
+import {
+  ensureKanbanColumnsSeeded,
+  resolveColumnIdForOrder,
+  type KanbanColumnRow,
+} from '@/lib/kanbanColumns';
 
 function OrdersContent() {
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
+  const [columns, setColumns] = useState<KanbanColumnRow[]>([]);
   const [orders, setOrders] = useState<PurchaseOrderRow[]>([]);
   const [items, setItems] = useState<PurchaseOrderItemRow[]>([]);
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
   const [search, setSearch] = useState(() => searchParams.get('q') || '');
-  const [stageFilter, setStageFilter] = useState<'Todos' | PurchaseStage>('Todos');
+  const [columnFilter, setColumnFilter] = useState<'Todos' | string>('Todos');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
-  const parseStageFilter = (v: string): 'Todos' | PurchaseStage => (v === 'Todos' ? 'Todos' : (v as PurchaseStage));
+
+  const sortedColumns = useMemo(
+    () => [...columns].sort((a, b) => a.sort_order - b.sort_order),
+    [columns]
+  );
 
   const fetchOrders = async () => {
     setLoading(true);
@@ -32,13 +41,17 @@ function OrdersContent() {
       setOrders([]);
       setItems([]);
       setEmployees([]);
+      setColumns([]);
       setLoading(false);
       return;
     }
 
+    const seeded = await ensureKanbanColumnsSeeded(supabase, user.id);
+    setColumns(seeded.columns);
+
     const { data: orderData, error: orderError } = await supabase
       .from('purchase_orders')
-      .select('id, requester_employee_id, stage, notes, created_at, updated_at')
+      .select('id, requester_employee_id, stage, title, kanban_column_id, notes, created_at, updated_at')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false });
 
@@ -53,11 +66,12 @@ function OrdersContent() {
 
     const orderList: PurchaseOrderRow[] = (orderData || []).map((r: unknown) => {
       const row = r as Record<string, unknown>;
-      const stageRaw = String(row.stage ?? '');
       return {
         id: String(row.id),
         requester_employee_id: String(row.requester_employee_id),
-        stage: isPurchaseStage(stageRaw) ? stageRaw : 'Rascunho',
+        stage: String(row.stage ?? ''),
+        title: (row.title as string) ?? null,
+        kanban_column_id: row.kanban_column_id ? String(row.kanban_column_id) : null,
         notes: (row.notes as string) ?? null,
         created_at: String(row.created_at),
         updated_at: String(row.updated_at),
@@ -71,7 +85,9 @@ function OrdersContent() {
     } else {
       const { data: itemData, error: itemError } = await supabase
         .from('purchase_order_items')
-        .select('id, order_id, product_name, product_url, vendor, product_price, unit, quantity_requested, quantity_received, received_at, notes, created_at, updated_at')
+        .select(
+          'id, order_id, product_name, product_url, vendor, product_price, unit, quantity_requested, quantity_received, received_at, notes, ca_number, created_at, updated_at'
+        )
         .in('order_id', ids);
       if (itemError) {
         console.error('Error fetching order items:', itemError);
@@ -91,6 +107,7 @@ function OrdersContent() {
             quantity_received: Number(row.quantity_received ?? 0),
             received_at: (row.received_at as string) ?? null,
             notes: (row.notes as string) ?? null,
+            ca_number: row.ca_number != null ? String(row.ca_number) : null,
             created_at: String(row.created_at),
             updated_at: String(row.updated_at),
           };
@@ -108,36 +125,28 @@ function OrdersContent() {
       console.error('Error fetching employees:', empError);
       setEmployees([]);
     } else {
-      const list: EmployeeLite[] = (empData || []).map((r: unknown) => {
-        const row = r as Record<string, unknown>;
-        return {
-          id: String(row.id),
-          full_name: String(row.full_name ?? ''),
-          status: row.status ? String(row.status) : undefined,
-        };
-      });
-      setEmployees(list);
+      setEmployees(
+        (empData || []).map((r: unknown) => {
+          const row = r as Record<string, unknown>;
+          return {
+            id: String(row.id),
+            full_name: String(row.full_name ?? ''),
+            status: row.status ? String(row.status) : undefined,
+          };
+        })
+      );
     }
-
     setLoading(false);
   };
 
   useEffect(() => {
-    // eslint-disable-next-line @typescript-eslint/no-floating-promises
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchOrders();
+    void fetchOrders();
   }, []);
 
   useEffect(() => {
-    const onFocus = () => {
-      // eslint-disable-next-line @typescript-eslint/no-floating-promises
-      fetchOrders();
-    };
+    const onFocus = () => void fetchOrders();
     const onVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        // eslint-disable-next-line @typescript-eslint/no-floating-promises
-        fetchOrders();
-      }
+      if (document.visibilityState === 'visible') void fetchOrders();
     };
     window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onVisibility);
@@ -145,11 +154,9 @@ function OrdersContent() {
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSearch(searchParams.get('q') || '');
   }, [searchParams]);
 
@@ -172,36 +179,40 @@ function OrdersContent() {
   const filtered = useMemo(() => {
     const s = search.trim().toLowerCase();
     return orders.filter((o) => {
-      const matchesStage = stageFilter === 'Todos' || o.stage === stageFilter;
-      if (!s) return matchesStage;
+      const cid = resolveColumnIdForOrder(o, sortedColumns);
+      const matchesCol = columnFilter === 'Todos' || cid === columnFilter;
+      if (!s) return matchesCol;
       const requesterName = employeeNameById.get(o.requester_employee_id) || '';
       const lineItems = itemsByOrderId.get(o.id) || [];
       const itemBlob = lineItems
-        .flatMap((it) => [it.product_name, it.vendor, it.product_url, it.product_price, it.notes])
+        .flatMap((it) => [it.product_name, it.vendor, it.product_url, it.product_price, it.notes, it.ca_number])
         .filter(Boolean)
         .join(' ');
-      const blob = [
-        requesterName,
-        o.stage,
-        o.notes,
-        itemBlob,
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
-      return matchesStage && blob.includes(s);
+      const blob = [requesterName, o.stage, o.title, o.notes, itemBlob].filter(Boolean).join(' ').toLowerCase();
+      return matchesCol && blob.includes(s);
     });
-  }, [orders, search, stageFilter, employeeNameById, itemsByOrderId]);
+  }, [orders, search, columnFilter, employeeNameById, itemsByOrderId, sortedColumns]);
 
-  const updateStage = async (id: string, stage: PurchaseStage) => {
+  const updateOrderColumn = async (id: string, columnId: string) => {
+    const col = sortedColumns.find((c) => c.id === columnId);
+    if (!col) return;
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-    setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, stage } : o)));
-    const { error } = await supabase.from('purchase_orders').update({ stage }).eq('id', id).eq('user_id', user.id);
+    setOrders((prev) =>
+      prev.map((o) => (o.id === id ? { ...o, kanban_column_id: columnId, stage: col.title } : o))
+    );
+    const { error } = await supabase
+      .from('purchase_orders')
+      .update({
+        kanban_column_id: columnId,
+        stage: col.title,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .eq('user_id', user.id);
     if (error) {
-      alert(`Erro ao atualizar estágio: ${error.message}`);
-      // eslint-disable-next-line @typescript-eslint/no-floating-promises
-      fetchOrders();
+      alert(`Erro ao atualizar coluna: ${error.message}`);
+      void fetchOrders();
     }
   };
 
@@ -217,14 +228,22 @@ function OrdersContent() {
     }
   };
 
+  const defaultCol = sortedColumns[0]?.id ?? '';
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-primary">Pedidos</h1>
-          <p className="text-slate-500 text-sm">Rascunhos, estágios de compra e links de produto com preenchimento automático.</p>
+          <p className="text-slate-500 text-sm">Lista alinhada às colunas do quadro; use o dashboard para editar o quadro.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href="/ca-consulta"
+            className="flex items-center gap-2 bg-white text-primary border border-slate-200 px-4 py-2 rounded-lg hover:bg-slate-50 font-medium text-sm"
+          >
+            Consulta CA
+          </Link>
           <button
             type="button"
             onClick={downloadOrdersTemplate}
@@ -275,23 +294,23 @@ function OrdersContent() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
           <input
             type="text"
-            placeholder="Buscar por solicitante, produto, link, fornecedor..."
+            placeholder="Buscar por título, solicitante, produto, CA, link…"
             className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-secondary/50 outline-none"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
         <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1">
-          <span className="text-[10px] font-bold text-slate-400 uppercase">Estágio</span>
+          <span className="text-[10px] font-bold text-slate-400 uppercase">Coluna</span>
           <select
-            className="bg-transparent border-none text-sm focus:ring-0 outline-none font-medium text-slate-600"
-            value={stageFilter}
-            onChange={(e) => setStageFilter(parseStageFilter(e.target.value))}
+            className="bg-transparent border-none text-sm focus:ring-0 outline-none font-medium text-slate-600 max-w-[180px]"
+            value={columnFilter}
+            onChange={(e) => setColumnFilter(e.target.value === 'Todos' ? 'Todos' : e.target.value)}
           >
-            <option value="Todos">Todos</option>
-            {PURCHASE_STAGES.map((s) => (
-              <option key={s} value={s}>
-                {s}
+            <option value="Todos">Todas</option>
+            {sortedColumns.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.title}
               </option>
             ))}
           </select>
@@ -307,7 +326,7 @@ function OrdersContent() {
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Solicitante</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Fornecedor</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Preço</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Estágio</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Coluna</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Ações</th>
               </tr>
             </thead>
@@ -321,7 +340,9 @@ function OrdersContent() {
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-12 text-center text-slate-400">Nenhum pedido encontrado.</td>
+                  <td colSpan={6} className="px-6 py-12 text-center text-slate-400">
+                    Nenhum pedido encontrado.
+                  </td>
                 </tr>
               ) : (
                 filtered.map((o) => {
@@ -330,53 +351,55 @@ function OrdersContent() {
                   const qtyReq = lineItems.reduce((acc, it) => acc + (it.quantity_requested || 0), 0);
                   const qtyRec = lineItems.reduce((acc, it) => acc + (it.quantity_received || 0), 0);
                   const requesterName = employeeNameById.get(o.requester_employee_id) || '—';
-                  const title = lineItems[0]?.product_name || `Pedido (${itemCount} itens)`;
+                  const lineTitle = lineItems[0]?.product_name || '';
+                  const title =
+                    (o.title && o.title.trim()) ||
+                    lineTitle ||
+                    (itemCount ? `Pedido (${itemCount} itens)` : 'Tarefa');
                   return (
-                  <tr key={o.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-6 py-4">
-                      <div className="font-bold text-primary text-sm">
-                        {title}
-                      </div>
-                      <div className="text-[10px] text-slate-400 font-bold mt-1">
-                        {itemCount} itens • {qtyRec}/{qtyReq} recebidos
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-slate-600 font-medium">{requesterName}</td>
-                    <td className="px-6 py-4 text-sm text-slate-600 font-medium">{lineItems[0]?.vendor || '—'}</td>
-                    <td className="px-6 py-4 text-sm text-slate-600 font-mono">{lineItems[0]?.product_price || '—'}</td>
-                    <td className="px-6 py-4">
-                      <select
-                        className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-slate-700 outline-none"
-                        value={o.stage}
-                        onChange={(e) => updateStage(o.id, e.target.value as PurchaseStage)}
-                      >
-                        {PURCHASE_STAGES.map((s) => (
-                          <option key={s} value={s}>
-                            {s}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <Link
-                        href={`/orders/${o.id}`}
-                        className="inline-flex items-center gap-2 mr-2 text-primary bg-white border border-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-slate-50"
-                        title="Abrir pedido"
-                      >
-                        <ExternalLink size={14} />
-                        Abrir
-                      </Link>
-                      <button
-                        type="button"
-                        onClick={() => deleteOrder(o.id)}
-                        className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-red-500"
-                        title="Excluir pedido"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </td>
-                  </tr>
-                );
+                    <tr key={o.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-6 py-4">
+                        <div className="font-bold text-primary text-sm">{title}</div>
+                        <div className="text-[10px] text-slate-400 font-bold mt-1">
+                          {itemCount} itens • {qtyRec}/{qtyReq} recebidos
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-sm text-slate-600 font-medium">{requesterName}</td>
+                      <td className="px-6 py-4 text-sm text-slate-600 font-medium">{lineItems[0]?.vendor || '—'}</td>
+                      <td className="px-6 py-4 text-sm text-slate-600 font-mono">{lineItems[0]?.product_price || '—'}</td>
+                      <td className="px-6 py-4">
+                        <select
+                          className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-slate-700 outline-none max-w-[140px]"
+                          value={resolveColumnIdForOrder(o, sortedColumns) ?? ''}
+                          onChange={(e) => void updateOrderColumn(o.id, e.target.value)}
+                        >
+                          {sortedColumns.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.title}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <Link
+                          href={`/orders/${o.id}`}
+                          className="inline-flex items-center gap-2 mr-2 text-primary bg-white border border-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-slate-50"
+                          title="Abrir pedido"
+                        >
+                          <ExternalLink size={14} />
+                          Abrir
+                        </Link>
+                        <button
+                          type="button"
+                          onClick={() => deleteOrder(o.id)}
+                          className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-red-500"
+                          title="Excluir pedido"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </td>
+                    </tr>
+                  );
                 })
               )}
             </tbody>
@@ -387,19 +410,14 @@ function OrdersContent() {
       <PurchaseOrderFormModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        onSaved={() => {
-          // eslint-disable-next-line @typescript-eslint/no-floating-promises
-          fetchOrders();
-        }}
+        initialKanbanColumnId={defaultCol}
+        onSaved={() => void fetchOrders()}
       />
 
       <PurchaseOrderImportModal
         isOpen={isImportOpen}
         onClose={() => setIsImportOpen(false)}
-        onSaved={() => {
-          // eslint-disable-next-line @typescript-eslint/no-floating-promises
-          fetchOrders();
-        }}
+        onSaved={() => void fetchOrders()}
       />
     </div>
   );
@@ -412,4 +430,3 @@ export default function OrdersPage() {
     </Suspense>
   );
 }
-
