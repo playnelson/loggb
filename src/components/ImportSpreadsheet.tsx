@@ -222,12 +222,22 @@ export default function ImportSpreadsheet({
           let empId = null;
           // Strategy: Match by CPF (if valid) OR Name
           if (person.cpf) {
-            const { data } = await supabase.from('employees').select('id').eq('cpf', person.cpf).maybeSingle();
+            const { data } = await supabase
+              .from('employees')
+              .select('id')
+              .eq('cpf', person.cpf)
+              .eq('user_id', user.id)
+              .maybeSingle();
             if (data) empId = data.id;
           }
           
           if (!empId) {
-            const { data } = await supabase.from('employees').select('id').ilike('full_name', person.name).maybeSingle();
+            const { data } = await supabase
+              .from('employees')
+              .select('id')
+              .ilike('full_name', person.name)
+              .eq('user_id', user.id)
+              .maybeSingle();
             if (data) empId = data.id;
           }
 
@@ -241,7 +251,7 @@ export default function ImportSpreadsheet({
           };
 
           if (empId) {
-            await supabase.from('employees').update(empData).eq('id', empId);
+            await supabase.from('employees').update(empData).eq('id', empId).eq('user_id', user.id);
             employeeMap.set(key, empId);
           } else {
             const { data } = await supabase.from('employees').insert(empData).select('id').single();
@@ -292,11 +302,21 @@ export default function ImportSpreadsheet({
           
           let existingId = null;
           if (itm.description) {
-            const { data: byDesc } = await supabase.from('items').select('id').ilike('description', itm.description).maybeSingle();
+            const { data: byDesc } = await supabase
+              .from('items')
+              .select('id')
+              .ilike('description', itm.description)
+              .eq('user_id', user.id)
+              .maybeSingle();
             if (byDesc) existingId = byDesc.id;
           }
           if (!existingId && itm.sheetCode && !itm.sheetCode.startsWith('REF-')) {
-            const { data: byCode } = await supabase.from('items').select('id').eq('code', itm.sheetCode).maybeSingle();
+            const { data: byCode } = await supabase
+              .from('items')
+              .select('id')
+              .eq('code', itm.sheetCode)
+              .eq('user_id', user.id)
+              .maybeSingle();
             if (byCode) existingId = byCode.id;
           }
 
@@ -313,7 +333,7 @@ export default function ImportSpreadsheet({
           };
 
           if (existingId) {
-            await supabase.from('items').update(itemData).eq('id', existingId);
+            await supabase.from('items').update(itemData).eq('id', existingId).eq('user_id', user.id);
             itemMap.set(key, existingId);
           } else {
             const { data: newItem } = await supabase.from('items').insert(itemData).select('id').single();

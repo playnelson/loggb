@@ -9,6 +9,7 @@ import ImportSpreadsheet from '@/components/ImportSpreadsheet';
 import QuickMovementModal from '@/components/QuickMovementModal';
 import { itemCodeFromDescription } from '@/lib/itemCode';
 import { recordMovement, updatePossessionQuantity, updateStock } from '@/lib/movements';
+import { fetchTenantItems, isLikelyMissingColumn } from '@/lib/tenantItems';
 
 function possessionEmployeeName(
   employees: { full_name: string } | { full_name: string }[] | null | undefined
@@ -177,26 +178,34 @@ function InventoryContent() {
 
   const fetchProducts = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('items')
-      .select(
-        'id, code, description, category, location, consumable, unique_item, tag, quantity_current, quantity_min, unit, updated_at, possession (id, quantity, employees (full_name))'
-      )
-      .order('description', { ascending: true });
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setProducts([]);
+      setLoading(false);
+      return;
+    }
+
+    const { data, error } = await fetchTenantItems(supabase, user.id);
 
     if (error) {
       console.error('Error fetching products:', error);
       setProducts([]);
     } else {
-      setProducts(data || []);
+      setProducts((data as Product[]) || []);
     }
     setLoading(false);
   };
 
   const fetchEmployees = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setEmployees([]);
+      return;
+    }
     const { data, error } = await supabase
       .from('employees')
       .select('id, full_name, status')
+      .eq('user_id', user.id)
       .order('full_name', { ascending: true });
     if (error) {
       console.error('Error fetching employees:', error);
@@ -278,8 +287,17 @@ function InventoryContent() {
       return;
     }
 
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setIsSubmitting(false);
+      return;
+    }
     // Update existing items to keep consistency (does NOT delete items).
-    await supabase.from('items').update({ category: nextName }).eq('category', prevName);
+    await supabase
+      .from('items')
+      .update({ category: nextName })
+      .eq('category', prevName)
+      .eq('user_id', user.id);
 
     setEditingCategory(null);
     setEditingCategoryName('');
@@ -358,11 +376,15 @@ function InventoryContent() {
   };
 
   const handleDelete = async (id: string, name: string) => {
-    if (confirm(`Tem certeza que deseja excluir "${name}"? Esta ação é irreversível.`)) {
-      const { error } = await supabase.from('items').delete().eq('id', id);
-      if (error) alert('Erro ao excluir: ' + error.message);
-      else fetchProducts();
+    if (!confirm(`Tem certeza que deseja excluir "${name}"? Esta ação é irreversível.`)) return;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      alert('Usuário não autenticado.');
+      return;
     }
+    const { error } = await supabase.from('items').delete().eq('id', id).eq('user_id', user.id);
+    if (error) alert('Erro ao excluir: ' + error.message);
+    else fetchProducts();
   };
 
   const handleEditSubmit = async (e: React.FormEvent) => {
@@ -370,21 +392,35 @@ function InventoryContent() {
     if (!editingItem) return;
     setIsSubmitting(true);
 
-    const { error } = await supabase
-      .from('items')
-      .update({
-        description: formData.description,
-        category: formData.category,
-        location: formData.location,
-        consumable: formData.consumable,
-        unique_item: formData.unique_item,
-        quantity_current: formData.quantity_current,
-        quantity_min: formData.quantity_min,
-        unit: formData.unit,
-        tag: formData.tag.trim() || null,
-        code: itemCodeFromDescription(formData.description),
-      })
-      .eq('id', editingItem.id);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setIsSubmitting(false);
+      return;
+    }
+
+    const basePatch = {
+      description: formData.description,
+      category: formData.category,
+      location: formData.location,
+      consumable: formData.consumable,
+      unique_item: formData.unique_item,
+      quantity_current: formData.quantity_current,
+      quantity_min: formData.quantity_min,
+      unit: formData.unit,
+      code: itemCodeFromDescription(formData.description),
+    };
+
+    let error = (
+      await supabase
+        .from('items')
+        .update({ ...basePatch, tag: formData.tag.trim() || null })
+        .eq('id', editingItem.id)
+        .eq('user_id', user.id)
+    ).error;
+
+    if (error?.message && isLikelyMissingColumn(error.message, 'tag')) {
+      error = (await supabase.from('items').update(basePatch).eq('id', editingItem.id).eq('user_id', user.id)).error;
+    }
 
     if (error) {
       alert('Erro ao atualizar: ' + error.message);
@@ -399,7 +435,14 @@ function InventoryContent() {
     e.preventDefault();
     setIsSubmitting(true);
 
-    const finalData = {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      alert('Usuário não autenticado.');
+      setIsSubmitting(false);
+      return;
+    }
+
+    const finalData: Record<string, unknown> = {
       description: formData.description,
       category: formData.category,
       location: formData.location,
@@ -410,11 +453,15 @@ function InventoryContent() {
       unit: formData.unit,
       tag: formData.tag.trim() || null,
       code: itemCodeFromDescription(formData.description),
+      user_id: user.id,
     };
 
-    const { error } = await supabase
-      .from('items')
-      .insert([finalData]);
+    let { error } = await supabase.from('items').insert([finalData]);
+
+    if (error?.message && isLikelyMissingColumn(error.message, 'tag')) {
+      const { tag: _t, ...withoutTag } = finalData;
+      ({ error } = await supabase.from('items').insert([withoutTag]));
+    }
 
     if (error) {
       console.error('Error adding item:', error);

@@ -45,10 +45,31 @@ export default function ReceivedReportPage() {
 
   const fetchReceived = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('purchase_order_items')
-      .select(
-        `
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setRows([]);
+      setLoading(false);
+      return;
+    }
+
+    const { data: orderRows, error: orderErr } = await supabase
+      .from('purchase_orders')
+      .select('id')
+      .eq('user_id', user.id);
+    if (orderErr) {
+      console.error('Error fetching orders for received report:', orderErr);
+      setRows([]);
+      setLoading(false);
+      return;
+    }
+    const orderIds = (orderRows || []).map((r: { id: string }) => r.id);
+    if (orderIds.length === 0) {
+      setRows([]);
+      setLoading(false);
+      return;
+    }
+
+    const selectBlock = `
         id,
         received_at,
         quantity_received,
@@ -65,40 +86,55 @@ export default function ReceivedReportPage() {
           requester_employee_id,
           employees:requester_employee_id ( full_name )
         )
-      `
-      )
-      .not('received_at', 'is', null)
-      .gt('quantity_received', 0)
-      .gte('received_at', toISOStart(from))
-      .lte('received_at', toISOEnd(to))
-      .order('received_at', { ascending: false });
+      `;
 
-    if (error) {
-      console.error('Error fetching received:', error);
-      setRows([]);
-    } else {
-      const list: ReceivedRow[] = (data || []).map((r: any) => ({
-        id: String(r.id),
-        received_at: String(r.received_at),
-        quantity_received: Number(r.quantity_received ?? 0),
-        quantity_requested: Number(r.quantity_requested ?? 0),
-        unit: String(r.unit ?? 'un'),
-        product_name: r.product_name ?? null,
-        product_url: r.product_url ?? null,
-        vendor: r.vendor ?? null,
-        product_price: r.product_price ?? null,
-        order: r.purchase_orders
-          ? {
-              id: String(r.purchase_orders.id),
-              stage: String(r.purchase_orders.stage ?? ''),
-              notes: r.purchase_orders.notes ?? null,
-              requester_employee_id: String(r.purchase_orders.requester_employee_id ?? ''),
-            }
-          : null,
-        requester: r.purchase_orders?.employees ?? null,
-      }));
-      setRows(list);
+    const chunkSize = 80;
+    const merged: unknown[] = [];
+    for (let i = 0; i < orderIds.length; i += chunkSize) {
+      const slice = orderIds.slice(i, i + chunkSize);
+      const { data, error } = await supabase
+        .from('purchase_order_items')
+        .select(selectBlock)
+        .in('order_id', slice)
+        .not('received_at', 'is', null)
+        .gt('quantity_received', 0)
+        .gte('received_at', toISOStart(from))
+        .lte('received_at', toISOEnd(to));
+      if (error) {
+        console.error('Error fetching received:', error);
+        setRows([]);
+        setLoading(false);
+        return;
+      }
+      merged.push(...(data || []));
     }
+
+    merged.sort(
+      (a: any, b: any) =>
+        new Date(String(b.received_at)).getTime() - new Date(String(a.received_at)).getTime()
+    );
+
+    const list: ReceivedRow[] = merged.map((r: any) => ({
+      id: String(r.id),
+      received_at: String(r.received_at),
+      quantity_received: Number(r.quantity_received ?? 0),
+      quantity_requested: Number(r.quantity_requested ?? 0),
+      unit: String(r.unit ?? 'un'),
+      product_name: r.product_name ?? null,
+      product_url: r.product_url ?? null,
+      vendor: r.vendor ?? null,
+      product_price: r.product_price ?? null,
+      order: r.purchase_orders
+        ? {
+            id: String(r.purchase_orders.id),
+            stage: String(r.purchase_orders.stage ?? ''),
+            notes: r.purchase_orders.notes ?? null,
+            requester_employee_id: String(r.purchase_orders.requester_employee_id ?? ''),
+          }
+        : null,
+      requester: r.purchase_orders?.employees ?? null,
+    }));
+    setRows(list);
     setLoading(false);
   };
 

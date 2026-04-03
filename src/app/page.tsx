@@ -22,9 +22,19 @@ export default function Home() {
 
   const fetchOrders = async () => {
     setLoading(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setOrders([]);
+      setItems([]);
+      setEmployees([]);
+      setLoading(false);
+      return;
+    }
+
     const { data: orderData, error: orderError } = await supabase
       .from('purchase_orders')
       .select('id, requester_employee_id, stage, notes, created_at, updated_at')
+      .eq('user_id', user.id)
       .order('created_at', { ascending: false });
 
     if (orderError) {
@@ -87,6 +97,7 @@ export default function Home() {
     const { data: empData, error: empError } = await supabase
       .from('employees')
       .select('id, full_name, status')
+      .eq('user_id', user.id)
       .order('full_name', { ascending: true });
     if (empError) {
       console.error('Error fetching employees:', empError);
@@ -163,8 +174,10 @@ export default function Home() {
   }, [filtered]);
 
   const updateStage = async (id: string, next: PurchaseStage) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
     setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, stage: next } : o)));
-    const { error } = await supabase.from('purchase_orders').update({ stage: next }).eq('id', id);
+    const { error } = await supabase.from('purchase_orders').update({ stage: next }).eq('id', id).eq('user_id', user.id);
     if (error) {
       alert(`Erro ao atualizar estágio: ${error.message}`);
       // eslint-disable-next-line @typescript-eslint/no-floating-promises
@@ -174,7 +187,9 @@ export default function Home() {
 
   const deleteRequest = async (id: string) => {
     if (!confirm('Excluir este pedido? (Não apaga itens do almoxarifado)')) return;
-    const { error } = await supabase.from('purchase_orders').delete().eq('id', id);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { error } = await supabase.from('purchase_orders').delete().eq('id', id).eq('user_id', user.id);
     if (error) alert(`Erro ao excluir: ${error.message}`);
     else {
       setOrders((prev) => prev.filter((o) => o.id !== id));

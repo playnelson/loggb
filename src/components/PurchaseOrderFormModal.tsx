@@ -45,9 +45,15 @@ export function PurchaseOrderFormModal({
   useEffect(() => {
     if (!isOpen) return;
     const run = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setEmployees([]);
+        return;
+      }
       const { data, error } = await supabase
         .from('employees')
         .select('id, full_name, status')
+        .eq('user_id', user.id)
         .order('full_name', { ascending: true });
       if (error) {
         console.error('Error fetching employees:', error);

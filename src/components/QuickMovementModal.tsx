@@ -54,7 +54,17 @@ export default function QuickMovementModal({
   const [error, setError] = useState<string | null>(null);
 
   const fetchEmployees = useCallback(async () => {
-    const { data } = await supabase.from('employees').select('id, full_name').eq('status', 'Ativo').order('full_name');
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setEmployees([]);
+      return;
+    }
+    const { data } = await supabase
+      .from('employees')
+      .select('id, full_name')
+      .eq('user_id', user.id)
+      .eq('status', 'Ativo')
+      .order('full_name');
     setEmployees(data || []);
   }, []);
 

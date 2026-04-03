@@ -1,0 +1,8 @@
+-- Opcional: vincular registros antigos (sem user_id) ao UUID de um usuário.
+-- Substitua YOUR_AUTH_USER_UUID pelo id em Authentication > Users no Supabase.
+--
+-- update public.items set user_id = 'YOUR_AUTH_USER_UUID'::uuid where user_id is null;
+-- update public.employees set user_id = 'YOUR_AUTH_USER_UUID'::uuid where user_id is null;
+-- update public.purchase_orders set user_id = 'YOUR_AUTH_USER_UUID'::uuid where user_id is null;
+--
+-- O app também oferece “Vincular órfãos à minha conta” em Configurações (use só em ambiente de um responsável).

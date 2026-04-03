@@ -44,29 +44,58 @@ export default function HistoryPage() {
 
   const fetchMovements = async () => {
     setLoading(true);
-    let query = supabase
-      .from('movements')
-      .select('*, items(description, unit), employees(full_name)')
-      .order('created_at', { ascending: false });
-
-    if (typeFilter !== 'ALL') {
-      query = query.eq('type', typeFilter);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setMovements([]);
+      setLoading(false);
+      return;
     }
 
-    if (dateFilter) {
-      // Filter by local day boundaries to avoid timezone "missing rows".
-      const start = new Date(`${dateFilter}T00:00:00`);
-      const end = new Date(`${dateFilter}T23:59:59.999`);
-      query = query.gte('created_at', start.toISOString()).lte('created_at', end.toISOString());
+    const { data: itemRows, error: itemErr } = await supabase.from('items').select('id').eq('user_id', user.id);
+    if (itemErr) {
+      console.error('Error fetching items for history:', itemErr);
+      setMovements([]);
+      setLoading(false);
+      return;
+    }
+    const itemIds = (itemRows || []).map((r: { id: string }) => r.id);
+    if (itemIds.length === 0) {
+      setMovements([]);
+      setLoading(false);
+      return;
     }
 
-    const { data, error } = await query;
+    const chunkSize = 120;
+    const merged: Movement[] = [];
+    for (let i = 0; i < itemIds.length; i += chunkSize) {
+      const slice = itemIds.slice(i, i + chunkSize);
+      let q = supabase
+        .from('movements')
+        .select('*, items(description, unit), employees(full_name)')
+        .in('item_id', slice)
+        .order('created_at', { ascending: false });
 
-    if (error) {
-      console.error('Error fetching history:', error);
-    } else {
-      setMovements(((data as unknown) as Movement[]) || []);
+      if (typeFilter !== 'ALL') {
+        q = q.eq('type', typeFilter);
+      }
+      if (dateFilter) {
+        const start = new Date(`${dateFilter}T00:00:00`);
+        const end = new Date(`${dateFilter}T23:59:59.999`);
+        q = q.gte('created_at', start.toISOString()).lte('created_at', end.toISOString());
+      }
+
+      const { data, error } = await q;
+      if (error) {
+        console.error('Error fetching history:', error);
+        setMovements([]);
+        setLoading(false);
+        return;
+      }
+      merged.push(...(((data as unknown) as Movement[]) || []));
     }
+
+    merged.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    setMovements(merged);
     setLoading(false);
   };
 

@@ -109,7 +109,10 @@ function mergeEpiWalletLines(
   return out;
 }
 
-async function loadEpiConsumableBalancesMap(): Promise<Record<string, EpiConsumableBalanceRow[]>> {
+async function loadEpiConsumableBalancesMap(
+  employeeIds: string[]
+): Promise<Record<string, EpiConsumableBalanceRow[]>> {
+  if (employeeIds.length === 0) return {};
   const byEmp = new Map<string, Map<string, { description: string; unit: string; balance: number }>>();
   let from = 0;
   const pageSize = 1000;
@@ -119,6 +122,7 @@ async function loadEpiConsumableBalancesMap(): Promise<Record<string, EpiConsuma
       .from('movements')
       .select('employee_id, item_id, quantity, type, items(description, unit, consumable, category)')
       .not('employee_id', 'is', null)
+      .in('employee_id', employeeIds)
       .order('created_at', { ascending: true })
       .range(from, from + pageSize - 1);
     if (error) {
@@ -226,6 +230,13 @@ export default function StaffPage() {
 
   const fetchEmployees = async () => {
     setLoading(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setEmployees([]);
+      setEpiConsumableByEmployee({});
+      setLoading(false);
+      return;
+    }
     const { data, error } = await supabase
       .from('employees')
       .select(`
@@ -241,6 +252,7 @@ export default function StaffPage() {
           )
         )
       `)
+      .eq('user_id', user.id)
       .order('full_name', { ascending: true });
 
     if (error) {
@@ -248,9 +260,11 @@ export default function StaffPage() {
       setEmployees([]);
       setEpiConsumableByEmployee({});
     } else {
-      setEmployees(data || []);
+      const list = data || [];
+      setEmployees(list);
       try {
-        const map = await loadEpiConsumableBalancesMap();
+        const ids = list.map((e: Employee) => e.id);
+        const map = await loadEpiConsumableBalancesMap(ids);
         setEpiConsumableByEmployee(map);
       } catch (err) {
         console.error(err);
@@ -678,9 +692,14 @@ export default function StaffPage() {
     e.preventDefault();
     setIsSubmitting(true);
 
-    const { error } = await supabase
-      .from('employees')
-      .insert([formData]);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      alert('Usuário não autenticado.');
+      setIsSubmitting(false);
+      return;
+    }
+
+    const { error } = await supabase.from('employees').insert([{ ...formData, user_id: user.id }]);
 
     if (error) {
       console.error('Error adding employee:', error);

@@ -21,6 +21,8 @@ export default function SettingsPage() {
   const [confirmStage, setConfirmStage] = useState(1);
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [claimLoading, setClaimLoading] = useState(false);
+  const [claimMessage, setClaimMessage] = useState<string | null>(null);
 
   const resetAccountData = async () => {
     setIsDeleting(true);
@@ -65,6 +67,44 @@ export default function SettingsPage() {
     } catch (err: any) {
       setError(err.message);
       setIsDeleting(false);
+    }
+  };
+
+  const claimOrphanTenantData = async () => {
+    setClaimMessage(null);
+    if (
+      !confirm(
+        'Isso associa à SUA conta todos os registros que ainda não têm responsável (user_id vazio): materiais, colaboradores e pedidos de compra.\n\n' +
+          'Use somente se você é o dono desses dados ou se há um único uso do sistema. Se outra pessoa usa o mesmo banco com outra conta, ela pode deixar de ver esses registros até corrigir manualmente no Supabase.\n\n' +
+          'Continuar?'
+      )
+    ) {
+      return;
+    }
+    setClaimLoading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Usuário não autenticado.');
+      const uid = user.id;
+      const parts: string[] = [];
+
+      const rItems = await supabase.from('items').update({ user_id: uid }).is('user_id', null).select('id');
+      if (rItems.error) parts.push(`Itens: ${rItems.error.message}`);
+      else parts.push(`Itens atualizados: ${rItems.data?.length ?? 0} (máx. retorno do servidor).`);
+
+      const rEmp = await supabase.from('employees').update({ user_id: uid }).is('user_id', null).select('id');
+      if (rEmp.error) parts.push(`Colaboradores: ${rEmp.error.message}`);
+      else parts.push(`Colaboradores: ${rEmp.data?.length ?? 0}.`);
+
+      const rOrd = await supabase.from('purchase_orders').update({ user_id: uid }).is('user_id', null).select('id');
+      if (rOrd.error) parts.push(`Pedidos: ${rOrd.error.message}`);
+      else parts.push(`Pedidos: ${rOrd.data?.length ?? 0}.`);
+
+      setClaimMessage(parts.join(' '));
+    } catch (e: unknown) {
+      setClaimMessage(e instanceof Error ? e.message : 'Falha ao vincular dados.');
+    } finally {
+      setClaimLoading(false);
     }
   };
 
@@ -115,6 +155,33 @@ export default function SettingsPage() {
                 </div>
                 <div className="w-10 h-6 bg-slate-200 rounded-full"></div>
               </div>
+            </div>
+          </section>
+
+          <section className="bg-amber-50/40 rounded-2xl border border-amber-100 shadow-sm overflow-hidden">
+            <div className="p-6 border-b border-amber-100 bg-amber-50 flex items-center gap-2 text-amber-900 font-bold">
+              <AlertCircle size={18} />
+              Dados antigos sem conta
+            </div>
+            <div className="p-6 space-y-3">
+              <p className="text-xs text-amber-900/90 leading-relaxed">
+                Se o almoxarifado aparece vazio mas os materiais existem no Supabase, eles podem estar sem{' '}
+                <span className="font-mono">user_id</span>. Use o botão abaixo <strong>somente</strong> para trazer
+                esses registros para a conta em que você está logado agora.
+              </p>
+              <button
+                type="button"
+                onClick={() => void claimOrphanTenantData()}
+                disabled={claimLoading}
+                className="px-4 py-2 bg-amber-700 text-white rounded-lg font-bold text-sm hover:bg-amber-800 disabled:opacity-50"
+              >
+                {claimLoading ? 'Processando…' : 'Vincular órfãos à minha conta'}
+              </button>
+              {claimMessage && (
+                <p className="text-xs font-bold text-amber-950 bg-white/80 border border-amber-100 rounded-lg p-3">
+                  {claimMessage}
+                </p>
+              )}
             </div>
           </section>
 

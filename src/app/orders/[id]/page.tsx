@@ -32,9 +32,16 @@ function OrderDetailContent() {
     if (!orderId) return;
     setLoading(true);
 
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      router.push('/login');
+      setLoading(false);
+      return;
+    }
+
     const { data: o, error: oErr } = await supabase
       .from('purchase_orders')
-      .select('id, requester_employee_id, stage, notes, created_at, updated_at')
+      .select('id, user_id, requester_employee_id, stage, notes, created_at, updated_at')
       .eq('id', orderId)
       .single();
     if (oErr || !o) {
@@ -44,6 +51,12 @@ function OrderDetailContent() {
     }
 
     const oRow = o as Record<string, unknown>;
+    if (String(oRow.user_id ?? '') !== user.id) {
+      alert('Pedido não encontrado ou não pertence à sua conta.');
+      router.push('/orders');
+      setLoading(false);
+      return;
+    }
     const stageRaw = String(oRow.stage ?? '');
     const row: PurchaseOrderRow = {
       id: String(oRow.id),
@@ -84,6 +97,7 @@ function OrderDetailContent() {
     const { data: empData } = await supabase
       .from('employees')
       .select('id, full_name, status')
+      .eq('user_id', user.id)
       .order('full_name', { ascending: true });
 
     const empList: EmployeeLite[] = (empData || []).map((r: unknown) => {
@@ -123,6 +137,8 @@ function OrderDetailContent() {
       alert('Selecione um solicitante.');
       return;
     }
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
     setSaving(true);
     const { error } = await supabase
       .from('purchase_orders')
@@ -131,7 +147,8 @@ function OrderDetailContent() {
         stage: orderStage,
         notes: notes.trim() || null,
       })
-      .eq('id', orderId);
+      .eq('id', orderId)
+      .eq('user_id', user.id);
     if (error) alert(`Erro ao salvar pedido: ${error.message}`);
     await fetchAll();
     setSaving(false);
