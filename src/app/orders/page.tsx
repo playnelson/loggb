@@ -192,6 +192,22 @@ function OrdersContent() {
     }
   };
 
+  const updateOrderTitle = async (id: string, raw: string) => {
+    const next = raw.trim() || null;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, title: next } : o)));
+    const { error } = await supabase
+      .from('purchase_orders')
+      .update({ title: next, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('user_id', user.id);
+    if (error) {
+      alert(`Erro ao salvar título: ${error.message}`);
+      void fetchOrders();
+    }
+  };
+
   const defaultCol = sortedColumns[0]?.id ?? '';
 
   return (
@@ -199,7 +215,9 @@ function OrdersContent() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-primary">Pedidos</h1>
-          <p className="text-slate-500 text-sm">Lista alinhada às colunas do quadro; use o dashboard para editar o quadro.</p>
+          <p className="text-slate-500 text-sm">
+            Edite o título do pedido aqui; o quadro na página inicial mostra os cartões em modo leitura.
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Link
@@ -286,7 +304,7 @@ function OrdersContent() {
           <table className="w-full text-left border-collapse">
             <thead className="bg-slate-50 border-b border-border">
               <tr>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Produto</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Título / produto</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Solicitante</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Fornecedor</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Preço</th>
@@ -316,14 +334,26 @@ function OrdersContent() {
                   const qtyRec = lineItems.reduce((acc, it) => acc + (it.quantity_received || 0), 0);
                   const requesterName = employeeNameById.get(o.requester_employee_id) || '—';
                   const lineTitle = lineItems[0]?.product_name || '';
-                  const title =
-                    (o.title && o.title.trim()) ||
-                    lineTitle ||
-                    (itemCount ? `Pedido (${itemCount} itens)` : 'Tarefa');
+                  const titlePlaceholder =
+                    lineTitle || (itemCount ? `Pedido (${itemCount} itens)` : 'Tarefa');
                   return (
                     <tr key={o.id} className="hover:bg-slate-50 transition-colors">
                       <td className="px-6 py-4">
-                        <div className="font-bold text-primary text-sm">{title}</div>
+                        <label className="sr-only">Título do pedido</label>
+                        <input
+                          type="text"
+                          className="w-full max-w-md font-bold text-primary text-sm bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 outline-none focus:ring-2 focus:ring-secondary/40"
+                          defaultValue={o.title ?? ''}
+                          placeholder={titlePlaceholder}
+                          title="Título exibido no quadro; vazio usa o produto principal ou rótulo padrão"
+                          onBlur={(e) => {
+                            const v = e.target.value.trim();
+                            const normalized = v || null;
+                            if (normalized !== (o.title ?? null)) void updateOrderTitle(o.id, e.target.value);
+                          }}
+                          key={`title-${o.id}-${o.updated_at}`}
+                          maxLength={200}
+                        />
                         <div className="text-[10px] text-slate-400 font-bold mt-1">
                           {itemCount} itens • {qtyRec}/{qtyReq} recebidos
                         </div>

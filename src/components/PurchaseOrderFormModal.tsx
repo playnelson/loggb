@@ -44,6 +44,7 @@ export function PurchaseOrderFormModal({
   const [form, setForm] = useState<NewOrderForm>({
     requester_employee_id: '',
     kanban_column_id: initialKanbanColumnId,
+    order_title: '',
     notes: '',
     items: [emptyItem()],
   });
@@ -186,7 +187,7 @@ export function PurchaseOrderFormModal({
       kanban_column_id: form.kanban_column_id,
       stage: stageTitle,
       notes: form.notes.trim() || null,
-      title: null as string | null,
+      title: form.order_title.trim() || null,
       updated_at: new Date().toISOString(),
     };
 
@@ -228,6 +229,7 @@ export function PurchaseOrderFormModal({
     setForm({
       requester_employee_id: '',
       kanban_column_id: initialKanbanColumnId || columns[0]?.id || '',
+      order_title: '',
       notes: '',
       items: [emptyItem()],
     });
@@ -282,6 +284,18 @@ export function PurchaseOrderFormModal({
                 )}
               </select>
             </div>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-bold uppercase text-slate-500">Título do pedido (opcional)</label>
+            <input
+              type="text"
+              className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none text-sm font-bold text-primary"
+              placeholder="Ex.: Compra ferramentas obra Norte — aparece no quadro e na lista"
+              value={form.order_title}
+              onChange={(e) => setForm((f) => ({ ...f, order_title: e.target.value }))}
+              maxLength={200}
+            />
           </div>
 
           <div className="space-y-1">

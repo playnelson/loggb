@@ -17,6 +17,21 @@ import {
 } from '@/lib/kanbanColumns';
 import { fetchPurchaseOrdersForUser, fetchPurchaseOrderItemsForOrderIds } from '@/lib/purchaseOrderQueries';
 
+const POSTIT_THEMES = [
+  { card: 'bg-[#fff8b0] border-[#e6d25c] shadow-[4px_4px_0_0_rgba(15,23,42,0.07)]', text: 'text-amber-950' },
+  { card: 'bg-[#ffd4e5] border-[#f0a4c3] shadow-[4px_4px_0_0_rgba(15,23,42,0.07)]', text: 'text-rose-950' },
+  { card: 'bg-[#c8f5e3] border-[#7dd3b0] shadow-[4px_4px_0_0_rgba(15,23,42,0.07)]', text: 'text-emerald-950' },
+  { card: 'bg-[#cfe5ff] border-[#8bbef0] shadow-[4px_4px_0_0_rgba(15,23,42,0.07)]', text: 'text-sky-950' },
+  { card: 'bg-[#e8d9ff] border-[#c4a8f5] shadow-[4px_4px_0_0_rgba(15,23,42,0.07)]', text: 'text-violet-950' },
+  { card: 'bg-[#ffe0c2] border-[#f5bf8a] shadow-[4px_4px_0_0_rgba(15,23,42,0.07)]', text: 'text-orange-950' },
+] as const;
+
+function postitThemeForOrderId(id: string) {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return POSTIT_THEMES[h % POSTIT_THEMES.length]!;
+}
+
 export default function Home() {
   const [loading, setLoading] = useState(true);
   const [boardError, setBoardError] = useState<string | null>(null);
@@ -206,24 +221,6 @@ export default function Home() {
     }
   };
 
-  const patchOrder = async (
-    id: string,
-    patch: { notes?: string | null; requester_employee_id?: string; title?: string | null }
-  ) => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, ...patch } : o)));
-    const { error } = await supabase
-      .from('purchase_orders')
-      .update({ ...patch, updated_at: new Date().toISOString() })
-      .eq('id', id)
-      .eq('user_id', user.id);
-    if (error) {
-      alert(`Erro ao salvar: ${error.message}`);
-      void fetchOrders();
-    }
-  };
-
   const deleteRequest = async (id: string) => {
     if (!confirm('Excluir este pedido/tarefa? (Não apaga itens do almoxarifado)')) return;
     const { data: { user } } = await supabase.auth.getUser();
@@ -253,7 +250,7 @@ export default function Home() {
         <div>
           <h1 className="text-2xl font-bold text-primary">Quadro de Pedidos</h1>
           <p className="text-slate-500 text-sm">
-            Colunas editáveis, tarefas rápidas e cartões arrastáveis. Configure o quadro ao lado.
+            Cartões estilo post-it (somente leitura aqui). Edite título, itens e solicitante na aba Pedidos.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -339,7 +336,7 @@ export default function Home() {
             {loading ? 'Carregando…' : `${filtered.length} no quadro`}
           </div>
           <div className="text-[10px] text-slate-400 font-bold">
-            Arraste cartões, edite título e colunas em &quot;Editar quadro&quot;.
+            Arraste entre colunas · edição de pedido na aba Pedidos · colunas em &quot;Editar quadro&quot;
           </div>
         </div>
 
@@ -347,7 +344,7 @@ export default function Home() {
           <div
             className="grid gap-4 p-4 min-w-[720px]"
             style={{
-              gridTemplateColumns: `repeat(${Math.max(sortedColumns.length, 1)}, minmax(200px, 1fr))`,
+              gridTemplateColumns: `repeat(${Math.max(sortedColumns.length, 1)}, minmax(220px, 1fr))`,
             }}
           >
             {sortedColumns.map((col) => {
@@ -390,7 +387,10 @@ export default function Home() {
                       {Array(3)
                         .fill(0)
                         .map((_, i) => (
-                          <div key={i} className="h-28 bg-slate-200/50 rounded-xl border border-slate-200 animate-pulse" />
+                          <div
+                            key={i}
+                            className="aspect-square w-full max-w-[240px] mx-auto bg-slate-200/50 rounded-sm border-2 border-slate-200 animate-pulse"
+                          />
                         ))}
                     </div>
                   ) : colOrders.length === 0 ? (
@@ -398,7 +398,7 @@ export default function Home() {
                       Solte aqui
                     </div>
                   ) : (
-                    <div className="space-y-3">
+                    <div className="space-y-4 flex flex-col items-stretch">
                       {colOrders.map((o) => {
                         const prev = neighborColumn(o, -1);
                         const next = neighborColumn(o, 1);
@@ -407,9 +407,13 @@ export default function Home() {
                         const qtyReq = lineItems.reduce((acc, it) => acc + (it.quantity_requested || 0), 0);
                         const qtyRec = lineItems.reduce((acc, it) => acc + (it.quantity_received || 0), 0);
                         const progress = qtyReq > 0 ? Math.min(100, Math.round((qtyRec / qtyReq) * 100)) : 0;
+                        const lineTitle = lineItems[0]?.product_name?.trim() || '';
                         const displayTitle =
                           (o.title && o.title.trim()) ||
-                          (itemCount ? `Pedido (${itemCount} itens)` : 'Tarefa (sem itens)');
+                          lineTitle ||
+                          (itemCount ? `Pedido (${itemCount} itens)` : 'Tarefa');
+                        const requesterName = employeeNameById.get(o.requester_employee_id) || '—';
+                        const theme = postitThemeForOrderId(o.id);
                         return (
                           <div
                             key={o.id}
@@ -438,135 +442,78 @@ export default function Home() {
                               setDraggingOrderId(null);
                               setDropTargetColumnId(null);
                             }}
-                            className={`rounded-xl border border-slate-300 bg-slate-100 p-3 shadow-sm transition-all ${
+                            className={`w-full max-w-[240px] mx-auto aspect-square rounded-sm border-2 p-2.5 flex flex-col ${theme.card} ${theme.text} transition-all ${
                               draggingOrderId === o.id
-                                ? 'opacity-60 ring-2 ring-slate-500 scale-[0.98]'
-                                : 'hover:border-slate-400'
+                                ? 'opacity-70 ring-2 ring-slate-600 scale-[0.97] rotate-1'
+                                : 'hover:brightness-[1.02]'
                             }`}
                           >
-                            <div className="flex items-start gap-1.5">
+                            <div className="flex items-center justify-between gap-1 shrink-0">
                               <div
-                                className="mt-0.5 text-slate-500 cursor-grab active:cursor-grabbing shrink-0 p-0.5"
+                                className="text-slate-700/80 cursor-grab active:cursor-grabbing p-0.5"
                                 title="Arrastar"
                               >
-                                <GripVertical size={18} />
+                                <GripVertical size={16} />
                               </div>
-                              <div className="min-w-0 flex-1 space-y-2">
-                                <div className="flex items-start justify-between gap-2">
-                                  <div className="min-w-0 flex-1">
-                                    <label className="text-[9px] font-black text-slate-500 uppercase tracking-wide block mb-0.5">
-                                      Título
-                                    </label>
-                                    <input
-                                      className="w-full bg-white/95 border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-bold text-slate-800"
-                                      defaultValue={o.title ?? ''}
-                                      placeholder={displayTitle}
-                                      key={`t-${o.id}-${o.updated_at}`}
-                                      onBlur={(e) => {
-                                        const v = e.target.value.trim();
-                                        const next = v || null;
-                                        if (next !== (o.title ?? null)) void patchOrder(o.id, { title: next });
-                                      }}
-                                    />
-                                    <div className="text-[11px] text-slate-600 font-medium mt-1">
-                                      {itemCount > 0 ? `${qtyRec}/${qtyReq} recebidos · ${progress}%` : 'Sem linhas de item'}
-                                    </div>
-                                  </div>
-                                  <button
-                                    type="button"
-                                    onClick={() => void deleteRequest(o.id)}
-                                    className="p-2 rounded-lg text-slate-500 hover:bg-slate-200/80 hover:text-red-600 shrink-0"
-                                    title="Excluir"
-                                  >
-                                    <Trash2 size={16} />
-                                  </button>
-                                </div>
+                              <button
+                                type="button"
+                                onClick={() => void deleteRequest(o.id)}
+                                className="p-1.5 rounded-md text-slate-700/70 hover:bg-black/10 hover:text-red-700"
+                                title="Excluir"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
 
-                                <div>
-                                  <label className="text-[9px] font-black text-slate-500 uppercase tracking-wide block mb-0.5">
-                                    Solicitante
-                                  </label>
-                                  <select
-                                    className="w-full bg-white/95 border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-slate-400/40"
-                                    value={o.requester_employee_id}
-                                    onChange={(e) =>
-                                      void patchOrder(o.id, { requester_employee_id: e.target.value })
-                                    }
-                                  >
-                                    {employees.length === 0 ? (
-                                      <option value={o.requester_employee_id}>—</option>
-                                    ) : (
-                                      <>
-                                        {!employees.some((e) => e.id === o.requester_employee_id) ? (
-                                          <option value={o.requester_employee_id}>Solicitante (fora da lista)</option>
-                                        ) : null}
-                                        {employees.map((emp) => (
-                                          <option key={emp.id} value={emp.id}>
-                                            {emp.full_name}
-                                          </option>
-                                        ))}
-                                      </>
-                                    )}
-                                  </select>
-                                </div>
+                            <div className="flex-1 min-h-0 flex flex-col pt-1">
+                              <p className="text-[11px] font-black leading-snug line-clamp-5 break-words">
+                                {displayTitle}
+                              </p>
+                              <p className="text-[9px] font-bold opacity-75 mt-1.5 truncate" title={requesterName}>
+                                {requesterName}
+                              </p>
+                              <p className="text-[9px] font-bold opacity-70 mt-auto pt-2">
+                                {itemCount > 0 ? `${qtyRec}/${qtyReq} · ${progress}%` : 'Sem itens'}
+                              </p>
+                            </div>
 
-                                <div>
-                                  <label className="text-[9px] font-black text-slate-500 uppercase tracking-wide block mb-0.5">
-                                    Observações
-                                  </label>
-                                  <textarea
-                                    defaultValue={o.notes ?? ''}
-                                    rows={2}
-                                    className="w-full resize-y min-h-[44px] bg-white/95 border border-slate-300 rounded-lg px-2 py-1.5 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-slate-400/40 placeholder:text-slate-400"
-                                    placeholder="Notas…"
-                                    onBlur={(e) => {
-                                      const v = e.target.value.trim();
-                                      const next = v || null;
-                                      if (next !== (o.notes ?? null)) void patchOrder(o.id, { notes: next });
-                                    }}
-                                  />
-                                </div>
-
-                                <div className="flex items-center justify-between gap-2 pt-0.5">
-                                  <Link
-                                    href={`/orders/${o.id}`}
-                                    className="text-[10px] font-bold text-slate-600 hover:text-slate-900 underline underline-offset-2"
-                                  >
-                                    Abrir itens e detalhes
-                                  </Link>
-                                </div>
-
-                                <div className="flex items-center gap-2 pt-1 border-t border-slate-300/60">
-                                  <select
-                                    className="flex-1 bg-white/95 border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-slate-400/40"
-                                    value={resolveColumnIdForOrder(o, sortedColumns) ?? ''}
-                                    onChange={(e) => void moveToColumn(o.id, e.target.value)}
-                                  >
-                                    {sortedColumns.map((c) => (
-                                      <option key={c.id} value={c.id}>
-                                        {c.title}
-                                      </option>
-                                    ))}
-                                  </select>
-                                  <button
-                                    type="button"
-                                    disabled={!prev}
-                                    onClick={() => prev && void moveToColumn(o.id, prev.id)}
-                                    className="p-2 bg-white/95 border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-200 disabled:opacity-40"
-                                    title="Coluna anterior"
-                                  >
-                                    <ArrowLeft size={16} />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={!next}
-                                    onClick={() => next && void moveToColumn(o.id, next.id)}
-                                    className="p-2 bg-white/95 border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-200 disabled:opacity-40"
-                                    title="Próxima coluna"
-                                  >
-                                    <ArrowRight size={16} />
-                                  </button>
-                                </div>
+                            <div className="shrink-0 pt-2 mt-1 border-t border-black/10 space-y-1.5">
+                              <Link
+                                href={`/orders/${o.id}`}
+                                className="block text-center text-[9px] font-black uppercase tracking-wide bg-black/10 hover:bg-black/15 rounded py-1.5"
+                              >
+                                Editar em Pedidos
+                              </Link>
+                              <div className="flex items-center gap-1">
+                                <select
+                                  className="flex-1 min-w-0 bg-white/50 border border-black/15 rounded px-1 py-1 text-[9px] font-bold outline-none"
+                                  value={resolveColumnIdForOrder(o, sortedColumns) ?? ''}
+                                  onChange={(e) => void moveToColumn(o.id, e.target.value)}
+                                >
+                                  {sortedColumns.map((c) => (
+                                    <option key={c.id} value={c.id}>
+                                      {c.title}
+                                    </option>
+                                  ))}
+                                </select>
+                                <button
+                                  type="button"
+                                  disabled={!prev}
+                                  onClick={() => prev && void moveToColumn(o.id, prev.id)}
+                                  className="p-1 bg-white/50 border border-black/15 rounded text-slate-800 disabled:opacity-35"
+                                  title="Coluna anterior"
+                                >
+                                  <ArrowLeft size={12} />
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={!next}
+                                  onClick={() => next && void moveToColumn(o.id, next.id)}
+                                  className="p-1 bg-white/50 border border-black/15 rounded text-slate-800 disabled:opacity-35"
+                                  title="Próxima coluna"
+                                >
+                                  <ArrowRight size={12} />
+                                </button>
                               </div>
                             </div>
                           </div>

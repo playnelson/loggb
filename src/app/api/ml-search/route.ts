@@ -38,7 +38,7 @@ export async function GET(req: Request) {
 
   const site =
     (process.env.MERCADOLIBRE_SITE_ID || 'MLB').replace(/[^A-Z0-9_-]/gi, '') || 'MLB';
-  const limit = Math.min(20, Math.max(1, Number(new URL(req.url).searchParams.get('limit')) || 15));
+  const limit = Math.min(20, Math.max(1, Number(new URL(req.url).searchParams.get('limit')) || 5));
 
   const url = `${ML_API}/sites/${site}/search?q=${encodeURIComponent(q)}&limit=${limit}`;
 
@@ -47,27 +47,33 @@ export async function GET(req: Request) {
 
   const { token: bearer, oauthError } = await getMercadoLibreBearer();
 
-  const headers: Record<string, string> = {
+  const baseHeaders: Record<string, string> = {
     Accept: 'application/json',
     'User-Agent':
       'Mozilla/5.0 (compatible; LoggB/1.0; +https://developers.mercadolivre.com.br) AppleWebKit/537.36',
   };
-  if (bearer) {
-    headers.Authorization = `Bearer ${bearer}`;
-  }
 
-  try {
-    const res = await fetch(url, {
+  const fetchMl = (authToken: string | null) => {
+    const h = { ...baseHeaders };
+    if (authToken) h.Authorization = `Bearer ${authToken}`;
+    return fetch(url, {
       method: 'GET',
-      headers,
+      headers: h,
       signal: controller.signal,
       cache: 'no-store',
     });
+  };
+
+  try {
+    let res = await fetchMl(bearer);
+    if (res.status === 403 && bearer) {
+      res = await fetchMl(null);
+    }
 
     if (!res.ok) {
       let errMsg =
         res.status === 403
-          ? 'Mercado Livre recusou a busca (403). Configure MERCADOLIBRE_CLIENT_ID e MERCADOLIBRE_CLIENT_SECRET no .env.local (ou MERCADOLIBRE_ACCESS_TOKEN).'
+          ? 'Mercado Livre recusou a busca (403). Em produção (Vercel etc.), defina MERCADOLIBRE_CLIENT_ID e MERCADOLIBRE_CLIENT_SECRET nas variáveis de ambiente, ou MERCADOLIBRE_ACCESS_TOKEN. Localmente use .env.local e reinicie o servidor.'
           : `Mercado Livre retornou ${res.status}.`;
       if (oauthError && !bearer) {
         errMsg += ` OAuth: ${oauthError}`;

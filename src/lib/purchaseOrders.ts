@@ -57,6 +57,8 @@ export type EmployeeLite = {
 export type NewOrderForm = {
   requester_employee_id: string;
   kanban_column_id: string;
+  /** Título exibido no quadro e na lista (opcional). */
+  order_title: string;
   notes: string;
   items: Array<{
     product_url: string;

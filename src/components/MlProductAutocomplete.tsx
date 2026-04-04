@@ -173,8 +173,8 @@ export function MlProductAutocomplete({
         )}
       </div>
       <p className="text-[10px] text-slate-400 leading-relaxed">
-        Sugestões em tempo real via API pública do Mercado Livre (Brasil). Selecione um anúncio para preencher a descrição
-        com o título oficial do catálogo.
+        Somente Mercado Livre (Brasil): sugestões são títulos de anúncios públicos. Selecione um para copiar o texto na
+        descrição do item.
       </p>
       {error && <p className="text-xs text-amber-700 font-bold">{error}</p>}
 

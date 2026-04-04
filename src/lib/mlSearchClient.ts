@@ -1,3 +1,4 @@
+/** Autocomplete: somente Mercado Livre (Brasil / MLB) via `/api/ml-search`. */
 export type MlSearchHit = {
   id: string;
   title: string;
@@ -20,7 +21,7 @@ export async function fetchMlSearchSuggestions(q: string): Promise<{
     return { ok: true, results: [] };
   }
 
-  const res = await fetch(`/api/ml-search?q=${encodeURIComponent(trimmed)}`, {
+  const res = await fetch(`/api/ml-search?q=${encodeURIComponent(trimmed)}&limit=5`, {
     method: 'GET',
     headers: { Accept: 'application/json' },
   });
