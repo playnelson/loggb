@@ -4,6 +4,7 @@ export const dynamic = 'force-dynamic';
 
 import { useCallback, useMemo, useRef, useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { formatProductLabelDisplay } from '@/lib/productDisplayText';
 import { recordMovement, updatePossessionQuantity, updateStock } from '@/lib/movements';
 import { Search, UserPlus, Mail, Phone, ExternalLink, X, FileUp, Filter, Package, AlertCircle, History, RotateCcw, Download, Loader2, ArrowLeft, FileText, Trash2 } from 'lucide-react';
 import ImportSpreadsheet from '@/components/ImportSpreadsheet';
@@ -873,7 +874,7 @@ export default function StaffPage() {
                                     key={row.key}
                                     className="flex items-center gap-2 bg-purple-50 border border-purple-100 px-2 py-1 rounded text-[10px] font-bold text-purple-700 group/p"
                                   >
-                                    <span className="truncate max-w-[150px]">{row.description}</span>
+                                    <span className="truncate max-w-[150px]">{formatProductLabelDisplay(row.description)}</span>
                                     {row.consumable && (
                                       <span className="text-[8px] font-black uppercase text-amber-800 bg-amber-100/80 px-1 rounded shrink-0">
                                         cons.
@@ -933,7 +934,7 @@ export default function StaffPage() {
                                   .filter(p => p.quantity > 0 && !!p.items && !p.items.consumable && p.items.category !== 'EPI')
                                   .map((p, idx) => (
                                     <div key={idx} className="flex items-center gap-2 bg-blue-50 border border-blue-100 px-2 py-1 rounded text-[10px] font-bold text-blue-700 group/p">
-                                      <span className="truncate max-w-[150px]">{p.items?.description}</span>
+                                      <span className="truncate max-w-[150px]">{formatProductLabelDisplay(p.items?.description)}</span>
                                       <span className="bg-blue-200/50 px-1 rounded">x{p.quantity}</span>
                                       <button 
                                         onClick={() => { setReturnItem({employeeId: e.id, item: p}); setReturnQty(p.quantity); }}
@@ -1211,7 +1212,9 @@ export default function StaffPage() {
                                   : 'Data da devolução: '}
                               <span className="font-mono text-slate-700">{formatMovementDateBr(m.created_at)}</span>
                             </p>
-                            <h4 className="font-bold text-primary text-sm leading-tight mt-2">{m.items?.description}</h4>
+                            <h4 className="font-bold text-primary text-sm leading-tight mt-2">
+                              {formatProductLabelDisplay(m.items?.description)}
+                            </h4>
                             {m.tag && (
                               <div className="mt-2 inline-flex items-center gap-2 bg-secondary/10 border border-secondary/20 px-2 py-1 rounded-lg">
                                 <span className="text-[9px] font-black text-secondary uppercase tracking-wider">TAG</span>
@@ -1283,7 +1286,7 @@ export default function StaffPage() {
                         className="flex items-center justify-between bg-purple-50/50 border border-purple-100 rounded-xl px-3 py-2"
                       >
                         <div className="min-w-0">
-                          <div className="font-bold text-primary text-sm truncate">{row.description}</div>
+                          <div className="font-bold text-primary text-sm truncate">{formatProductLabelDisplay(row.description)}</div>
                           <div className="text-[10px] text-slate-400 font-bold uppercase">{row.unit}</div>
                           {row.consumable && (
                             <div className="text-[9px] font-bold text-amber-800 mt-0.5">Consumível — saldo em uso</div>
@@ -1354,7 +1357,9 @@ export default function StaffPage() {
                       .map((p, idx) => (
                         <div key={idx} className="flex items-center justify-between bg-blue-50/50 border border-blue-100 rounded-xl px-3 py-2">
                           <div className="min-w-0">
-                            <div className="font-bold text-primary text-sm truncate">{p.items.description}</div>
+                            <div className="font-bold text-primary text-sm truncate">
+                              {formatProductLabelDisplay(p.items.description)}
+                            </div>
                             <div className="text-[10px] text-slate-400 font-bold uppercase">{p.items.unit}</div>
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
@@ -1473,7 +1478,9 @@ export default function StaffPage() {
                                     : 'Data da devolução: '}
                                 <span className="font-mono font-normal">{formatMovementDateBr(m.created_at)}</span>
                               </p>
-                              <div className="font-bold text-primary text-sm truncate mt-1">{m.items?.description || '—'}</div>
+                              <div className="font-bold text-primary text-sm truncate mt-1">
+                                {formatProductLabelDisplay(m.items?.description || '—')}
+                              </div>
                               {m.tag && (
                                 <div className="mt-1 inline-flex items-center gap-2 bg-secondary/10 border border-secondary/20 px-2 py-1 rounded-lg">
                                   <span className="text-[9px] font-black text-secondary uppercase tracking-wider">TAG</span>
@@ -1534,7 +1541,7 @@ export default function StaffPage() {
                 <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in duration-300">
                   <div className="p-6 border-b border-border bg-slate-50">
                     <h3 className="text-xl font-bold text-primary">Devolver item</h3>
-                    <p className="text-xs text-slate-500 mt-1">{walletReturn.description}</p>
+                    <p className="text-xs text-slate-500 mt-1">{formatProductLabelDisplay(walletReturn.description)}</p>
                   </div>
                   <form onSubmit={handleWalletReturn} className="p-6 space-y-4">
                     <div className="space-y-1">
@@ -1585,7 +1592,7 @@ export default function StaffPage() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in duration-300">
             <div className="p-6 border-b border-border bg-amber-50/80">
               <h3 className="text-xl font-bold text-primary">Descarte de EPI consumível</h3>
-              <p className="text-xs text-slate-600 mt-1 font-medium">{epiDiscard.description}</p>
+              <p className="text-xs text-slate-600 mt-1 font-medium">{formatProductLabelDisplay(epiDiscard.description)}</p>
             </div>
             <form onSubmit={handleEpiDiscardSubmit} className="p-6 space-y-4">
               <div className="space-y-1">
@@ -1642,7 +1649,9 @@ export default function StaffPage() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in duration-300">
             <div className="p-6 border-b border-border bg-slate-50">
               <h3 className="text-xl font-bold text-primary">Processar Devolução</h3>
-              <p className="text-xs text-slate-500 mt-1">{returnItem.item.items?.description}</p>
+              <p className="text-xs text-slate-500 mt-1">
+                {formatProductLabelDisplay(returnItem.item.items?.description)}
+              </p>
             </div>
             <form onSubmit={handleReturn} className="p-6 space-y-4">
               <div className="space-y-1">

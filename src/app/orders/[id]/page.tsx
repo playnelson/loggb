@@ -6,7 +6,7 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { ArrowLeft, Loader2, Plus, Trash2, Wand2, Link as LinkIcon, Save, Sheet, Search } from 'lucide-react';
+import { ArrowLeft, Loader2, Plus, Trash2, Wand2, Link as LinkIcon, Save, Sheet } from 'lucide-react';
 import type { EmployeeLite, PurchaseOrderItemRow, PurchaseOrderRow } from '@/lib/purchaseOrders';
 import { clampNumber } from '@/lib/purchaseOrders';
 import { downloadOrdersSpreadsheet } from '@/lib/ordersExport';
@@ -16,7 +16,8 @@ import {
   type KanbanColumnRow,
 } from '@/lib/kanbanColumns';
 import { fetchPurchaseOrderById, fetchPurchaseOrderItemsForOrderIdOrdered } from '@/lib/purchaseOrderQueries';
-import { fetchCaEpiByNumber } from '@/lib/caEpiClient';
+import { formatOcForDisplay, normalizeOcNumberInput } from '@/lib/purchaseOrderOc';
+import { normalizeProductLabelForSave } from '@/lib/productDisplayText';
 
 function OrderDetailContent() {
   const params = useParams<{ id: string }>();
@@ -26,7 +27,6 @@ function OrderDetailContent() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [linkLoadingIdx, setLinkLoadingIdx] = useState<number | null>(null);
-  const [caLoadingIdx, setCaLoadingIdx] = useState<number | null>(null);
 
   const [items, setItems] = useState<PurchaseOrderItemRow[]>([]);
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
@@ -35,6 +35,7 @@ function OrderDetailContent() {
 
   const [orderColumnId, setOrderColumnId] = useState<string>('');
   const [orderTitle, setOrderTitle] = useState<string>('');
+  const [ocInput, setOcInput] = useState<string>('');
   const [requesterId, setRequesterId] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
 
@@ -71,6 +72,7 @@ function OrderDetailContent() {
       requester_employee_id: String(oRow.requester_employee_id),
       stage: String(oRow.stage ?? ''),
       title: (oRow.title as string) ?? null,
+      oc_number: oRow.oc_number != null && String(oRow.oc_number).trim() !== '' ? String(oRow.oc_number).trim() : null,
       kanban_column_id: oRow.kanban_column_id ? String(oRow.kanban_column_id) : null,
       notes: (oRow.notes as string) ?? null,
       created_at: String(oRow.created_at),
@@ -106,6 +108,7 @@ function OrderDetailContent() {
     const cid = resolveColumnIdForOrder(row, seeded.columns);
     setOrderColumnId(cid || seeded.columns[0]?.id || '');
     setOrderTitle(row.title || '');
+    setOcInput(formatOcForDisplay(row.oc_number) ?? '');
     setRequesterId(row.requester_employee_id);
     setNotes(row.notes || '');
 
@@ -131,6 +134,11 @@ function OrderDetailContent() {
       alert('Selecione um solicitante.');
       return;
     }
+    const ocNormalized = normalizeOcNumberInput(ocInput);
+    if (ocInput.trim() !== '' && ocNormalized === null) {
+      alert('Ordem de compra (OC): informe exatamente 4 dígitos ou deixe em branco.');
+      return;
+    }
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
     const col = columns.find((c) => c.id === orderColumnId) || columns[0];
@@ -147,6 +155,7 @@ function OrderDetailContent() {
         kanban_column_id: col.id,
         stage: col.title,
         title: orderTitle.trim() || null,
+        oc_number: ocNormalized,
         notes: notes.trim() || null,
         updated_at: new Date().toISOString(),
       })
@@ -179,16 +188,27 @@ function OrderDetailContent() {
   };
 
   const updateItem = async (id: string, patch: Partial<PurchaseOrderItemRow>) => {
-    let dbPatch: Record<string, unknown> = { ...patch };
+    const normalizedPatch: Partial<PurchaseOrderItemRow> = { ...patch };
+    if (typeof patch.product_name === 'string') {
+      normalizedPatch.product_name = normalizeProductLabelForSave(patch.product_name) || null;
+    }
+    let dbPatch: Record<string, unknown> = { ...normalizedPatch };
     setItems((prev) => {
       const cur = prev.find((x) => x.id === id);
       const nextRequested =
-        typeof patch.quantity_requested === 'number' ? patch.quantity_requested : (cur?.quantity_requested ?? 0);
+        typeof normalizedPatch.quantity_requested === 'number'
+          ? normalizedPatch.quantity_requested
+          : (cur?.quantity_requested ?? 0);
       const nextReceived =
-        typeof patch.quantity_received === 'number' ? patch.quantity_received : (cur?.quantity_received ?? 0);
+        typeof normalizedPatch.quantity_received === 'number'
+          ? normalizedPatch.quantity_received
+          : (cur?.quantity_received ?? 0);
 
       // Ensure received_at set when quantity_received reaches requested
-      if (typeof patch.quantity_received === 'number' || typeof patch.quantity_requested === 'number') {
+      if (
+        typeof normalizedPatch.quantity_received === 'number' ||
+        typeof normalizedPatch.quantity_requested === 'number'
+      ) {
         if (nextReceived > 0 && nextReceived >= nextRequested) {
           dbPatch = { ...dbPatch, received_at: new Date().toISOString() };
         } else if (nextReceived === 0) {
@@ -198,7 +218,11 @@ function OrderDetailContent() {
         }
       }
 
-      return prev.map((it) => (it.id === id ? { ...it, ...patch, received_at: (dbPatch.received_at as string | null) ?? it.received_at } : it));
+      return prev.map((it) =>
+        it.id === id
+          ? { ...it, ...normalizedPatch, received_at: (dbPatch.received_at as string | null) ?? it.received_at }
+          : it
+      );
     });
     const { error } = await supabase.from('purchase_order_items').update(dbPatch).eq('id', id);
     if (error) {
@@ -226,41 +250,14 @@ function OrderDetailContent() {
       }
       const payload = json as { product_name?: string | null; vendor?: string | null; product_price?: string | null };
       const cur = items[idx];
+      const mergedName = cur.product_name || payload.product_name;
       await updateItem(id, {
-        product_name: cur.product_name || (payload.product_name ?? null),
+        product_name: mergedName ? normalizeProductLabelForSave(String(mergedName)) || null : null,
         vendor: cur.vendor || (payload.vendor ?? null),
         product_price: cur.product_price || (payload.product_price ?? null),
       });
     } finally {
       setLinkLoadingIdx(null);
-    }
-  };
-
-  const pullFromCa = async (id: string, idx: number) => {
-    const it = items.find((x) => x.id === id);
-    const raw = (it?.ca_number || '').replace(/\D/g, '');
-    if (raw.length < 4) {
-      alert('Informe o CA (mín. 4 dígitos).');
-      return;
-    }
-    setCaLoadingIdx(idx);
-    try {
-      const res = await fetchCaEpiByNumber(raw);
-      if (!res.ok) {
-        let msg = res.error ?? 'Falha na consulta.';
-        if (res.hint) msg += `\n\n${res.hint}`;
-        alert(msg);
-        return;
-      }
-      if (res.label) {
-        const cur = items.find((x) => x.id === id);
-        await updateItem(id, {
-          ca_number: raw,
-          product_name: cur?.product_name || res.label,
-        });
-      }
-    } finally {
-      setCaLoadingIdx(null);
     }
   };
 
@@ -369,6 +366,20 @@ function OrderDetailContent() {
                 </select>
               </div>
 
+              <div className="space-y-1">
+                <label className="text-xs font-bold uppercase text-slate-500">OC — ordem de compra (4 dígitos)</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={4}
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none text-sm font-mono font-bold tracking-widest"
+                  value={ocInput}
+                  onChange={(e) => setOcInput(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                  placeholder="Ex.: 1042"
+                  title="Número de 4 dígitos gerado pelo setor de compras; vazio até emitirem a OC"
+                />
+              </div>
+
               <div className="space-y-1 md:col-span-2">
                 <label className="text-xs font-bold uppercase text-slate-500">Observações</label>
                 <input
@@ -398,7 +409,6 @@ function OrderDetailContent() {
               <table className="w-full text-left border-collapse">
                 <thead className="bg-slate-50 border-b border-border">
                   <tr>
-                    <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">CA</th>
                     <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Produto</th>
                     <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Fornecedor</th>
                     <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Un</th>
@@ -411,34 +421,13 @@ function OrderDetailContent() {
                 <tbody className="divide-y divide-border">
                   {items.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="px-6 py-10 text-center text-slate-400 italic">
+                      <td colSpan={7} className="px-6 py-10 text-center text-slate-400 italic">
                         Nenhum item. Clique em “Adicionar item”.
                       </td>
                     </tr>
                   ) : (
                     items.map((it, idx) => (
                       <tr key={it.id} className="hover:bg-slate-50 transition-colors">
-                        <td className="px-6 py-4 align-top w-36">
-                          <div className="flex gap-1">
-                            <input
-                              type="text"
-                              inputMode="numeric"
-                              className="w-full min-w-0 p-2 bg-slate-50 border border-slate-200 rounded-lg outline-none text-xs font-mono"
-                              placeholder="CA"
-                              value={it.ca_number || ''}
-                              onChange={(e) => void updateItem(it.id, { ca_number: e.target.value || null })}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => void pullFromCa(it.id, idx)}
-                              disabled={caLoadingIdx === idx}
-                              className="shrink-0 p-2 bg-teal-50 border border-teal-200 rounded-lg text-teal-800 disabled:opacity-50"
-                              title="Nome pelo CA"
-                            >
-                              {caLoadingIdx === idx ? <Loader2 className="animate-spin" size={14} /> : <Search size={14} />}
-                            </button>
-                          </div>
-                        </td>
                         <td className="px-6 py-4">
                           <div className="space-y-2">
                             <input

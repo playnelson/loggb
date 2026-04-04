@@ -2,11 +2,11 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Loader2, Plus, Trash2, Wand2, X, Search } from 'lucide-react';
+import { normalizeProductLabelForSave } from '@/lib/productDisplayText';
+import { Loader2, Plus, Trash2, Wand2, X } from 'lucide-react';
 import type { EmployeeLite, NewOrderForm } from '@/lib/purchaseOrders';
 import { clampNumber } from '@/lib/purchaseOrders';
 import { ensureKanbanColumnsSeeded, type KanbanColumnRow } from '@/lib/kanbanColumns';
-import { fetchCaEpiByNumber } from '@/lib/caEpiClient';
 
 function emptyItem() {
   return {
@@ -17,7 +17,6 @@ function emptyItem() {
     unit: 'un',
     quantity_requested: 1,
     notes: '',
-    ca_number: '',
   };
 }
 
@@ -37,7 +36,6 @@ export function PurchaseOrderFormModal({
 }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [linkLoadingIdx, setLinkLoadingIdx] = useState<number | null>(null);
-  const [caLoadingIdx, setCaLoadingIdx] = useState<number | null>(null);
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
   const [columns, setColumns] = useState<KanbanColumnRow[]>([]);
 
@@ -121,9 +119,10 @@ export function PurchaseOrderFormModal({
       setForm((f) => {
         const next = { ...f, items: [...f.items] };
         const cur = next.items[idx] || emptyItem();
+        const merged = cur.product_name || (payload.product_name ?? '');
         next.items[idx] = {
           ...cur,
-          product_name: cur.product_name || (payload.product_name ?? ''),
+          product_name: normalizeProductLabelForSave(merged) || '',
           vendor: cur.vendor || (payload.vendor ?? ''),
           product_price: cur.product_price || (payload.product_price ?? ''),
         };
@@ -131,39 +130,6 @@ export function PurchaseOrderFormModal({
       });
     } finally {
       setLinkLoadingIdx(null);
-    }
-  };
-
-  const pullFromCa = async (idx: number) => {
-    const raw = form.items[idx]?.ca_number?.replace(/\D/g, '') ?? '';
-    if (raw.length < 4) {
-      alert('Informe o número do CA (mín. 4 dígitos).');
-      return;
-    }
-    setCaLoadingIdx(idx);
-    try {
-      const res = await fetchCaEpiByNumber(raw);
-      if (!res.ok) {
-        let msg = res.error ?? 'CA não encontrado.';
-        if (res.hint) msg += `\n\n${res.hint}`;
-        if (res.officialUrl) msg += `\n\nConsulta manual: ${res.officialUrl}`;
-        alert(msg);
-        return;
-      }
-      if (res.label) {
-        setForm((f) => {
-          const next = { ...f, items: [...f.items] };
-          const cur = next.items[idx] || emptyItem();
-          next.items[idx] = {
-            ...cur,
-            ca_number: raw,
-            product_name: cur.product_name || res.label!,
-          };
-          return next;
-        });
-      }
-    } finally {
-      setCaLoadingIdx(null);
     }
   };
 
@@ -206,14 +172,13 @@ export function PurchaseOrderFormModal({
     const itemsPayload = form.items.map((it) => ({
       order_id: orderData.id,
       product_url: it.product_url.trim() || null,
-      product_name: it.product_name.trim() || null,
+      product_name: normalizeProductLabelForSave(it.product_name) || null,
       vendor: it.vendor.trim() || null,
       product_price: it.product_price.trim() || null,
       unit: it.unit.trim() || 'un',
       quantity_requested: clampNumber(Number(it.quantity_requested), 1, 1_000_000),
       quantity_received: 0,
       notes: it.notes.trim() || null,
-      ca_number: it.ca_number.replace(/\D/g, '') || null,
     }));
 
     const { error: itemsError } = await supabase.from('purchase_order_items').insert(itemsPayload);
@@ -337,38 +302,6 @@ export function PurchaseOrderFormModal({
                   >
                     <Trash2 size={16} />
                   </button>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold uppercase text-slate-500">CA (EPI) — opcional</label>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none text-sm font-mono"
-                        placeholder="Ex.: 12345"
-                        value={it.ca_number}
-                        onChange={(e) =>
-                          setForm((f) => {
-                            const next = { ...f, items: [...f.items] };
-                            next.items[idx] = { ...next.items[idx], ca_number: e.target.value };
-                            return next;
-                          })
-                        }
-                      />
-                      <button
-                        type="button"
-                        onClick={() => void pullFromCa(idx)}
-                        disabled={caLoadingIdx === idx}
-                        className="px-3 py-2 bg-teal-50 border border-teal-200 rounded-lg font-bold text-teal-800 hover:bg-teal-100 disabled:opacity-50 flex items-center gap-1"
-                        title="Preencher nome pelo CA (requer CA_EPI_API_BASE)"
-                      >
-                        {caLoadingIdx === idx ? <Loader2 className="animate-spin" size={16} /> : <Search size={16} />}
-                        CA
-                      </button>
-                    </div>
-                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

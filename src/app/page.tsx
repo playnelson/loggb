@@ -2,10 +2,25 @@
 
 export const dynamic = 'force-dynamic';
 
+import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
-import { Plus, Search, Trash2, ArrowLeft, ArrowRight, GripVertical, LayoutGrid, ClipboardList } from 'lucide-react';
+import {
+  Plus,
+  Search,
+  Trash2,
+  ArrowLeft,
+  ArrowRight,
+  GripVertical,
+  LayoutGrid,
+  ClipboardList,
+  BarChart3,
+  StickyNote,
+} from 'lucide-react';
+import { AlmoxHomeDashboard } from '@/components/AlmoxHomeDashboard';
+import { MuralPostIts } from '@/components/MuralPostIts';
+import { formatProductLabelDisplay } from '@/lib/productDisplayText';
 import type { EmployeeLite, PurchaseOrderItemRow, PurchaseOrderRow } from '@/lib/purchaseOrders';
 import { PurchaseOrderFormModal } from '@/components/PurchaseOrderFormModal';
 import { KanbanBoardEditor } from '@/components/KanbanBoardEditor';
@@ -16,6 +31,7 @@ import {
   type KanbanColumnRow,
 } from '@/lib/kanbanColumns';
 import { fetchPurchaseOrdersForUser, fetchPurchaseOrderItemsForOrderIds } from '@/lib/purchaseOrderQueries';
+import { formatOcForDisplay } from '@/lib/purchaseOrderOc';
 
 /** Pedido com linhas de item — sempre amarelo post-it. */
 const POSTIT_PEDIDO = {
@@ -47,6 +63,8 @@ function postitThemeForCard(col: KanbanColumnRow, itemCount: number) {
   return POSTIT_TAREFA;
 }
 
+type HomeSection = 'resumo' | 'mural' | 'kanban';
+
 export default function Home() {
   const [loading, setLoading] = useState(true);
   const [boardError, setBoardError] = useState<string | null>(null);
@@ -61,6 +79,7 @@ export default function Home() {
   const [quickTaskOpen, setQuickTaskOpen] = useState(false);
   const [draggingOrderId, setDraggingOrderId] = useState<string | null>(null);
   const [dropTargetColumnId, setDropTargetColumnId] = useState<string | null>(null);
+  const [homeSection, setHomeSection] = useState<HomeSection>('resumo');
 
   const fetchOrders = useCallback(async () => {
     setLoading(true);
@@ -190,10 +209,14 @@ export default function Home() {
       const requesterName = employeeNameById.get(o.requester_employee_id) || '';
       const lineItems = itemsByOrderId.get(o.id) || [];
       const itemBlob = lineItems
-        .flatMap((it) => [it.product_name, it.vendor, it.product_url, it.product_price, it.notes, it.ca_number])
+        .flatMap((it) => [it.product_name, it.vendor, it.product_url, it.product_price, it.notes])
         .filter(Boolean)
         .join(' ');
-      const blob = [requesterName, o.stage, o.title, o.notes, itemBlob].filter(Boolean).join(' ').toLowerCase();
+      const ocDisp = formatOcForDisplay(o.oc_number);
+      const blob = [requesterName, o.stage, o.title, o.notes, ocDisp, o.oc_number, itemBlob]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
       return matchesCol && blob.includes(s);
     });
   }, [orders, search, columnFilter, employeeNameById, itemsByOrderId, sortedColumns]);
@@ -259,92 +282,122 @@ export default function Home() {
 
   const defaultColumnIdForModals = sortedColumns[0]?.id ?? '';
 
+  const sectionTabs: { id: HomeSection; label: string; icon: ReactNode }[] = [
+    { id: 'resumo', label: 'Resumo', icon: <BarChart3 size={16} /> },
+    { id: 'mural', label: 'Mural', icon: <StickyNote size={16} /> },
+    { id: 'kanban', label: 'Pedidos', icon: <LayoutGrid size={16} /> },
+  ];
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-primary">Quadro de Pedidos</h1>
-          <p className="text-slate-500 text-sm">
-            Cartões estilo post-it (somente leitura aqui). Edite título, itens e solicitante na aba Pedidos.
-          </p>
+      <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
+        <div className="space-y-3">
+          <div>
+            <h1 className="text-2xl font-bold text-primary">Início</h1>
+            <p className="text-slate-500 text-sm">
+              {homeSection === 'resumo' && 'Indicadores para o almoxarifado: saídas, estoque e categorias.'}
+              {homeSection === 'mural' && 'Post-its para lembretes rápidos da equipe.'}
+              {homeSection === 'kanban' &&
+                'Quadro de pedidos (cartões post-it). Edite título, itens e OC na lista de pedidos.'}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {sectionTabs.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setHomeSection(t.id)}
+                className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold border transition-all ${
+                  homeSection === t.id
+                    ? 'bg-primary text-white border-primary shadow-md'
+                    : 'bg-white text-primary border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                {t.icon}
+                {t.label}
+              </button>
+            ))}
+          </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => setQuickTaskOpen(true)}
-            disabled={sortedColumns.length === 0 || employees.length === 0}
-            className="flex items-center gap-2 bg-secondary text-white px-4 py-2 rounded-lg hover:opacity-95 transition-all font-medium text-sm disabled:opacity-50"
-          >
-            <ClipboardList size={16} />
-            Nova tarefa
-          </button>
-          <button
-            type="button"
-            onClick={() => setIsModalOpen(true)}
-            className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-slate-800 transition-all font-medium text-sm"
-          >
-            <Plus size={16} />
-            Novo pedido
-          </button>
-          <button
-            type="button"
-            onClick={() => setBoardEditorOpen(true)}
-            disabled={sortedColumns.length === 0}
-            className="flex items-center gap-2 bg-white text-primary border border-slate-200 px-4 py-2 rounded-lg hover:bg-slate-50 font-medium text-sm disabled:opacity-50"
-          >
-            <LayoutGrid size={16} />
-            Editar quadro
-          </button>
-        </div>
+        {homeSection === 'kanban' && (
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setQuickTaskOpen(true)}
+              disabled={sortedColumns.length === 0 || employees.length === 0}
+              className="flex items-center gap-2 bg-secondary text-white px-4 py-2 rounded-lg hover:opacity-95 transition-all font-medium text-sm disabled:opacity-50"
+            >
+              <ClipboardList size={16} />
+              Nova tarefa
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsModalOpen(true)}
+              className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-slate-800 transition-all font-medium text-sm"
+            >
+              <Plus size={16} />
+              Novo pedido
+            </button>
+            <button
+              type="button"
+              onClick={() => setBoardEditorOpen(true)}
+              disabled={sortedColumns.length === 0}
+              className="flex items-center gap-2 bg-white text-primary border border-slate-200 px-4 py-2 rounded-lg hover:bg-slate-50 font-medium text-sm disabled:opacity-50"
+            >
+              <LayoutGrid size={16} />
+              Editar quadro
+            </button>
+          </div>
+        )}
       </div>
 
-      {boardError && (
+      {homeSection === 'resumo' && <AlmoxHomeDashboard />}
+      {homeSection === 'mural' && <MuralPostIts />}
+
+      {homeSection === 'kanban' && boardError && (
         <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-sm">
           <strong>Quadro:</strong> {boardError}
         </div>
       )}
 
-      <div className="bg-white p-4 rounded-xl border border-border shadow-sm flex flex-col lg:flex-row gap-4">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-          <input
-            type="text"
-            placeholder="Buscar por título, solicitante, produto, CA, link…"
-            className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-secondary/50 outline-none"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-        <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1">
-          <span className="text-[10px] font-bold text-slate-400 uppercase">Coluna</span>
-          <select
-            className="bg-transparent border-none text-sm focus:ring-0 outline-none font-medium text-slate-600 max-w-[160px]"
-            value={columnFilter}
-            onChange={(e) => setColumnFilter(e.target.value === 'Todos' ? 'Todos' : e.target.value)}
+      {homeSection === 'kanban' && (
+        <div className="bg-white p-4 rounded-xl border border-border shadow-sm flex flex-col lg:flex-row gap-4">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+            <input
+              type="text"
+              placeholder="Buscar por OC, título, solicitante, produto, link…"
+              className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-secondary/50 outline-none"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1">
+            <span className="text-[10px] font-bold text-slate-400 uppercase">Coluna</span>
+            <select
+              className="bg-transparent border-none text-sm focus:ring-0 outline-none font-medium text-slate-600 max-w-[160px]"
+              value={columnFilter}
+              onChange={(e) => setColumnFilter(e.target.value === 'Todos' ? 'Todos' : e.target.value)}
+            >
+              <option value="Todos">Todas</option>
+              {sortedColumns.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.title}
+                </option>
+              ))}
+            </select>
+          </div>
+          <Link
+            href="/orders"
+            className="flex items-center justify-center gap-2 bg-white text-primary border border-slate-200 px-4 py-2 rounded-lg hover:bg-slate-50 transition-all font-medium text-sm"
+            title="Ver em lista"
           >
-            <option value="Todos">Todas</option>
-            {sortedColumns.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.title}
-              </option>
-            ))}
-          </select>
+            Ver lista
+          </Link>
         </div>
-        <Link
-          href="/ca-consulta"
-          className="flex items-center justify-center gap-2 bg-white text-primary border border-slate-200 px-4 py-2 rounded-lg hover:bg-slate-50 transition-all font-medium text-sm"
-        >
-          Consulta CA
-        </Link>
-        <Link
-          href="/orders"
-          className="flex items-center justify-center gap-2 bg-white text-primary border border-slate-200 px-4 py-2 rounded-lg hover:bg-slate-50 transition-all font-medium text-sm"
-          title="Ver em lista"
-        >
-          Ver lista
-        </Link>
-      </div>
+      )}
 
+      {homeSection === 'kanban' && (
       <div className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden">
         <div className="p-4 border-b bg-slate-50 flex items-center justify-between">
           <div className="text-xs font-bold text-slate-500 uppercase tracking-wider">
@@ -427,11 +480,12 @@ export default function Home() {
                         const qtyReq = lineItems.reduce((acc, it) => acc + (it.quantity_requested || 0), 0);
                         const qtyRec = lineItems.reduce((acc, it) => acc + (it.quantity_received || 0), 0);
                         const progress = qtyReq > 0 ? Math.min(100, Math.round((qtyRec / qtyReq) * 100)) : 0;
-                        const lineTitle = lineItems[0]?.product_name?.trim() || '';
+                        const lineTitle = formatProductLabelDisplay(lineItems[0]?.product_name?.trim() || '');
                         const displayTitle =
                           (o.title && o.title.trim()) ||
                           lineTitle ||
                           (itemCount ? `Pedido (${itemCount} itens)` : 'Tarefa');
+                        const ocLabel = formatOcForDisplay(o.oc_number);
                         const requesterName = employeeNameById.get(o.requester_employee_id) || '—';
                         const theme = postitThemeForCard(col, itemCount);
                         return (
@@ -486,6 +540,13 @@ export default function Home() {
                             </div>
 
                             <div className="flex-1 min-h-0 flex flex-col pt-1">
+                              {ocLabel ? (
+                                <div className="mb-1.5 shrink-0">
+                                  <span className="inline-block text-[9px] font-black uppercase tracking-wider bg-black/20 px-1.5 py-0.5 rounded border border-black/15">
+                                    OC {ocLabel}
+                                  </span>
+                                </div>
+                              ) : null}
                               <p className="text-[11px] font-black leading-snug line-clamp-5 break-words">
                                 {displayTitle}
                               </p>
@@ -547,6 +608,7 @@ export default function Home() {
           </div>
         </div>
       </div>
+      )}
 
       <PurchaseOrderFormModal
         isOpen={isModalOpen}

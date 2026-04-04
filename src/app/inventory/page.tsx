@@ -5,13 +5,13 @@ export const dynamic = 'force-dynamic';
 import { useState, useEffect, Suspense, useCallback } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
+import { formatProductLabelDisplay, normalizeProductLabelForSave } from '@/lib/productDisplayText';
 import { Search, Plus, AlertCircle, X, FileUp, Users, History, Edit, Trash2, Loader2, ArrowUpRight, ArrowDownLeft, Tags, ShoppingCart, User, Minus, Tag, Download, MapPin } from 'lucide-react';
 import ImportSpreadsheet from '@/components/ImportSpreadsheet';
 import QuickMovementModal from '@/components/QuickMovementModal';
 import { itemCodeFromDescription } from '@/lib/itemCode';
 import { recordMovement, updatePossessionQuantity, updateSitePossessionQuantity, updateStock } from '@/lib/movements';
 import { fetchTenantItems, isLikelyMissingColumn } from '@/lib/tenantItems';
-import { fetchCaEpiByNumber } from '@/lib/caEpiClient';
 import { downloadInventoryImportTemplate } from '@/lib/inventoryImportTemplate';
 import { CatalogProductAutocomplete } from '@/components/CatalogProductAutocomplete';
 
@@ -53,8 +53,6 @@ interface Product {
   unique_item?: boolean;
   /** TAG / identificador fixo no cadastro do item */
   tag?: string | null;
-  /** Número do CA (EPI), opcional */
-  ca_number?: string | null;
   quantity_current: number;
   quantity_min: number;
   unit: string;
@@ -102,7 +100,6 @@ const emptyItemForm = () => ({
   quantity_min: 0,
   unit: 'un',
   tag: '',
-  ca_number: '',
 });
 
 function InventoryContent() {
@@ -144,7 +141,6 @@ function InventoryContent() {
 
   // Form states for NEW/EDIT
   const [formData, setFormData] = useState(emptyItemForm);
-  const [caPullLoading, setCaPullLoading] = useState(false);
 
   const fetchCategories = async () => {
     setCategoryError(null);
@@ -446,8 +442,9 @@ function InventoryContent() {
       return;
     }
 
+    const descNorm = normalizeProductLabelForSave(formData.description);
     const basePatch = {
-      description: formData.description,
+      description: descNorm,
       category: formData.category,
       location: formData.location,
       consumable: formData.consumable,
@@ -455,22 +452,17 @@ function InventoryContent() {
       quantity_current: formData.quantity_current,
       quantity_min: formData.quantity_min,
       unit: formData.unit,
-      code: itemCodeFromDescription(formData.description),
+      code: itemCodeFromDescription(descNorm),
     };
     const tagVal = formData.tag.trim() || null;
-    const caNorm = formData.ca_number.replace(/\D/g, '') || null;
 
-    let patch: Record<string, unknown> = { ...basePatch, tag: tagVal, ca_number: caNorm };
+    let patch: Record<string, unknown> = { ...basePatch, tag: tagVal };
     let error = (await supabase.from('items').update(patch).eq('id', editingItem.id).eq('user_id', user.id)).error;
 
     if (error?.message && isLikelyMissingColumn(error.message, 'tag')) {
       const { tag: _t, ...noTag } = patch;
       patch = noTag;
       error = (await supabase.from('items').update(patch).eq('id', editingItem.id).eq('user_id', user.id)).error;
-    }
-    if (error?.message && isLikelyMissingColumn(error.message, 'ca_number')) {
-      const { ca_number: _c, ...noCa } = patch;
-      error = (await supabase.from('items').update(noCa).eq('id', editingItem.id).eq('user_id', user.id)).error;
     }
 
     if (error) {
@@ -493,8 +485,9 @@ function InventoryContent() {
       return;
     }
 
+    const descNew = normalizeProductLabelForSave(formData.description);
     const finalData: Record<string, unknown> = {
-      description: formData.description,
+      description: descNew,
       category: formData.category,
       location: formData.location,
       consumable: formData.consumable,
@@ -503,8 +496,7 @@ function InventoryContent() {
       quantity_min: formData.quantity_min,
       unit: formData.unit,
       tag: formData.tag.trim() || null,
-      ca_number: formData.ca_number.replace(/\D/g, '') || null,
-      code: itemCodeFromDescription(formData.description),
+      code: itemCodeFromDescription(descNew),
       user_id: user.id,
     };
 
@@ -514,15 +506,6 @@ function InventoryContent() {
       const { tag: _t, ...noTag } = row;
       row = noTag;
       ({ error } = await supabase.from('items').insert([row]));
-    }
-    if (error?.message && isLikelyMissingColumn(error.message, 'ca_number')) {
-      const { ca_number: _c, ...noCa } = row;
-      row = noCa;
-      ({ error } = await supabase.from('items').insert([row]));
-    }
-    if (error?.message && isLikelyMissingColumn(error.message, 'tag')) {
-      const { tag: _t2, ...minimal } = row;
-      ({ error } = await supabase.from('items').insert([minimal]));
     }
 
     if (error) {
@@ -540,40 +523,8 @@ function InventoryContent() {
   const q = searchTerm.toLowerCase().trim();
   const filteredProducts = products.filter((p) => {
     if (!q) return true;
-    if (p.description.toLowerCase().includes(q)) return true;
-    const caDigits = (p.ca_number ?? '').replace(/\D/g, '');
-    const qDigits = q.replace(/\D/g, '');
-    if (qDigits.length > 0 && caDigits.includes(qDigits)) return true;
-    return (p.ca_number ?? '').toLowerCase().includes(q);
+    return p.description.toLowerCase().includes(q);
   });
-
-  const pullDescriptionFromCa = async () => {
-    const raw = formData.ca_number.replace(/\D/g, '');
-    if (raw.length < 4) {
-      alert('Informe o número do CA (mín. 4 dígitos).');
-      return;
-    }
-    setCaPullLoading(true);
-    try {
-      const res = await fetchCaEpiByNumber(raw);
-      if (!res.ok) {
-        let msg = res.error ?? 'CA não encontrado.';
-        if (res.hint) msg += `\n\n${res.hint}`;
-        if (res.officialUrl) msg += `\n\nConsulta manual: ${res.officialUrl}`;
-        alert(msg);
-        return;
-      }
-      if (res.label) {
-        setFormData((fd) => ({
-          ...fd,
-          ca_number: raw,
-          description: fd.description.trim() ? fd.description : res.label!,
-        }));
-      }
-    } finally {
-      setCaPullLoading(false);
-    }
-  };
 
   const handleDownloadInventory = () => {
     if (products.length === 0) {
@@ -583,7 +534,6 @@ function InventoryContent() {
     const header = [
       'Descrição',
       'Código',
-      'CA (EPI)',
       'Categoria',
       'Local',
       'Unidade',
@@ -610,7 +560,6 @@ function InventoryContent() {
       const row = [
         p.description,
         p.code ?? '',
-        p.ca_number ?? '',
         p.category,
         p.location ?? '',
         p.unit,
@@ -1054,7 +1003,7 @@ function InventoryContent() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
           <input 
             type="text" 
-            placeholder="Buscar por descrição ou número do CA..." 
+            placeholder="Buscar por descrição..." 
             className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary/50 focus:border-secondary transition-all"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
@@ -1069,7 +1018,6 @@ function InventoryContent() {
             <thead className="bg-slate-50 border-b border-border">
               <tr>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Descrição do Material</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center whitespace-nowrap">CA</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Consumível?</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Estoque</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Em Posse</th>
@@ -1083,14 +1031,14 @@ function InventoryContent() {
             <tbody className="divide-y divide-border text-sm">
               {loading ? (
                 <tr>
-                  <td colSpan={10} className="px-6 py-12 text-center text-slate-400">
+                  <td colSpan={9} className="px-6 py-12 text-center text-slate-400">
                     <Loader2 className="animate-spin inline mr-2" size={20} />
                     Carregando inventário...
                   </td>
                 </tr>
               ) : filteredProducts.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-6 py-12 text-center text-slate-400">Nenhum item encontrado.</td>
+                  <td colSpan={9} className="px-6 py-12 text-center text-slate-400">Nenhum item encontrado.</td>
                 </tr>
               ) : (
                 filteredProducts.map((p) => {
@@ -1101,7 +1049,7 @@ function InventoryContent() {
                   return (
                     <tr key={p.id} className="hover:bg-slate-50 transition-colors group">
                       <td className="px-6 py-4">
-                        <div className="font-bold text-primary text-base">{p.description}</div>
+                        <div className="font-bold text-primary text-base">{formatProductLabelDisplay(p.description)}</div>
                         <div className="text-[10px] text-slate-400 uppercase font-bold tracking-tight">{p.location || 'Sem local definido'} • {p.unit}</div>
                         {p.tag ? (
                           <div className="text-[10px] text-slate-500 font-mono mt-1 flex items-center gap-1">
@@ -1109,18 +1057,6 @@ function InventoryContent() {
                             {p.tag}
                           </div>
                         ) : null}
-                      </td>
-                      <td className="px-4 py-4 text-center text-xs font-mono text-slate-600 whitespace-nowrap">
-                        {p.ca_number ? (
-                          <Link
-                            href={`/ca-consulta?ca=${encodeURIComponent(String(p.ca_number).replace(/\D/g, ''))}`}
-                            className="text-teal-700 font-bold hover:underline"
-                          >
-                            {p.ca_number}
-                          </Link>
-                        ) : (
-                          <span className="text-slate-300">—</span>
-                        )}
                       </td>
                       <td className="px-6 py-4 text-xs text-center border-x border-slate-50">
                         <span className={`px-2 py-1 rounded-md font-bold text-[10px] uppercase tracking-tighter ${p.consumable ? 'bg-green-50 text-green-600' : 'bg-slate-50 text-slate-400'}`}>
@@ -1242,7 +1178,6 @@ function InventoryContent() {
                                 quantity_min: p.quantity_min,
                                 unit: p.unit,
                                 tag: p.tag ?? '',
-                                ca_number: p.ca_number ?? '',
                               });
                             }}
                             className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-blue-500"
@@ -1274,7 +1209,7 @@ function InventoryContent() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden animate-in zoom-in duration-300">
             <div className="p-6 border-b bg-slate-50 flex items-center justify-between">
               <div>
-                <h3 className="text-xl font-bold text-primary">{historyItem.description}</h3>
+                <h3 className="text-xl font-bold text-primary">{formatProductLabelDisplay(historyItem.description)}</h3>
                 <p className="text-xs text-slate-500 font-mono mt-1 uppercase">Log de movimentações detalhado</p>
               </div>
               <button onClick={() => setHistoryItem(null)} className="p-2 hover:bg-slate-200 rounded-full">
@@ -1397,36 +1332,6 @@ function InventoryContent() {
                     </label>
                   </div>
                 </div>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-bold uppercase text-slate-400">CA (EPI) — opcional</label>
-                <div className="flex gap-2 mt-1">
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none text-sm font-mono"
-                    placeholder="Ex.: 12345"
-                    value={formData.ca_number}
-                    onChange={(e) => setFormData({ ...formData, ca_number: e.target.value })}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => void pullDescriptionFromCa()}
-                    disabled={caPullLoading}
-                    className="px-3 py-2 bg-teal-50 border border-teal-200 rounded-lg font-bold text-teal-800 hover:bg-teal-100 disabled:opacity-50 flex items-center gap-1 shrink-0"
-                    title="Preencher descrição pelo CA (configure CA_EPI_API_BASE)"
-                  >
-                    {caPullLoading ? <Loader2 className="animate-spin" size={16} /> : <Search size={16} />}
-                    CA
-                  </button>
-                </div>
-                <p className="text-[10px] text-slate-400 mt-1">
-                  Com a descrição vazia, o nome padronizado da API preenche o campo.{' '}
-                  <Link href="/ca-consulta" className="text-teal-700 font-bold hover:underline">
-                    Consulta CA
-                  </Link>
-                </p>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -1637,7 +1542,7 @@ function InventoryContent() {
                     <option value="">Item para adicionar...</option>
                     {products.map((p) => (
                       <option key={p.id} value={p.id} disabled={p.quantity_current <= 0}>
-                        {p.description} - saldo {p.quantity_current}
+                        {formatProductLabelDisplay(p.description)} - saldo {p.quantity_current}
                       </option>
                     ))}
                   </select>
@@ -1678,7 +1583,9 @@ function InventoryContent() {
                   cart.map((line) => (
                     <div key={line.lineId} className="flex items-center justify-between bg-white border border-slate-100 rounded-xl px-3 py-2">
                       <div className="min-w-0">
-                        <div className="font-bold text-primary text-sm truncate">{line.description}</div>
+                        <div className="font-bold text-primary text-sm truncate">
+                          {formatProductLabelDisplay(line.description)}
+                        </div>
                         <div className="text-[10px] text-slate-400 font-bold uppercase flex items-center gap-2">
                           {line.unit}
                           {line.tag && (
@@ -1775,7 +1682,7 @@ function InventoryContent() {
             <div className="p-6 border-b border-border bg-slate-50 flex items-center justify-between">
               <div>
                 <h3 className="text-xl font-bold text-primary">Ajustar estoque</h3>
-                <p className="text-xs text-slate-500 mt-1">{adjustItem.description}</p>
+                <p className="text-xs text-slate-500 mt-1">{formatProductLabelDisplay(adjustItem.description)}</p>
               </div>
               <button
                 type="button"

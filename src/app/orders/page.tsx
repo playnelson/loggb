@@ -17,6 +17,8 @@ import {
   type KanbanColumnRow,
 } from '@/lib/kanbanColumns';
 import { fetchPurchaseOrdersForUser, fetchPurchaseOrderItemsForOrderIds } from '@/lib/purchaseOrderQueries';
+import { formatOcForDisplay, normalizeOcNumberInput } from '@/lib/purchaseOrderOc';
+import { formatProductLabelDisplay } from '@/lib/productDisplayText';
 
 function OrdersContent() {
   const searchParams = useSearchParams();
@@ -149,10 +151,14 @@ function OrdersContent() {
       const requesterName = employeeNameById.get(o.requester_employee_id) || '';
       const lineItems = itemsByOrderId.get(o.id) || [];
       const itemBlob = lineItems
-        .flatMap((it) => [it.product_name, it.vendor, it.product_url, it.product_price, it.notes, it.ca_number])
+        .flatMap((it) => [it.product_name, it.vendor, it.product_url, it.product_price, it.notes])
         .filter(Boolean)
         .join(' ');
-      const blob = [requesterName, o.stage, o.title, o.notes, itemBlob].filter(Boolean).join(' ').toLowerCase();
+      const ocDisp = formatOcForDisplay(o.oc_number);
+      const blob = [requesterName, o.stage, o.title, o.notes, ocDisp, o.oc_number, itemBlob]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
       return matchesCol && blob.includes(s);
     });
   }, [orders, search, columnFilter, employeeNameById, itemsByOrderId, sortedColumns]);
@@ -208,6 +214,27 @@ function OrdersContent() {
     }
   };
 
+  const updateOrderOc = async (id: string, raw: string) => {
+    const oc = normalizeOcNumberInput(raw);
+    if (raw.trim() !== '' && oc === null) {
+      alert('OC: use exatamente 4 dígitos ou deixe em branco.');
+      void fetchOrders();
+      return;
+    }
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, oc_number: oc } : o)));
+    const { error } = await supabase
+      .from('purchase_orders')
+      .update({ oc_number: oc, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('user_id', user.id);
+    if (error) {
+      alert(`Erro ao salvar OC: ${error.message}`);
+      void fetchOrders();
+    }
+  };
+
   const defaultCol = sortedColumns[0]?.id ?? '';
 
   return (
@@ -220,12 +247,6 @@ function OrdersContent() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Link
-            href="/ca-consulta"
-            className="flex items-center gap-2 bg-white text-primary border border-slate-200 px-4 py-2 rounded-lg hover:bg-slate-50 font-medium text-sm"
-          >
-            Consulta CA
-          </Link>
           <button
             type="button"
             onClick={downloadOrdersTemplate}
@@ -276,7 +297,7 @@ function OrdersContent() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
           <input
             type="text"
-            placeholder="Buscar por título, solicitante, produto, CA, link…"
+            placeholder="Buscar por OC, título, solicitante, produto, link…"
             className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-secondary/50 outline-none"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -305,6 +326,7 @@ function OrdersContent() {
             <thead className="bg-slate-50 border-b border-border">
               <tr>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Título / produto</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">OC</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Solicitante</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Fornecedor</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Preço</th>
@@ -315,14 +337,14 @@ function OrdersContent() {
             <tbody className="divide-y divide-border">
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-12 text-center text-slate-400">
+                  <td colSpan={7} className="px-6 py-12 text-center text-slate-400">
                     <Loader2 className="animate-spin inline mr-2 text-secondary" size={20} />
                     Carregando pedidos...
                   </td>
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-12 text-center text-slate-400">
+                  <td colSpan={7} className="px-6 py-12 text-center text-slate-400">
                     Nenhum pedido encontrado.
                   </td>
                 </tr>
@@ -333,7 +355,7 @@ function OrdersContent() {
                   const qtyReq = lineItems.reduce((acc, it) => acc + (it.quantity_requested || 0), 0);
                   const qtyRec = lineItems.reduce((acc, it) => acc + (it.quantity_received || 0), 0);
                   const requesterName = employeeNameById.get(o.requester_employee_id) || '—';
-                  const lineTitle = lineItems[0]?.product_name || '';
+                  const lineTitle = formatProductLabelDisplay(lineItems[0]?.product_name || '');
                   const titlePlaceholder =
                     lineTitle || (itemCount ? `Pedido (${itemCount} itens)` : 'Tarefa');
                   return (
@@ -357,6 +379,28 @@ function OrdersContent() {
                         <div className="text-[10px] text-slate-400 font-bold mt-1">
                           {itemCount} itens • {qtyRec}/{qtyReq} recebidos
                         </div>
+                      </td>
+                      <td className="px-6 py-4 w-[88px]">
+                        <label className="sr-only">Ordem de compra (4 dígitos)</label>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          maxLength={4}
+                          className="w-full font-mono font-bold text-sm text-center bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 outline-none focus:ring-2 focus:ring-secondary/40 tracking-widest"
+                          defaultValue={formatOcForDisplay(o.oc_number) ?? ''}
+                          placeholder="—"
+                          title="OC de 4 dígitos (setor de compras)"
+                          onBlur={(e) => {
+                            const v = e.target.value.replace(/\D/g, '').slice(0, 4);
+                            const normalized = normalizeOcNumberInput(v);
+                            const prev = o.oc_number;
+                            const same =
+                              (normalized === null && (prev == null || prev === '')) ||
+                              normalized === prev;
+                            if (!same) void updateOrderOc(o.id, e.target.value);
+                          }}
+                          key={`oc-${o.id}-${o.updated_at}`}
+                        />
                       </td>
                       <td className="px-6 py-4 text-sm text-slate-600 font-medium">{requesterName}</td>
                       <td className="px-6 py-4 text-sm text-slate-600 font-medium">{lineItems[0]?.vendor || '—'}</td>

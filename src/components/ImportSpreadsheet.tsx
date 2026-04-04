@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import * as XLSX from 'xlsx';
 import { supabase } from '@/lib/supabase';
 import { itemCodeFromDescription } from '@/lib/itemCode';
+import { normalizeProductLabelForSave } from '@/lib/productDisplayText';
 import { recordMovement, updatePossessionQuantity, updateStock } from '@/lib/movements';
 import { FileUp, Loader2, CheckCircle2, AlertCircle, X, Info, Users, Package, Download } from 'lucide-react';
 import { downloadInventoryImportTemplate } from '@/lib/inventoryImportTemplate';
@@ -270,7 +271,7 @@ export default function ImportSpreadsheet({
             const desc = mapping.descIdx !== -1 ? row[mapping.descIdx]?.toString().trim() : '';
             
             if (code || desc) {
-              const description = (desc || code || 'Sem descrição').trim();
+              const description = normalizeProductLabelForSave((desc || code || 'Sem descrição').trim()) || 'SEM DESCRIÇÃO';
               const itemKey = description.toLowerCase();
               if (!uniqueItems.has(itemKey)) {
                 const qty = qtyIdx !== -1 ? parseNumericValue(row[qtyIdx]) : 0;
@@ -359,7 +360,7 @@ export default function ImportSpreadsheet({
             
             const code = row[mapping.codeIdx]?.toString().trim();
             const desc = row[mapping.descIdx]?.toString().trim();
-            const description = (desc || code || '').trim();
+            const description = normalizeProductLabelForSave((desc || code || '').trim());
             const itemKey = description.toLowerCase();
             const itemId = itemKey ? itemMap.get(itemKey) : null;
             

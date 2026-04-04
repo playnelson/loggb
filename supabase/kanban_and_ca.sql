@@ -1,4 +1,4 @@
--- Colunas de kanban editáveis, título em pedidos, CA em itens.
+-- Kanban: colunas editáveis, título em pedidos.
 -- Execute no SQL Editor do Supabase (uma vez).
 
 -- Remover checagem rígida de estágio se existir (nomes variam entre projetos).
@@ -26,16 +26,17 @@ alter table public.purchase_orders
   add column if not exists title text null,
   add column if not exists kanban_column_id uuid references public.kanban_columns(id) on delete set null;
 
+alter table public.purchase_orders
+  add column if not exists oc_number text null;
+
+comment on column public.purchase_orders.oc_number is 'Ordem de compra (4 dígitos) gerada pelo setor de compras; identifica o pedido.';
+
+alter table public.purchase_orders drop constraint if exists purchase_orders_oc_number_format;
+alter table public.purchase_orders
+  add constraint purchase_orders_oc_number_format
+  check (oc_number is null or oc_number ~ '^[0-9]{4}$');
+
 create index if not exists purchase_orders_kanban_column_idx on public.purchase_orders (kanban_column_id);
-
-alter table public.purchase_order_items
-  add column if not exists ca_number text null;
-
-alter table public.items
-  add column if not exists ca_number text null;
-
-comment on column public.purchase_order_items.ca_number is 'Certificado de Aprovação (CA) do EPI, para padronizar nome do produto.';
-comment on column public.items.ca_number is 'CA do EPI vinculado ao material no almoxarifado.';
 
 -- RLS kanban_columns
 alter table public.kanban_columns enable row level security;

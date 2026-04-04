@@ -2,6 +2,7 @@
 
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
+import { formatProductLabelDisplay } from '@/lib/productDisplayText';
 import { recordMovement, updateStock, updatePossessionQuantity, updateSitePossessionQuantity } from '@/lib/movements';
 import { 
   X, 
@@ -334,7 +335,7 @@ export default function QuickMovementModal({
             </div>
             <div>
               <h2 className="text-xl font-bold text-primary leading-tight">
-                {mode === 'IN' ? 'Entrada' : 'Saída'} - {item.description}
+                {mode === 'IN' ? 'Entrada' : 'Saída'} - {formatProductLabelDisplay(item.description)}
               </h2>
               <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">UNIDADE: {item.unit}</p>
             </div>

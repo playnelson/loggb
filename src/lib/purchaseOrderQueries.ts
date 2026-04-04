@@ -14,17 +14,17 @@ export function isMissingColumnError(err: { code?: string; message?: string } | 
   return false;
 }
 
-const PO_LIST_FULL =
+const PO_LIST_WITH_KANBAN =
   'id, requester_employee_id, stage, title, kanban_column_id, notes, created_at, updated_at';
+const PO_LIST_FULL = `${PO_LIST_WITH_KANBAN.replace(/updated_at$/, 'oc_number, updated_at')}`;
 const PO_LIST_LEGACY = 'id, requester_employee_id, stage, notes, created_at, updated_at';
 
-const PO_DETAIL_FULL =
+const PO_DETAIL_WITH_KANBAN =
   'id, user_id, requester_employee_id, stage, title, kanban_column_id, notes, created_at, updated_at';
+const PO_DETAIL_FULL = `${PO_DETAIL_WITH_KANBAN.replace(/updated_at$/, 'oc_number, updated_at')}`;
 const PO_DETAIL_LEGACY = 'id, user_id, requester_employee_id, stage, notes, created_at, updated_at';
 
 const ITEMS_FULL =
-  'id, order_id, product_name, product_url, vendor, product_price, unit, quantity_requested, quantity_received, received_at, notes, ca_number, created_at, updated_at';
-const ITEMS_LEGACY =
   'id, order_id, product_name, product_url, vendor, product_price, unit, quantity_requested, quantity_received, received_at, notes, created_at, updated_at';
 
 function mapOrderRow(r: Record<string, unknown>): PurchaseOrderRow {
@@ -33,6 +33,7 @@ function mapOrderRow(r: Record<string, unknown>): PurchaseOrderRow {
     requester_employee_id: String(r.requester_employee_id),
     stage: String(r.stage ?? ''),
     title: (r.title as string) ?? null,
+    oc_number: r.oc_number != null && String(r.oc_number).trim() !== '' ? String(r.oc_number).trim() : null,
     kanban_column_id: r.kanban_column_id ? String(r.kanban_column_id) : null,
     notes: (r.notes as string) ?? null,
     created_at: String(r.created_at),
@@ -53,7 +54,6 @@ function mapItemRow(r: Record<string, unknown>): PurchaseOrderItemRow {
     quantity_received: Number(r.quantity_received ?? 0),
     received_at: (r.received_at as string) ?? null,
     notes: (r.notes as string) ?? null,
-    ca_number: r.ca_number != null ? String(r.ca_number) : null,
     created_at: String(r.created_at),
     updated_at: String(r.updated_at),
   };
@@ -72,9 +72,21 @@ export async function fetchPurchaseOrdersForUser(
   if (first.error && isMissingColumnError(first.error)) {
     const second = await supabase
       .from('purchase_orders')
-      .select(PO_LIST_LEGACY)
+      .select(PO_LIST_WITH_KANBAN)
       .eq('user_id', userId)
       .order('created_at', { ascending });
+    if (second.error && isMissingColumnError(second.error)) {
+      const third = await supabase
+        .from('purchase_orders')
+        .select(PO_LIST_LEGACY)
+        .eq('user_id', userId)
+        .order('created_at', { ascending });
+      if (third.error) return { rows: [], error: { message: third.error.message } };
+      return {
+        rows: (third.data || []).map((r: unknown) => mapOrderRow(r as Record<string, unknown>)),
+        error: null,
+      };
+    }
     if (second.error) return { rows: [], error: { message: second.error.message } };
     return {
       rows: (second.data || []).map((r: unknown) => mapOrderRow(r as Record<string, unknown>)),
@@ -94,7 +106,16 @@ export async function fetchPurchaseOrderById(
 ): Promise<{ row: Record<string, unknown> | null; error: { message: string } | null }> {
   const first = await supabase.from('purchase_orders').select(PO_DETAIL_FULL).eq('id', orderId).maybeSingle();
   if (first.error && isMissingColumnError(first.error)) {
-    const second = await supabase.from('purchase_orders').select(PO_DETAIL_LEGACY).eq('id', orderId).maybeSingle();
+    const second = await supabase
+      .from('purchase_orders')
+      .select(PO_DETAIL_WITH_KANBAN)
+      .eq('id', orderId)
+      .maybeSingle();
+    if (second.error && isMissingColumnError(second.error)) {
+      const third = await supabase.from('purchase_orders').select(PO_DETAIL_LEGACY).eq('id', orderId).maybeSingle();
+      if (third.error) return { row: null, error: { message: third.error.message } };
+      return { row: (third.data as Record<string, unknown>) ?? null, error: null };
+    }
     if (second.error) return { row: null, error: { message: second.error.message } };
     return { row: (second.data as Record<string, unknown>) ?? null, error: null };
   }
@@ -107,18 +128,10 @@ export async function fetchPurchaseOrderItemsForOrderIds(
   orderIds: string[]
 ): Promise<{ items: PurchaseOrderItemRow[]; error: { message: string } | null }> {
   if (orderIds.length === 0) return { items: [], error: null };
-  const first = await supabase.from('purchase_order_items').select(ITEMS_FULL).in('order_id', orderIds);
-  if (first.error && isMissingColumnError(first.error)) {
-    const second = await supabase.from('purchase_order_items').select(ITEMS_LEGACY).in('order_id', orderIds);
-    if (second.error) return { items: [], error: { message: second.error.message } };
-    return {
-      items: (second.data || []).map((r: unknown) => mapItemRow(r as Record<string, unknown>)),
-      error: null,
-    };
-  }
-  if (first.error) return { items: [], error: { message: first.error.message } };
+  const { data, error } = await supabase.from('purchase_order_items').select(ITEMS_FULL).in('order_id', orderIds);
+  if (error) return { items: [], error: { message: error.message } };
   return {
-    items: (first.data || []).map((r: unknown) => mapItemRow(r as Record<string, unknown>)),
+    items: (data || []).map((r: unknown) => mapItemRow(r as Record<string, unknown>)),
     error: null,
   };
 }
@@ -128,26 +141,14 @@ export async function fetchPurchaseOrderItemsForOrderIdOrdered(
   orderId: string,
   ascending: boolean
 ): Promise<{ items: PurchaseOrderItemRow[]; error: { message: string } | null }> {
-  const first = await supabase
+  const { data, error } = await supabase
     .from('purchase_order_items')
     .select(ITEMS_FULL)
     .eq('order_id', orderId)
     .order('created_at', { ascending });
-  if (first.error && isMissingColumnError(first.error)) {
-    const second = await supabase
-      .from('purchase_order_items')
-      .select(ITEMS_LEGACY)
-      .eq('order_id', orderId)
-      .order('created_at', { ascending });
-    if (second.error) return { items: [], error: { message: second.error.message } };
-    return {
-      items: (second.data || []).map((r: unknown) => mapItemRow(r as Record<string, unknown>)),
-      error: null,
-    };
-  }
-  if (first.error) return { items: [], error: { message: first.error.message } };
+  if (error) return { items: [], error: { message: error.message } };
   return {
-    items: (first.data || []).map((r: unknown) => mapItemRow(r as Record<string, unknown>)),
+    items: (data || []).map((r: unknown) => mapItemRow(r as Record<string, unknown>)),
     error: null,
   };
 }

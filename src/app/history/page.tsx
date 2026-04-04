@@ -4,6 +4,7 @@ export const dynamic = 'force-dynamic';
 
 import { useMemo, useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { formatProductLabelDisplay } from '@/lib/productDisplayText';
 import { 
   History, 
   Search, 
@@ -273,7 +274,9 @@ export default function HistoryPage() {
                           <Package size={14} className="text-slate-400" />
                         </div>
                         <div className="flex flex-col">
-                          <p className="text-sm font-bold text-primary leading-tight">{move.items?.description}</p>
+                          <p className="text-sm font-bold text-primary leading-tight">
+                            {formatProductLabelDisplay(move.items?.description)}
+                          </p>
 
                         </div>
                       </div>

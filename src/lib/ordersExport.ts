@@ -1,5 +1,7 @@
 import * as XLSX from 'xlsx-js-style';
 import type { EmployeeLite, PurchaseOrderItemRow, PurchaseOrderRow } from '@/lib/purchaseOrders';
+import { formatOcForDisplay } from '@/lib/purchaseOrderOc';
+import { formatProductLabelDisplay } from '@/lib/productDisplayText';
 
 function safeDate(v: string | null | undefined): Date | null {
   if (!v) return null;
@@ -36,6 +38,7 @@ type ExportInput = {
 
 export function downloadOrdersSpreadsheet({ orders, items, employees, title = 'Pedidos de Compra' }: ExportInput): void {
   const employeeNameById = new Map(employees.map((e) => [e.id, e.full_name]));
+  const ocByOrderId = new Map(orders.map((o) => [o.id, formatOcForDisplay(o.oc_number) ?? '']));
   const itemsByOrderId = new Map<string, PurchaseOrderItemRow[]>();
   for (const it of items) {
     const bucket = itemsByOrderId.get(it.order_id) || [];
@@ -77,6 +80,7 @@ export function downloadOrdersSpreadsheet({ orders, items, employees, title = 'P
   // Sheet 1: Pedidos (resumo)
   const resumoHeader = [
     'ID do pedido',
+    'OC (4 dígitos)',
     'Solicitante',
     'Estágio',
     'Criado em',
@@ -91,8 +95,10 @@ export function downloadOrdersSpreadsheet({ orders, items, employees, title = 'P
     const lineItems = itemsByOrderId.get(o.id) || [];
     const qtyReq = lineItems.reduce((acc, it) => acc + (it.quantity_requested || 0), 0);
     const qtyRec = lineItems.reduce((acc, it) => acc + (it.quantity_received || 0), 0);
+    const ocDisp = formatOcForDisplay(o.oc_number);
     return [
       o.id,
+      ocDisp ?? '',
       employeeNameById.get(o.requester_employee_id) || '—',
       o.stage,
       formatPtBrDateTime(o.created_at),
@@ -118,9 +124,10 @@ export function downloadOrdersSpreadsheet({ orders, items, employees, title = 'P
   ];
 
   wsResumo['!freeze'] = { xSplit: 0, ySplit: 4 };
-  wsResumo['!autofilter'] = { ref: `A4:I${4 + Math.max(resumoRows.length, 1)}` };
+  wsResumo['!autofilter'] = { ref: `A4:J${4 + Math.max(resumoRows.length, 1)}` };
   wsResumo['!cols'] = [
     { wch: 40 },
+    { wch: 10 },
     { wch: 22 },
     { wch: 12 },
     { wch: 20 },
@@ -142,7 +149,7 @@ export function downloadOrdersSpreadsheet({ orders, items, employees, title = 'P
   for (let r = 0; r < resumoRows.length; r++) {
     const rowIndex = 4 + r;
     // Qtd itens, pedida, recebida
-    for (const c of [5, 6, 7]) {
+    for (const c of [6, 7, 8]) {
       const addr = XLSX.utils.encode_cell({ r: rowIndex, c });
       const cell = wsResumo[addr];
       if (cell) cell.s = intStyle;
@@ -154,6 +161,7 @@ export function downloadOrdersSpreadsheet({ orders, items, employees, title = 'P
   // Sheet 2: Itens (detalhado)
   const itensHeader = [
     'ID do pedido',
+    'OC (4 dígitos)',
     'Produto',
     'Fornecedor',
     'Un',
@@ -171,7 +179,8 @@ export function downloadOrdersSpreadsheet({ orders, items, employees, title = 'P
     const priceN = parsePriceToNumberBRL(it.product_price);
     return [
       it.order_id,
-      it.product_name || '',
+      ocByOrderId.get(it.order_id) ?? '',
+      formatProductLabelDisplay(it.product_name || ''),
       it.vendor || '',
       it.unit || 'un',
       it.quantity_requested ?? 0,
@@ -199,9 +208,10 @@ export function downloadOrdersSpreadsheet({ orders, items, employees, title = 'P
   ];
 
   wsItens['!freeze'] = { xSplit: 0, ySplit: 4 };
-  wsItens['!autofilter'] = { ref: `A4:L${4 + Math.max(itensRows.length, 1)}` };
+  wsItens['!autofilter'] = { ref: `A4:M${4 + Math.max(itensRows.length, 1)}` };
   wsItens['!cols'] = [
     { wch: 40 },
+    { wch: 10 },
     { wch: 34 },
     { wch: 20 },
     { wch: 6 },
@@ -224,12 +234,12 @@ export function downloadOrdersSpreadsheet({ orders, items, employees, title = 'P
   }
   for (let r = 0; r < itensRows.length; r++) {
     const rowIndex = 4 + r;
-    for (const c of [4, 5]) {
+    for (const c of [5, 6]) {
       const addr = XLSX.utils.encode_cell({ r: rowIndex, c });
       const cell = wsItens[addr];
       if (cell) cell.s = intStyle;
     }
-    const moneyAddr = XLSX.utils.encode_cell({ r: rowIndex, c: 7 });
+    const moneyAddr = XLSX.utils.encode_cell({ r: rowIndex, c: 8 });
     const moneyCell = wsItens[moneyAddr];
     if (moneyCell && typeof moneyCell.v === 'number') moneyCell.s = moneyStyle;
   }

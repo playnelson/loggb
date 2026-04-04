@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Package, Users, LayoutDashboard, LogOut, Settings, History, ShoppingCart, ClipboardCheck, MapPin, ShieldCheck } from 'lucide-react';
+import { Package, Users, LayoutDashboard, LogOut, Settings, History, ShoppingCart, ClipboardCheck, MapPin, Ruler } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useRouter, usePathname } from 'next/navigation';
 
@@ -9,12 +9,12 @@ export function Sidebar() {
   const router = useRouter();
   const pathname = usePathname();
   const menuItems = [
-    { name: 'Dashboard', icon: <LayoutDashboard size={20} />, href: '/' },
+    { name: 'Início', icon: <LayoutDashboard size={20} />, href: '/' },
     { name: 'Almoxarifado', icon: <Package size={20} />, href: '/inventory' },
     { name: 'Colaboradores', icon: <Users size={20} />, href: '/staff' },
     { name: 'Sedes e canteiros', icon: <MapPin size={20} />, href: '/sites' },
     { name: 'Pedidos', icon: <ShoppingCart size={20} />, href: '/orders' },
-    { name: 'Consulta CA', icon: <ShieldCheck size={20} />, href: '/ca-consulta' },
+    { name: 'mm / pol', icon: <Ruler size={20} />, href: '/conversor' },
     { name: 'Recebidos', icon: <ClipboardCheck size={20} />, href: '/received' },
     { name: 'Histórico', icon: <History size={20} />, href: '/history' },
     { name: 'Configurações', icon: <Settings size={20} />, href: '/settings' },

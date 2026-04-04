@@ -25,6 +25,8 @@ export type PurchaseOrderRow = {
   /** Legado + exibição em listas; preferir coluna do kanban quando existir. */
   stage: PurchaseStage | string;
   title: string | null;
+  /** Ordem de compra (4 dígitos), gerada pelo setor de compras. */
+  oc_number: string | null;
   kanban_column_id: string | null;
   notes: string | null;
   created_at: string;
@@ -43,7 +45,6 @@ export type PurchaseOrderItemRow = {
   quantity_received: number;
   received_at: string | null;
   notes: string | null;
-  ca_number: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -68,7 +69,6 @@ export type NewOrderForm = {
     unit: string;
     quantity_requested: number;
     notes: string;
-    ca_number: string;
   }>;
 };
 

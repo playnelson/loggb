@@ -7,6 +7,7 @@ import { FileUp, Loader2, Plus, X } from 'lucide-react';
 import type { EmployeeLite } from '@/lib/purchaseOrders';
 import { clampNumber } from '@/lib/purchaseOrders';
 import { ensureKanbanColumnsSeeded, type KanbanColumnRow } from '@/lib/kanbanColumns';
+import { formatProductLabelDisplay, normalizeProductLabelForSave } from '@/lib/productDisplayText';
 
 type ImportItem = {
   product_name: string;
@@ -133,7 +134,7 @@ export function PurchaseOrderImportModal({
       .slice(1)
       .filter((r) => (r[iName] ?? '').toString().trim())
       .map((r) => ({
-        product_name: String(r[iName] ?? '').trim(),
+        product_name: normalizeProductLabelForSave(String(r[iName] ?? '').trim()),
         quantity_requested: clampNumber(Number(r[iQty] ?? 1), 1, 1_000_000),
         unit: normalizeUnit(String(r[iUnit] ?? 'un')),
         product_url: String(r[iUrl] ?? '').trim(),
@@ -203,7 +204,7 @@ export function PurchaseOrderImportModal({
 
     const itemsPayload = items.map((it) => ({
       order_id: orderData.id,
-      product_name: it.product_name || null,
+      product_name: normalizeProductLabelForSave(it.product_name) || null,
       product_url: it.product_url || null,
       vendor: it.vendor || null,
       product_price: it.product_price || null,
@@ -327,7 +328,9 @@ export function PurchaseOrderImportModal({
                   {items.slice(0, 12).map((it, idx) => (
                     <div key={idx} className="flex items-center justify-between bg-slate-50 border border-slate-100 rounded-xl px-3 py-2 text-sm">
                       <div className="min-w-0">
-                        <div className="font-bold text-primary truncate">{it.product_name}</div>
+                        <div className="font-bold text-primary truncate">
+                          {formatProductLabelDisplay(it.product_name)}
+                        </div>
                         <div className="text-[10px] text-slate-400 font-bold truncate">
                           {it.vendor || '—'} {it.product_price ? `• ${it.product_price}` : ''} {it.product_url ? '• link' : ''}
                         </div>

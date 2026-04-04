@@ -5,6 +5,7 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
+import { formatProductLabelDisplay } from '@/lib/productDisplayText';
 import { ArrowLeft, Loader2, Search } from 'lucide-react';
 
 type ReceivedRow = {
@@ -254,7 +255,11 @@ export default function ReceivedReportPage() {
                       </td>
                       <td className="px-6 py-4">
                         <div className="font-bold text-primary text-sm">
-                          {r.product_name || <span className="text-slate-300 italic font-medium">Sem nome</span>}
+                          {r.product_name ? (
+                            formatProductLabelDisplay(r.product_name)
+                          ) : (
+                            <span className="text-slate-300 italic font-medium">Sem nome</span>
+                          )}
                         </div>
                         <div className="text-[10px] text-slate-400 font-bold">
                           {r.vendor || '—'} {r.product_price ? `• ${r.product_price}` : ''}
