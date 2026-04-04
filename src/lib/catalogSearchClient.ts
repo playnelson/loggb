@@ -1,5 +1,6 @@
-/** Autocomplete: somente Mercado Livre (Brasil / MLB) via `/api/ml-search`. */
-export type MlSearchHit = {
+/** Autocomplete CATMAT (GitHub) + SINAPI opcional via `/api/catalog-search`. */
+
+export type CatalogSearchHit = {
   id: string;
   title: string;
   subtitle: string | null;
@@ -9,11 +10,12 @@ export type MlSearchHit = {
   permalink: string | null;
   condition: string | null;
   seller_nickname: string | null;
+  source?: 'catmat' | 'sinapi_insumo' | 'sinapi_composicao';
 };
 
-export async function fetchMlSearchSuggestions(q: string): Promise<{
+export async function fetchCatalogSearchSuggestions(q: string): Promise<{
   ok: boolean;
-  results: MlSearchHit[];
+  results: CatalogSearchHit[];
   error?: string;
 }> {
   const trimmed = q.trim();
@@ -21,7 +23,7 @@ export async function fetchMlSearchSuggestions(q: string): Promise<{
     return { ok: true, results: [] };
   }
 
-  const res = await fetch(`/api/ml-search?q=${encodeURIComponent(trimmed)}&limit=5`, {
+  const res = await fetch(`/api/catalog-search?q=${encodeURIComponent(trimmed)}&limit=8`, {
     method: 'GET',
     headers: { Accept: 'application/json' },
   });
@@ -36,11 +38,11 @@ export async function fetchMlSearchSuggestions(q: string): Promise<{
     };
   }
 
-  const results = Array.isArray(obj.results) ? (obj.results as MlSearchHit[]) : [];
+  const results = Array.isArray(obj.results) ? (obj.results as CatalogSearchHit[]) : [];
   return { ok: true, results };
 }
 
-export function formatMlPrice(price: number | null, currencyId: string | null): string {
+export function formatCatalogPrice(price: number | null, currencyId: string | null): string {
   if (price == null || Number.isNaN(price)) return '';
   const cur = currencyId === 'BRL' || !currencyId ? 'BRL' : currencyId;
   try {

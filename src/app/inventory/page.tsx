@@ -13,7 +13,7 @@ import { recordMovement, updatePossessionQuantity, updateSitePossessionQuantity,
 import { fetchTenantItems, isLikelyMissingColumn } from '@/lib/tenantItems';
 import { fetchCaEpiByNumber } from '@/lib/caEpiClient';
 import { downloadInventoryImportTemplate } from '@/lib/inventoryImportTemplate';
-import { MlProductAutocomplete } from '@/components/MlProductAutocomplete';
+import { CatalogProductAutocomplete } from '@/components/CatalogProductAutocomplete';
 
 function possessionEmployeeName(
   employees: { full_name: string } | { full_name: string }[] | null | undefined
@@ -1347,7 +1347,7 @@ function InventoryContent() {
               </div>
 
               <div className="grid grid-cols-2 gap-4">
-                <MlProductAutocomplete
+                <CatalogProductAutocomplete
                   label="Descrição do Produto"
                   value={formData.description}
                   onChange={(v) => setFormData({ ...formData, description: v })}

@@ -2,7 +2,11 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Loader2, ExternalLink } from 'lucide-react';
-import { fetchMlSearchSuggestions, formatMlPrice, type MlSearchHit } from '@/lib/mlSearchClient';
+import {
+  fetchCatalogSearchSuggestions,
+  formatCatalogPrice,
+  type CatalogSearchHit,
+} from '@/lib/catalogSearchClient';
 
 function useDebounced<T>(value: T, ms: number): T {
   const [debounced, setDebounced] = useState(value);
@@ -13,12 +17,24 @@ function useDebounced<T>(value: T, ms: number): T {
   return debounced;
 }
 
-export function MlProductAutocomplete({
+function sourceLabel(hit: CatalogSearchHit): string {
+  switch (hit.source) {
+    case 'sinapi_insumo':
+      return 'SINAPI insumo';
+    case 'sinapi_composicao':
+      return 'SINAPI composição';
+    case 'catmat':
+    default:
+      return 'CATMAT';
+  }
+}
+
+export function CatalogProductAutocomplete({
   label,
   value,
   onChange,
   required,
-  placeholder = 'Digite para buscar no Mercado Livre…',
+  placeholder = 'Buscar em CATMAT / SINAPI…',
 }: {
   label: string;
   value: string;
@@ -31,7 +47,7 @@ export function MlProductAutocomplete({
   const menuRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [results, setResults] = useState<MlSearchHit[]>([]);
+  const [results, setResults] = useState<CatalogSearchHit[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [highlight, setHighlight] = useState(0);
   const [menuStyle, setMenuStyle] = useState<{ top: number; left: number; width: number } | null>(null);
@@ -83,7 +99,7 @@ export function MlProductAutocomplete({
     setError(null);
 
     void (async () => {
-      const res = await fetchMlSearchSuggestions(q);
+      const res = await fetchCatalogSearchSuggestions(q);
       if (cancelled) return;
       setLoading(false);
       if (!res.ok) {
@@ -107,7 +123,7 @@ export function MlProductAutocomplete({
   }, [debouncedQuery, updateMenuPosition]);
 
   const pick = useCallback(
-    (hit: MlSearchHit) => {
+    (hit: CatalogSearchHit) => {
       onChange(hit.title);
       setOpen(false);
       setResults([]);
@@ -173,8 +189,25 @@ export function MlProductAutocomplete({
         )}
       </div>
       <p className="text-[10px] text-slate-400 leading-relaxed">
-        Somente Mercado Livre (Brasil): sugestões são títulos de anúncios públicos. Selecione um para copiar o texto na
-        descrição do item.
+        Dados do catálogo CATMAT (
+        <a
+          href="https://github.com/ant-rod-silva/catmat_compras_gov"
+          target="_blank"
+          rel="noreferrer"
+          className="text-amber-800 font-bold hover:underline"
+        >
+          ant-rod-silva/catmat_compras_gov
+        </a>
+        ) e, se configurado, da sua API{' '}
+        <a
+          href="https://github.com/LAMP-LUCAS/autoSINAPI_API"
+          target="_blank"
+          rel="noreferrer"
+          className="text-amber-800 font-bold hover:underline"
+        >
+          autoSINAPI
+        </a>{' '}
+        (SINAPI). Escolha uma sugestão para copiar a descrição.
       </p>
       {error && <p className="text-xs text-amber-700 font-bold">{error}</p>}
 
@@ -203,18 +236,9 @@ export function MlProductAutocomplete({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => pick(hit)}
             >
-              {hit.thumbnail ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={hit.thumbnail}
-                  alt=""
-                  className="h-14 w-14 shrink-0 rounded-lg object-cover bg-slate-100"
-                  width={56}
-                  height={56}
-                />
-              ) : (
-                <div className="h-14 w-14 shrink-0 rounded-lg bg-slate-100" />
-              )}
+              <div className="h-14 w-14 shrink-0 rounded-lg bg-slate-100 flex items-center justify-center text-[10px] font-black text-slate-500 text-center leading-tight px-1">
+                {sourceLabel(hit)}
+              </div>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-bold text-primary leading-snug line-clamp-2">{hit.title}</p>
                 {hit.subtitle ? (
@@ -223,7 +247,7 @@ export function MlProductAutocomplete({
                 <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-500">
                   {hit.price != null && (
                     <span className="font-black text-amber-800">
-                      {formatMlPrice(hit.price, hit.currency_id)}
+                      {formatCatalogPrice(hit.price, hit.currency_id)}
                     </span>
                   )}
                   {hit.condition && <span className="uppercase">{hit.condition}</span>}
@@ -237,7 +261,7 @@ export function MlProductAutocomplete({
                     className="mt-1 inline-flex items-center gap-0.5 text-[10px] font-bold text-secondary hover:underline"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    Ver no ML <ExternalLink size={10} />
+                    Abrir link <ExternalLink size={10} />
                   </a>
                 )}
               </div>
