@@ -16,6 +16,7 @@ import {
   resolveColumnIdForOrder,
   type KanbanColumnRow,
 } from '@/lib/kanbanColumns';
+import { fetchPurchaseOrdersForUser, fetchPurchaseOrderItemsForOrderIds } from '@/lib/purchaseOrderQueries';
 
 function OrdersContent() {
   const searchParams = useSearchParams();
@@ -49,11 +50,11 @@ function OrdersContent() {
     const seeded = await ensureKanbanColumnsSeeded(supabase, user.id);
     setColumns(seeded.columns);
 
-    const { data: orderData, error: orderError } = await supabase
-      .from('purchase_orders')
-      .select('id, requester_employee_id, stage, title, kanban_column_id, notes, created_at, updated_at')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false });
+    const { rows: orderList, error: orderError } = await fetchPurchaseOrdersForUser(
+      supabase,
+      user.id,
+      false
+    );
 
     if (orderError) {
       console.error('Error fetching purchase orders:', orderError);
@@ -64,54 +65,17 @@ function OrdersContent() {
       return;
     }
 
-    const orderList: PurchaseOrderRow[] = (orderData || []).map((r: unknown) => {
-      const row = r as Record<string, unknown>;
-      return {
-        id: String(row.id),
-        requester_employee_id: String(row.requester_employee_id),
-        stage: String(row.stage ?? ''),
-        title: (row.title as string) ?? null,
-        kanban_column_id: row.kanban_column_id ? String(row.kanban_column_id) : null,
-        notes: (row.notes as string) ?? null,
-        created_at: String(row.created_at),
-        updated_at: String(row.updated_at),
-      };
-    });
     setOrders(orderList);
 
     const ids = orderList.map((o) => o.id);
     if (ids.length === 0) {
       setItems([]);
     } else {
-      const { data: itemData, error: itemError } = await supabase
-        .from('purchase_order_items')
-        .select(
-          'id, order_id, product_name, product_url, vendor, product_price, unit, quantity_requested, quantity_received, received_at, notes, ca_number, created_at, updated_at'
-        )
-        .in('order_id', ids);
+      const { items: itemList, error: itemError } = await fetchPurchaseOrderItemsForOrderIds(supabase, ids);
       if (itemError) {
         console.error('Error fetching order items:', itemError);
         setItems([]);
       } else {
-        const itemList: PurchaseOrderItemRow[] = (itemData || []).map((r: unknown) => {
-          const row = r as Record<string, unknown>;
-          return {
-            id: String(row.id),
-            order_id: String(row.order_id),
-            product_name: (row.product_name as string) ?? null,
-            product_url: (row.product_url as string) ?? null,
-            vendor: (row.vendor as string) ?? null,
-            product_price: (row.product_price as string) ?? null,
-            unit: String(row.unit ?? 'un'),
-            quantity_requested: Number(row.quantity_requested ?? 0),
-            quantity_received: Number(row.quantity_received ?? 0),
-            received_at: (row.received_at as string) ?? null,
-            notes: (row.notes as string) ?? null,
-            ca_number: row.ca_number != null ? String(row.ca_number) : null,
-            created_at: String(row.created_at),
-            updated_at: String(row.updated_at),
-          };
-        });
         setItems(itemList);
       }
     }

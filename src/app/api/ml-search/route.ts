@@ -3,6 +3,8 @@
  * Documentação: https://developers.mercadolivre.com.br/pt_br/api-docs-pt-br/busca-de-produtos
  */
 
+import { getMercadoLibreBearer } from '@/lib/mercadolibreAccessToken';
+
 const ML_API = 'https://api.mercadolibre.com';
 
 function normalizeThumb(url: string | null | undefined): string | null {
@@ -43,12 +45,13 @@ export async function GET(req: Request) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), 12_000);
 
+  const { token: bearer, oauthError } = await getMercadoLibreBearer();
+
   const headers: Record<string, string> = {
     Accept: 'application/json',
     'User-Agent':
       'Mozilla/5.0 (compatible; LoggB/1.0; +https://developers.mercadolivre.com.br) AppleWebKit/537.36',
   };
-  const bearer = process.env.MERCADOLIBRE_ACCESS_TOKEN?.trim();
   if (bearer) {
     headers.Authorization = `Bearer ${bearer}`;
   }
@@ -62,10 +65,13 @@ export async function GET(req: Request) {
     });
 
     if (!res.ok) {
-      const errMsg =
+      let errMsg =
         res.status === 403
-          ? 'Mercado Livre recusou a busca (403). Em alguns servidores é necessário definir MERCADOLIBRE_ACCESS_TOKEN (token de app em developers.mercadolivre.com.br).'
+          ? 'Mercado Livre recusou a busca (403). Configure MERCADOLIBRE_CLIENT_ID e MERCADOLIBRE_CLIENT_SECRET no .env.local (ou MERCADOLIBRE_ACCESS_TOKEN).'
           : `Mercado Livre retornou ${res.status}.`;
+      if (oauthError && !bearer) {
+        errMsg += ` OAuth: ${oauthError}`;
+      }
       return Response.json({ error: errMsg, results: [] }, { status: 502 });
     }
 

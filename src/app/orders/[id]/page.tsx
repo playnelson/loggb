@@ -15,6 +15,7 @@ import {
   resolveColumnIdForOrder,
   type KanbanColumnRow,
 } from '@/lib/kanbanColumns';
+import { fetchPurchaseOrderById, fetchPurchaseOrderItemsForOrderIdOrdered } from '@/lib/purchaseOrderQueries';
 import { fetchCaEpiByNumber } from '@/lib/caEpiClient';
 
 function OrderDetailContent() {
@@ -51,18 +52,14 @@ function OrderDetailContent() {
     const seeded = await ensureKanbanColumnsSeeded(supabase, user.id);
     setColumns(seeded.columns);
 
-    const { data: o, error: oErr } = await supabase
-      .from('purchase_orders')
-      .select('id, user_id, requester_employee_id, stage, title, kanban_column_id, notes, created_at, updated_at')
-      .eq('id', orderId)
-      .single();
+    const { row: o, error: oErr } = await fetchPurchaseOrderById(supabase, orderId);
     if (oErr || !o) {
       alert(`Pedido não encontrado: ${oErr?.message || 'erro'}`);
       setLoading(false);
       return;
     }
 
-    const oRow = o as Record<string, unknown>;
+    const oRow = o;
     if (String(oRow.user_id ?? '') !== user.id) {
       alert('Pedido não encontrado ou não pertence à sua conta.');
       router.push('/orders');
@@ -80,35 +77,14 @@ function OrderDetailContent() {
       updated_at: String(oRow.updated_at),
     };
 
-    const { data: it, error: itErr } = await supabase
-      .from('purchase_order_items')
-      .select(
-        'id, order_id, product_name, product_url, vendor, product_price, unit, quantity_requested, quantity_received, received_at, notes, ca_number, created_at, updated_at'
-      )
-      .eq('order_id', orderId)
-      .order('created_at', { ascending: true });
+    const { items: itemList, error: itErr } = await fetchPurchaseOrderItemsForOrderIdOrdered(
+      supabase,
+      orderId,
+      true
+    );
     if (itErr) {
       console.error('Error fetching order items:', itErr);
     }
-    const itemList: PurchaseOrderItemRow[] = (it || []).map((r: unknown) => {
-      const row = r as Record<string, unknown>;
-      return {
-        id: String(row.id),
-        order_id: String(row.order_id),
-        product_name: (row.product_name as string) ?? null,
-        product_url: (row.product_url as string) ?? null,
-        vendor: (row.vendor as string) ?? null,
-        product_price: (row.product_price as string) ?? null,
-        unit: String(row.unit ?? 'un'),
-        quantity_requested: Number(row.quantity_requested ?? 0),
-        quantity_received: Number(row.quantity_received ?? 0),
-        received_at: (row.received_at as string) ?? null,
-        notes: (row.notes as string) ?? null,
-        ca_number: row.ca_number != null ? String(row.ca_number) : null,
-        created_at: String(row.created_at),
-        updated_at: String(row.updated_at),
-      };
-    });
 
     const { data: empData } = await supabase
       .from('employees')
