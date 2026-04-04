@@ -36,6 +36,8 @@ export async function getMercadoLibreBearer(): Promise<{ token: string | null; o
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
       },
       body: body.toString(),
       cache: 'no-store',
@@ -44,12 +46,15 @@ export async function getMercadoLibreBearer(): Promise<{ token: string | null; o
     const json = (await res.json()) as Record<string, unknown>;
 
     if (!res.ok) {
+      const desc =
+        typeof json.error_description === 'string' ? json.error_description : null;
       const msg =
-        typeof json.message === 'string'
+        desc ||
+        (typeof json.message === 'string'
           ? json.message
           : typeof json.error === 'string'
             ? json.error
-            : `HTTP ${res.status}`;
+            : `HTTP ${res.status}`);
       return { token: null, oauthError: msg };
     }
 

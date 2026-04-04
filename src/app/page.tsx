@@ -17,19 +17,34 @@ import {
 } from '@/lib/kanbanColumns';
 import { fetchPurchaseOrdersForUser, fetchPurchaseOrderItemsForOrderIds } from '@/lib/purchaseOrderQueries';
 
-const POSTIT_THEMES = [
-  { card: 'bg-[#fff8b0] border-[#e6d25c] shadow-[4px_4px_0_0_rgba(15,23,42,0.07)]', text: 'text-amber-950' },
-  { card: 'bg-[#ffd4e5] border-[#f0a4c3] shadow-[4px_4px_0_0_rgba(15,23,42,0.07)]', text: 'text-rose-950' },
-  { card: 'bg-[#c8f5e3] border-[#7dd3b0] shadow-[4px_4px_0_0_rgba(15,23,42,0.07)]', text: 'text-emerald-950' },
-  { card: 'bg-[#cfe5ff] border-[#8bbef0] shadow-[4px_4px_0_0_rgba(15,23,42,0.07)]', text: 'text-sky-950' },
-  { card: 'bg-[#e8d9ff] border-[#c4a8f5] shadow-[4px_4px_0_0_rgba(15,23,42,0.07)]', text: 'text-violet-950' },
-  { card: 'bg-[#ffe0c2] border-[#f5bf8a] shadow-[4px_4px_0_0_rgba(15,23,42,0.07)]', text: 'text-orange-950' },
-] as const;
+/** Pedido com linhas de item — sempre amarelo post-it. */
+const POSTIT_PEDIDO = {
+  card: 'bg-[#fff8b0] border-[#e6d25c] shadow-[4px_4px_0_0_rgba(15,23,42,0.07)]',
+  text: 'text-amber-950',
+} as const;
 
-function postitThemeForOrderId(id: string) {
-  let h = 0;
-  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
-  return POSTIT_THEMES[h % POSTIT_THEMES.length]!;
+/** Tarefa sem itens (ex.: tarefa rápida) — verde-água. */
+const POSTIT_TAREFA = {
+  card: 'bg-[#d6f5ef] border-[#5ec4b0] shadow-[4px_4px_0_0_rgba(15,23,42,0.07)]',
+  text: 'text-teal-950',
+} as const;
+
+/** Cartões na coluna Cancelado (slug ou título) — salmão. */
+const POSTIT_CANCELADO = {
+  card: 'bg-[#fde8e8] border-[#e8a0a0] shadow-[4px_4px_0_0_rgba(15,23,42,0.07)]',
+  text: 'text-red-950',
+} as const;
+
+function isCancelColumn(col: KanbanColumnRow): boolean {
+  const s = col.slug.toLowerCase();
+  const t = col.title.trim().toLowerCase();
+  return s === 'cancelado' || s.includes('cancel') || t.includes('cancel');
+}
+
+function postitThemeForCard(col: KanbanColumnRow, itemCount: number) {
+  if (isCancelColumn(col)) return POSTIT_CANCELADO;
+  if (itemCount > 0) return POSTIT_PEDIDO;
+  return POSTIT_TAREFA;
 }
 
 export default function Home() {
@@ -335,8 +350,13 @@ export default function Home() {
           <div className="text-xs font-bold text-slate-500 uppercase tracking-wider">
             {loading ? 'Carregando…' : `${filtered.length} no quadro`}
           </div>
-          <div className="text-[10px] text-slate-400 font-bold">
-            Arraste entre colunas · edição de pedido na aba Pedidos · colunas em &quot;Editar quadro&quot;
+          <div className="text-[10px] text-slate-500 font-bold text-right max-w-xl leading-relaxed">
+            <span className="inline-block w-2 h-2 rounded-sm bg-[#fff8b0] border border-[#e6d25c] align-middle mr-1" />{' '}
+            Amarelo = pedido com itens ·{' '}
+            <span className="inline-block w-2 h-2 rounded-sm bg-[#d6f5ef] border border-[#5ec4b0] align-middle mx-0.5" />{' '}
+            Verde-água = tarefa ·{' '}
+            <span className="inline-block w-2 h-2 rounded-sm bg-[#fde8e8] border border-[#e8a0a0] align-middle mx-0.5" />{' '}
+            Salmão = coluna cancelado · Arraste entre colunas · Editar em Pedidos
           </div>
         </div>
 
@@ -413,7 +433,7 @@ export default function Home() {
                           lineTitle ||
                           (itemCount ? `Pedido (${itemCount} itens)` : 'Tarefa');
                         const requesterName = employeeNameById.get(o.requester_employee_id) || '—';
-                        const theme = postitThemeForOrderId(o.id);
+                        const theme = postitThemeForCard(col, itemCount);
                         return (
                           <div
                             key={o.id}

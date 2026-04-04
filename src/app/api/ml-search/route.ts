@@ -1,11 +1,16 @@
 /**
  * Proxy de busca pública no Mercado Livre (site MLB por padrão).
- * Documentação: https://developers.mercadolivre.com.br/pt_br/api-docs-pt-br/busca-de-produtos
+ * A busca por `q=` é recurso público; OAuth é opcional. Enviar Bearer de
+ * client_credentials primeiro costuma gerar 403 em alguns casos; datacenters
+ * também filtram User-Agent “bot”. Por isso: tentar sem auth + UA de navegador,
+ * depois com token se necessário.
  */
 
 import { getMercadoLibreBearer } from '@/lib/mercadolibreAccessToken';
 
 const ML_API = 'https://api.mercadolibre.com';
+
+export const dynamic = 'force-dynamic';
 
 function normalizeThumb(url: string | null | undefined): string | null {
   if (!url || typeof url !== 'string') return null;
@@ -49,8 +54,9 @@ export async function GET(req: Request) {
 
   const baseHeaders: Record<string, string> = {
     Accept: 'application/json',
+    'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
     'User-Agent':
-      'Mozilla/5.0 (compatible; LoggB/1.0; +https://developers.mercadolivre.com.br) AppleWebKit/537.36',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
   };
 
   const fetchMl = (authToken: string | null) => {
@@ -65,18 +71,32 @@ export async function GET(req: Request) {
   };
 
   try {
-    let res = await fetchMl(bearer);
-    if (res.status === 403 && bearer) {
+    let res: Response;
+    if (bearer) {
+      // Com credenciais: muitos IPs de datacenter só aceitam a busca com Bearer válido.
+      res = await fetchMl(bearer);
+      if (!res.ok && (res.status === 403 || res.status === 401)) {
+        res = await fetchMl(null);
+      }
+    } else {
+      // Sem token: endpoint público (quando o ML não bloqueia o IP).
       res = await fetchMl(null);
     }
 
     if (!res.ok) {
       let errMsg =
         res.status === 403
-          ? 'Mercado Livre recusou a busca (403). Em produção (Vercel etc.), defina MERCADOLIBRE_CLIENT_ID e MERCADOLIBRE_CLIENT_SECRET nas variáveis de ambiente, ou MERCADOLIBRE_ACCESS_TOKEN. Localmente use .env.local e reinicie o servidor.'
+          ? 'Mercado Livre recusou a busca (403). Confira se fez redeploy no Vercel após definir MERCADOLIBRE_CLIENT_ID e MERCADOLIBRE_CLIENT_SECRET (ou MERCADOLIBRE_ACCESS_TOKEN). Credenciais no painel de desenvolvedores do Mercado Livre.'
           : `Mercado Livre retornou ${res.status}.`;
-      if (oauthError && !bearer) {
+      if (oauthError) {
         errMsg += ` OAuth: ${oauthError}`;
+      } else if (!bearer && !process.env.MERCADOLIBRE_ACCESS_TOKEN?.trim()) {
+        const hasId = Boolean(process.env.MERCADOLIBRE_CLIENT_ID?.trim());
+        const hasSecret = Boolean(process.env.MERCADOLIBRE_CLIENT_SECRET?.trim());
+        if (!hasId || !hasSecret) {
+          errMsg +=
+            ' Não há token: faltam MERCADOLIBRE_CLIENT_ID / MERCADOLIBRE_CLIENT_SECRET no ambiente em runtime (redeploy após salvar no Vercel).';
+        }
       }
       return Response.json({ error: errMsg, results: [] }, { status: 502 });
     }
