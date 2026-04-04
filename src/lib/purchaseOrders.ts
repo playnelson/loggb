@@ -36,6 +36,8 @@ export type PurchaseOrderRow = {
 export type PurchaseOrderItemRow = {
   id: string;
   order_id: string;
+  /** Item em `items` criado/vinculado ao cadastrar a linha no pedido. */
+  inventory_item_id: string | null;
   product_name: string | null;
   product_url: string | null;
   vendor: string | null;

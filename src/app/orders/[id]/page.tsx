@@ -18,6 +18,7 @@ import {
 import { fetchPurchaseOrderById, fetchPurchaseOrderItemsForOrderIdOrdered } from '@/lib/purchaseOrderQueries';
 import { formatOcForDisplay, normalizeOcNumberInput } from '@/lib/purchaseOrderOc';
 import { normalizeProductLabelForSave } from '@/lib/productDisplayText';
+import { syncPoLineToInventory } from '@/lib/poLineInventorySync';
 
 function OrderDetailContent() {
   const params = useParams<{ id: string }>();
@@ -168,16 +169,27 @@ function OrderDetailContent() {
 
   const addItem = async () => {
     if (!orderId) return;
-    const { error } = await supabase.from('purchase_order_items').insert([
-      {
-        order_id: orderId,
-        unit: 'un',
-        quantity_requested: 1,
-        quantity_received: 0,
-      },
-    ]);
+    const { data: row, error } = await supabase
+      .from('purchase_order_items')
+      .insert([
+        {
+          order_id: orderId,
+          unit: 'un',
+          quantity_requested: 1,
+          quantity_received: 0,
+        },
+      ])
+      .select('id, product_name, unit')
+      .single();
     if (error) alert(`Erro ao adicionar item: ${error.message}`);
-    else await fetchAll();
+    else {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user && row) {
+        const sync = await syncPoLineToInventory(supabase, user.id, row.id, row.product_name, row.unit);
+        if (!sync.ok) console.error('syncPoLineToInventory', sync.error);
+      }
+      await fetchAll();
+    }
   };
 
   const deleteItem = async (id: string) => {
@@ -228,6 +240,19 @@ function OrderDetailContent() {
     if (error) {
       alert(`Erro ao salvar item: ${error.message}`);
       await fetchAll();
+    } else if (normalizedPatch.product_name !== undefined || normalizedPatch.unit !== undefined) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: row } = await supabase
+          .from('purchase_order_items')
+          .select('product_name, unit')
+          .eq('id', id)
+          .single();
+        if (row) {
+          const sync = await syncPoLineToInventory(supabase, user.id, id, row.product_name, row.unit);
+          if (!sync.ok) console.error('syncPoLineToInventory', sync.error);
+        }
+      }
     }
   };
 

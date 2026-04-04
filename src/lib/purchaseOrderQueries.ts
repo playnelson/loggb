@@ -24,8 +24,9 @@ const PO_DETAIL_WITH_KANBAN =
 const PO_DETAIL_FULL = `${PO_DETAIL_WITH_KANBAN.replace(/updated_at$/, 'oc_number, updated_at')}`;
 const PO_DETAIL_LEGACY = 'id, user_id, requester_employee_id, stage, notes, created_at, updated_at';
 
-const ITEMS_FULL =
+const ITEMS_WITHOUT_INVENTORY_LINK =
   'id, order_id, product_name, product_url, vendor, product_price, unit, quantity_requested, quantity_received, received_at, notes, created_at, updated_at';
+const ITEMS_FULL = `${ITEMS_WITHOUT_INVENTORY_LINK.replace(/updated_at$/, 'inventory_item_id, updated_at')}`;
 
 function mapOrderRow(r: Record<string, unknown>): PurchaseOrderRow {
   return {
@@ -45,6 +46,7 @@ function mapItemRow(r: Record<string, unknown>): PurchaseOrderItemRow {
   return {
     id: String(r.id),
     order_id: String(r.order_id),
+    inventory_item_id: r.inventory_item_id ? String(r.inventory_item_id) : null,
     product_name: (r.product_name as string) ?? null,
     product_url: (r.product_url as string) ?? null,
     vendor: (r.vendor as string) ?? null,
@@ -128,10 +130,21 @@ export async function fetchPurchaseOrderItemsForOrderIds(
   orderIds: string[]
 ): Promise<{ items: PurchaseOrderItemRow[]; error: { message: string } | null }> {
   if (orderIds.length === 0) return { items: [], error: null };
-  const { data, error } = await supabase.from('purchase_order_items').select(ITEMS_FULL).in('order_id', orderIds);
-  if (error) return { items: [], error: { message: error.message } };
+  const first = await supabase.from('purchase_order_items').select(ITEMS_FULL).in('order_id', orderIds);
+  if (first.error && isMissingColumnError(first.error)) {
+    const second = await supabase
+      .from('purchase_order_items')
+      .select(ITEMS_WITHOUT_INVENTORY_LINK)
+      .in('order_id', orderIds);
+    if (second.error) return { items: [], error: { message: second.error.message } };
+    return {
+      items: (second.data || []).map((r: unknown) => mapItemRow(r as Record<string, unknown>)),
+      error: null,
+    };
+  }
+  if (first.error) return { items: [], error: { message: first.error.message } };
   return {
-    items: (data || []).map((r: unknown) => mapItemRow(r as Record<string, unknown>)),
+    items: (first.data || []).map((r: unknown) => mapItemRow(r as Record<string, unknown>)),
     error: null,
   };
 }
@@ -141,14 +154,26 @@ export async function fetchPurchaseOrderItemsForOrderIdOrdered(
   orderId: string,
   ascending: boolean
 ): Promise<{ items: PurchaseOrderItemRow[]; error: { message: string } | null }> {
-  const { data, error } = await supabase
+  const first = await supabase
     .from('purchase_order_items')
     .select(ITEMS_FULL)
     .eq('order_id', orderId)
     .order('created_at', { ascending });
-  if (error) return { items: [], error: { message: error.message } };
+  if (first.error && isMissingColumnError(first.error)) {
+    const second = await supabase
+      .from('purchase_order_items')
+      .select(ITEMS_WITHOUT_INVENTORY_LINK)
+      .eq('order_id', orderId)
+      .order('created_at', { ascending });
+    if (second.error) return { items: [], error: { message: second.error.message } };
+    return {
+      items: (second.data || []).map((r: unknown) => mapItemRow(r as Record<string, unknown>)),
+      error: null,
+    };
+  }
+  if (first.error) return { items: [], error: { message: first.error.message } };
   return {
-    items: (data || []).map((r: unknown) => mapItemRow(r as Record<string, unknown>)),
+    items: (first.data || []).map((r: unknown) => mapItemRow(r as Record<string, unknown>)),
     error: null,
   };
 }

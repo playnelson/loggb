@@ -8,6 +8,7 @@ import type { EmployeeLite } from '@/lib/purchaseOrders';
 import { clampNumber } from '@/lib/purchaseOrders';
 import { ensureKanbanColumnsSeeded, type KanbanColumnRow } from '@/lib/kanbanColumns';
 import { formatProductLabelDisplay, normalizeProductLabelForSave } from '@/lib/productDisplayText';
+import { syncPoLinesToInventoryAfterInsert } from '@/lib/poLineInventorySync';
 
 type ImportItem = {
   product_name: string;
@@ -214,13 +215,26 @@ export function PurchaseOrderImportModal({
       notes: it.notes || null,
     }));
 
-    const { error: itemsError } = await supabase.from('purchase_order_items').insert(itemsPayload);
+    const { data: insertedLines, error: itemsError } = await supabase
+      .from('purchase_order_items')
+      .insert(itemsPayload)
+      .select('id, product_name, unit');
     if (itemsError) {
       await supabase.from('purchase_orders').delete().eq('id', orderData.id);
       setError(itemsError.message);
       setIsSubmitting(false);
       return;
     }
+
+    await syncPoLinesToInventoryAfterInsert(
+      supabase,
+      user.id,
+      (insertedLines || []).map((r: { id: string; product_name: string | null; unit: string | null }) => ({
+        id: r.id,
+        product_name: r.product_name,
+        unit: r.unit ?? 'un',
+      }))
+    );
 
     onClose();
     onSaved();

@@ -7,6 +7,7 @@ import { Loader2, Plus, Trash2, Wand2, X } from 'lucide-react';
 import type { EmployeeLite, NewOrderForm } from '@/lib/purchaseOrders';
 import { clampNumber } from '@/lib/purchaseOrders';
 import { ensureKanbanColumnsSeeded, type KanbanColumnRow } from '@/lib/kanbanColumns';
+import { syncPoLinesToInventoryAfterInsert } from '@/lib/poLineInventorySync';
 
 function emptyItem() {
   return {
@@ -181,13 +182,26 @@ export function PurchaseOrderFormModal({
       notes: it.notes.trim() || null,
     }));
 
-    const { error: itemsError } = await supabase.from('purchase_order_items').insert(itemsPayload);
+    const { data: insertedLines, error: itemsError } = await supabase
+      .from('purchase_order_items')
+      .insert(itemsPayload)
+      .select('id, product_name, unit');
     if (itemsError) {
       await supabase.from('purchase_orders').delete().eq('id', orderData.id);
       alert(`Erro ao adicionar itens: ${itemsError.message}`);
       setIsSubmitting(false);
       return;
     }
+
+    await syncPoLinesToInventoryAfterInsert(
+      supabase,
+      user.id,
+      (insertedLines || []).map((r: { id: string; product_name: string | null; unit: string | null }) => ({
+        id: r.id,
+        product_name: r.product_name,
+        unit: r.unit ?? 'un',
+      }))
+    );
 
     onClose();
     onSaved();
