@@ -9,35 +9,54 @@ type SupabaseClient = ReturnType<typeof createBrowserClient>;
 const PENDING_CATEGORY = 'A receber';
 const PENDING_LOCATION = 'Pedido';
 
+type SyncInput = {
+  inventoryItemId: string | null | undefined;
+  productNameRaw: string | null | undefined;
+  unitRaw: string | null | undefined;
+  quantityRequested: number;
+};
+
 /**
- * Garante um registro em `items` (saldo 0) para a linha do pedido e grava `inventory_item_id`.
- * Sem nome de produto, remove o vínculo. Idempotente por descrição normalizada + user_id.
+ * Ação manual por item do pedido:
+ * - sem vínculo: cria (ou reaproveita) item em `items` e vincula em `inventory_item_id`;
+ * - com vínculo: atualiza nome/unidade/estoque do item já vinculado.
  */
-export async function syncPoLineToInventory(
+export async function syncPoLineToInventoryManual(
   supabase: SupabaseClient,
   userId: string,
   poLineId: string,
-  productNameRaw: string | null | undefined,
-  unitRaw: string | null | undefined
+  input: SyncInput
 ): Promise<{ ok: boolean; error: string | null }> {
-  const desc = normalizeProductLabelForSave(String(productNameRaw ?? ''));
-  const unit = String(unitRaw ?? 'un').trim().slice(0, 10) || 'un';
+  const desc = normalizeProductLabelForSave(String(input.productNameRaw ?? ''));
+  const unit = String(input.unitRaw ?? 'un').trim().slice(0, 10) || 'un';
+  const qty = Number.isFinite(input.quantityRequested) ? Math.max(0, Math.floor(input.quantityRequested)) : 0;
+  if (!desc) {
+    return { ok: false, error: 'Informe o nome do produto antes de enviar ao almoxarifado.' };
+  }
 
-  const clearLink = async (): Promise<{ ok: boolean; error: string | null }> => {
-    const { error } = await supabase
-      .from('purchase_order_items')
-      .update({ inventory_item_id: null, updated_at: new Date().toISOString() })
-      .eq('id', poLineId);
-    if (error && isMissingColumnError(error)) return { ok: true, error: null };
-    if (error) return { ok: false, error: error.message };
+  const touchLinkedItem = async (itemId: string): Promise<{ ok: boolean; error: string | null }> => {
+    let patch: Record<string, unknown> = {
+      description: desc,
+      unit,
+      quantity_current: qty,
+      updated_at: new Date().toISOString(),
+      tag: null,
+    };
+    let up = await supabase.from('items').update(patch).eq('id', itemId).eq('user_id', userId);
+    if (up.error?.message && isLikelyMissingColumn(up.error.message, 'tag')) {
+      const { tag: _t, ...noTag } = patch;
+      patch = noTag;
+      up = await supabase.from('items').update(patch).eq('id', itemId).eq('user_id', userId);
+    }
+    if (up.error) return { ok: false, error: up.error.message };
     return { ok: true, error: null };
   };
 
-  if (!desc) {
-    return clearLink();
+  if (input.inventoryItemId) {
+    return touchLinkedItem(String(input.inventoryItemId));
   }
 
-  const { data: existing, error: findErr } = await supabase
+  const { data: existingByName, error: findErr } = await supabase
     .from('items')
     .select('id')
     .eq('user_id', userId)
@@ -47,8 +66,10 @@ export async function syncPoLineToInventory(
   if (findErr) return { ok: false, error: findErr.message };
 
   let itemId: string;
-  if (existing?.id) {
-    itemId = String(existing.id);
+  if (existingByName?.id) {
+    itemId = String(existingByName.id);
+    const touch = await touchLinkedItem(itemId);
+    if (!touch.ok) return touch;
   } else {
     const baseRow: Record<string, unknown> = {
       description: desc,
@@ -56,7 +77,7 @@ export async function syncPoLineToInventory(
       location: PENDING_LOCATION,
       consumable: false,
       unique_item: false,
-      quantity_current: 0,
+      quantity_current: qty,
       quantity_min: 0,
       unit,
       code: itemCodeFromDescription(desc),
@@ -85,16 +106,4 @@ export async function syncPoLineToInventory(
   }
   if (linkErr) return { ok: false, error: linkErr.message };
   return { ok: true, error: null };
-}
-
-/** Após inserir várias linhas, sincroniza cada uma (fire-and-forget com log). */
-export async function syncPoLinesToInventoryAfterInsert(
-  supabase: SupabaseClient,
-  userId: string,
-  rows: Array<{ id: string; product_name: string | null; unit: string | null | undefined }>
-): Promise<void> {
-  for (const r of rows) {
-    const res = await syncPoLineToInventory(supabase, userId, r.id, r.product_name, r.unit);
-    if (!res.ok) console.error('syncPoLineToInventory', r.id, res.error);
-  }
 }

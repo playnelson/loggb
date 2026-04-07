@@ -18,7 +18,7 @@ import {
 import { fetchPurchaseOrderById, fetchPurchaseOrderItemsForOrderIdOrdered } from '@/lib/purchaseOrderQueries';
 import { formatOcForDisplay, normalizeOcNumberInput } from '@/lib/purchaseOrderOc';
 import { normalizeProductLabelForSave } from '@/lib/productDisplayText';
-import { syncPoLineToInventory } from '@/lib/poLineInventorySync';
+import { syncPoLineToInventoryManual } from '@/lib/poLineInventorySync';
 
 function OrderDetailContent() {
   const params = useParams<{ id: string }>();
@@ -28,6 +28,8 @@ function OrderDetailContent() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [linkLoadingIdx, setLinkLoadingIdx] = useState<number | null>(null);
+  const [syncingItemId, setSyncingItemId] = useState<string | null>(null);
+  const [needsAlmoxUpdate, setNeedsAlmoxUpdate] = useState<Record<string, boolean>>({});
 
   const [items, setItems] = useState<PurchaseOrderItemRow[]>([]);
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
@@ -105,6 +107,7 @@ function OrderDetailContent() {
     });
     setEmployees(empList);
     setItems(itemList);
+    setNeedsAlmoxUpdate({});
     setOrder(row);
     const cid = resolveColumnIdForOrder(row, seeded.columns);
     setOrderColumnId(cid || seeded.columns[0]?.id || '');
@@ -169,7 +172,7 @@ function OrderDetailContent() {
 
   const addItem = async () => {
     if (!orderId) return;
-    const { data: row, error } = await supabase
+    const { error } = await supabase
       .from('purchase_order_items')
       .insert([
         {
@@ -179,17 +182,9 @@ function OrderDetailContent() {
           quantity_received: 0,
         },
       ])
-      .select('id, product_name, unit')
-      .single();
+      ;
     if (error) alert(`Erro ao adicionar item: ${error.message}`);
-    else {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user && row) {
-        const sync = await syncPoLineToInventory(supabase, user.id, row.id, row.product_name, row.unit);
-        if (!sync.ok) console.error('syncPoLineToInventory', sync.error);
-      }
-      await fetchAll();
-    }
+    else await fetchAll();
   };
 
   const deleteItem = async (id: string) => {
@@ -240,20 +235,32 @@ function OrderDetailContent() {
     if (error) {
       alert(`Erro ao salvar item: ${error.message}`);
       await fetchAll();
-    } else if (normalizedPatch.product_name !== undefined || normalizedPatch.unit !== undefined) {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const { data: row } = await supabase
-          .from('purchase_order_items')
-          .select('product_name, unit')
-          .eq('id', id)
-          .single();
-        if (row) {
-          const sync = await syncPoLineToInventory(supabase, user.id, id, row.product_name, row.unit);
-          if (!sync.ok) console.error('syncPoLineToInventory', sync.error);
-        }
-      }
+    } else if (
+      normalizedPatch.product_name !== undefined ||
+      normalizedPatch.quantity_requested !== undefined ||
+      normalizedPatch.unit !== undefined
+    ) {
+      setNeedsAlmoxUpdate((prev) => ({ ...prev, [id]: true }));
     }
+  };
+
+  const syncItemToInventory = async (it: PurchaseOrderItemRow) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    setSyncingItemId(it.id);
+    const res = await syncPoLineToInventoryManual(supabase, user.id, it.id, {
+      inventoryItemId: it.inventory_item_id,
+      productNameRaw: it.product_name,
+      unitRaw: it.unit,
+      quantityRequested: it.quantity_requested,
+    });
+    setSyncingItemId(null);
+    if (!res.ok) {
+      alert(`Erro ao sincronizar com almoxarifado: ${res.error}`);
+      return;
+    }
+    setNeedsAlmoxUpdate((prev) => ({ ...prev, [it.id]: false }));
+    await fetchAll();
   };
 
   const pullFromLink = async (id: string, url: string) => {
@@ -562,6 +569,27 @@ function OrderDetailContent() {
                           />
                         </td>
                         <td className="px-6 py-4 text-right">
+                          {it.product_name?.trim() ? (
+                            <button
+                              type="button"
+                              onClick={() => void syncItemToInventory(it)}
+                              disabled={syncingItemId === it.id}
+                              className="px-2.5 py-1.5 mr-2 bg-white border border-slate-200 rounded-lg text-[11px] font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                              title={
+                                it.inventory_item_id
+                                  ? 'Atualizar nome e quantidade no almoxarifado'
+                                  : 'Adicionar este item ao almoxarifado'
+                              }
+                            >
+                              {syncingItemId === it.id
+                                ? 'Sincronizando...'
+                                : it.inventory_item_id
+                                  ? needsAlmoxUpdate[it.id]
+                                    ? 'Atualizar no almox'
+                                    : 'No almox'
+                                  : 'Adicionar ao almox'}
+                            </button>
+                          ) : null}
                           <button
                             type="button"
                             onClick={() => void deleteItem(it.id)}

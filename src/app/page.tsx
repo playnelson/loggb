@@ -33,34 +33,25 @@ import {
 import { fetchPurchaseOrdersForUser, fetchPurchaseOrderItemsForOrderIds } from '@/lib/purchaseOrderQueries';
 import { formatOcForDisplay } from '@/lib/purchaseOrderOc';
 
-/** Pedido com linhas de item — sempre amarelo post-it. */
-const POSTIT_PEDIDO = {
-  card: 'bg-[#fff8b0] border-[#e6d25c] shadow-[4px_4px_0_0_rgba(15,23,42,0.07)]',
-  text: 'text-amber-950',
+const STAGE_COLORS = {
+  rascunho: { card: 'bg-[#f1f5f9] border-[#cbd5e1] shadow-[4px_4px_0_0_rgba(15,23,42,0.07)]', text: 'text-slate-900' },
+  cotando: { card: 'bg-[#dbeafe] border-[#93c5fd] shadow-[4px_4px_0_0_rgba(15,23,42,0.07)]', text: 'text-blue-950' },
+  aprovado: { card: 'bg-[#ede9fe] border-[#c4b5fd] shadow-[4px_4px_0_0_rgba(15,23,42,0.07)]', text: 'text-violet-950' },
+  comprado: { card: 'bg-[#fff8b0] border-[#e6d25c] shadow-[4px_4px_0_0_rgba(15,23,42,0.07)]', text: 'text-amber-950' },
+  recebido: { card: 'bg-[#dcfce7] border-[#86efac] shadow-[4px_4px_0_0_rgba(15,23,42,0.07)]', text: 'text-emerald-950' },
+  cancelado: { card: 'bg-[#fde8e8] border-[#e8a0a0] shadow-[4px_4px_0_0_rgba(15,23,42,0.07)]', text: 'text-red-950' },
 } as const;
 
-/** Tarefa sem itens (ex.: tarefa rápida) — verde-água. */
-const POSTIT_TAREFA = {
-  card: 'bg-[#d6f5ef] border-[#5ec4b0] shadow-[4px_4px_0_0_rgba(15,23,42,0.07)]',
-  text: 'text-teal-950',
-} as const;
-
-/** Cartões na coluna Cancelado (slug ou título) — salmão. */
-const POSTIT_CANCELADO = {
-  card: 'bg-[#fde8e8] border-[#e8a0a0] shadow-[4px_4px_0_0_rgba(15,23,42,0.07)]',
-  text: 'text-red-950',
-} as const;
-
-function isCancelColumn(col: KanbanColumnRow): boolean {
-  const s = col.slug.toLowerCase();
-  const t = col.title.trim().toLowerCase();
-  return s === 'cancelado' || s.includes('cancel') || t.includes('cancel');
-}
-
-function postitThemeForCard(col: KanbanColumnRow, itemCount: number) {
-  if (isCancelColumn(col)) return POSTIT_CANCELADO;
-  if (itemCount > 0) return POSTIT_PEDIDO;
-  return POSTIT_TAREFA;
+function postitThemeForCard(col: KanbanColumnRow) {
+  const slug = col.slug.toLowerCase();
+  const title = col.title.trim().toLowerCase();
+  if (slug.includes('cancel') || title.includes('cancel')) return STAGE_COLORS.cancelado;
+  if (slug.includes('receb') || title.includes('receb')) return STAGE_COLORS.recebido;
+  if (slug.includes('compr') || title.includes('compr')) return STAGE_COLORS.comprado;
+  if (slug.includes('aprov') || title.includes('aprov')) return STAGE_COLORS.aprovado;
+  if (slug.includes('cot') || title.includes('cot')) return STAGE_COLORS.cotando;
+  if (slug.includes('rascun') || title.includes('rascun') || slug.includes('draft')) return STAGE_COLORS.rascunho;
+  return STAGE_COLORS.rascunho;
 }
 
 type HomeSection = 'resumo' | 'mural' | 'kanban';
@@ -404,12 +395,7 @@ export default function Home() {
             {loading ? 'Carregando…' : `${filtered.length} no quadro`}
           </div>
           <div className="text-[10px] text-slate-500 font-bold text-right max-w-xl leading-relaxed">
-            <span className="inline-block w-2 h-2 rounded-sm bg-[#fff8b0] border border-[#e6d25c] align-middle mr-1" />{' '}
-            Amarelo = pedido com itens ·{' '}
-            <span className="inline-block w-2 h-2 rounded-sm bg-[#d6f5ef] border border-[#5ec4b0] align-middle mx-0.5" />{' '}
-            Verde-água = tarefa ·{' '}
-            <span className="inline-block w-2 h-2 rounded-sm bg-[#fde8e8] border border-[#e8a0a0] align-middle mx-0.5" />{' '}
-            Salmão = coluna cancelado · Arraste entre colunas · Editar em Pedidos
+            Cinza=Rascunho · Azul=Cotando · Roxo=Aprovado · Amarelo=Comprado · Verde=Recebido · Vermelho=Cancelado
           </div>
         </div>
 
@@ -487,7 +473,7 @@ export default function Home() {
                           (itemCount ? `Pedido (${itemCount} itens)` : 'Tarefa');
                         const ocLabel = formatOcForDisplay(o.oc_number);
                         const requesterName = employeeNameById.get(o.requester_employee_id) || '—';
-                        const theme = postitThemeForCard(col, itemCount);
+                        const theme = postitThemeForCard(col);
                         return (
                           <div
                             key={o.id}
