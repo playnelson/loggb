@@ -230,20 +230,8 @@ export default function QuickMovementModal({
           return;
         }
       }
-      if (counterparty === 'site' && selectedSiteId) {
-        const { data: sitePre } = await supabase
-          .from('site_possession')
-          .select('quantity')
-          .eq('site_id', selectedSiteId)
-          .eq('item_id', item.id)
-          .maybeSingle();
-        const preSite = Number(sitePre?.quantity ?? 0);
-        if (preSite < effectiveQty) {
-          setError('Esse local não tem essa quantidade registrada para devolução ao almoxarifado.');
-          setLoading(false);
-          return;
-        }
-      }
+      // Para sede/canteiro, não exigimos saldo registrado para devolver ao almoxarifado.
+      // O histórico da origem local já é registrado em movements (work_site_id).
     }
 
     const moveError = await insertMovement(movePayload);
@@ -280,7 +268,7 @@ export default function QuickMovementModal({
       }
     }
 
-    if (!item.consumable && counterparty === 'site' && selectedSiteId) {
+    if (!item.consumable && counterparty === 'site' && selectedSiteId && mode === 'OUT') {
       const { data: currentSp } = await supabase
         .from('site_possession')
         .select('quantity')
@@ -288,12 +276,7 @@ export default function QuickMovementModal({
         .eq('item_id', item.id)
         .maybeSingle();
       const cur = Number(currentSp?.quantity ?? 0);
-      const nextSite = mode === 'OUT' ? cur + effectiveQty : cur - effectiveQty;
-      if (mode === 'IN' && nextSite < 0) {
-        setError('Esse local não tem essa quantidade registrada para devolução ao almoxarifado.');
-        setLoading(false);
-        return;
-      }
+      const nextSite = cur + effectiveQty;
       const spRes = await updateSitePossessionQuantity(supabase, selectedSiteId, item.id, nextSite, user.id);
       if (!spRes.ok) {
         setError(spRes.message);
