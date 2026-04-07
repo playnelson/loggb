@@ -1,7 +1,12 @@
-/** Padrão visual: nomes de produto / descrição sempre em maiúsculas (pt-BR). */
+/** Padrão visual: nomes de produto / descrição em MAIÚSCULAS, sem acentos (pt-BR). */
+
+/** Remove marcas diacríticas (á→a, ç→c, ã→a, etc.). */
+export function stripDiacritics(raw: string): string {
+  return String(raw ?? '').normalize('NFD').replace(/\p{M}/gu, '');
+}
 
 export function normalizeProductLabelForSave(raw: string): string {
-  const t = String(raw ?? '').trim();
+  const t = stripDiacritics(String(raw ?? '').trim());
   if (!t) return '';
   return t.toLocaleUpperCase('pt-BR');
 }

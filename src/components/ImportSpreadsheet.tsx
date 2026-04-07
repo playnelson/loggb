@@ -271,7 +271,7 @@ export default function ImportSpreadsheet({
             const desc = mapping.descIdx !== -1 ? row[mapping.descIdx]?.toString().trim() : '';
             
             if (code || desc) {
-              const description = normalizeProductLabelForSave((desc || code || 'Sem descrição').trim()) || 'SEM DESCRIÇÃO';
+              const description = normalizeProductLabelForSave((desc || code || 'Sem descricao').trim()) || 'SEM DESCRICAO';
               const itemKey = description.toLowerCase();
               if (!uniqueItems.has(itemKey)) {
                 const qty = qtyIdx !== -1 ? parseNumericValue(row[qtyIdx]) : 0;

@@ -2,11 +2,11 @@
 
 export const dynamic = 'force-dynamic';
 
-import { useState, useEffect, Suspense, useCallback } from 'react';
+import { useState, useEffect, Suspense, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { formatProductLabelDisplay, normalizeProductLabelForSave } from '@/lib/productDisplayText';
-import { Search, Plus, AlertCircle, X, FileUp, Users, History, Edit, Trash2, Loader2, ArrowUpRight, ArrowDownLeft, Tags, ShoppingCart, User, Minus, Tag, Download, MapPin } from 'lucide-react';
+import { Plus, AlertCircle, X, FileUp, Users, History, Edit, Trash2, Loader2, ArrowUpRight, ArrowDownLeft, Tags, ShoppingCart, User, Minus, Tag, Download, MapPin, FilterX } from 'lucide-react';
 import ImportSpreadsheet from '@/components/ImportSpreadsheet';
 import QuickMovementModal from '@/components/QuickMovementModal';
 import { itemCodeFromDescription } from '@/lib/itemCode';
@@ -106,7 +106,14 @@ function InventoryContent() {
   const [products, setProducts] = useState<Product[]>([]);
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [filterDescription, setFilterDescription] = useState('');
+  const [filterConsumable, setFilterConsumable] = useState<'all' | 'sim' | 'nao'>('all');
+  const [filterEstoque, setFilterEstoque] = useState<'all' | 'zero' | 'positive' | 'below_min'>('all');
+  const [filterPosse, setFilterPosse] = useState<'all' | 'zero' | 'positive'>('all');
+  const [filterTotal, setFilterTotal] = useState<'all' | 'zero' | 'positive'>('all');
+  const [filterMinimo, setFilterMinimo] = useState<'all' | 'defined' | 'below_min'>('all');
+  const [filterCategory, setFilterCategory] = useState('');
+  const [filterCart, setFilterCart] = useState<'all' | 'in' | 'out'>('all');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -520,11 +527,64 @@ function InventoryContent() {
     setIsSubmitting(false);
   };
 
-  const q = searchTerm.toLowerCase().trim();
-  const filteredProducts = products.filter((p) => {
-    if (!q) return true;
-    return p.description.toLowerCase().includes(q);
-  });
+  const resetInventoryFilters = () => {
+    setFilterDescription('');
+    setFilterConsumable('all');
+    setFilterEstoque('all');
+    setFilterPosse('all');
+    setFilterTotal('all');
+    setFilterMinimo('all');
+    setFilterCategory('');
+    setFilterCart('all');
+  };
+
+  const filteredProducts = useMemo(() => {
+    const q = filterDescription.toLowerCase().trim();
+    return products.filter((p) => {
+      if (q && !p.description.toLowerCase().includes(q)) return false;
+      if (filterConsumable === 'sim' && !p.consumable) return false;
+      if (filterConsumable === 'nao' && p.consumable) return false;
+
+      const posTotal = p.possession?.reduce((acc, curr) => acc + curr.quantity, 0) || 0;
+      const physTotal = p.quantity_current + posTotal;
+      const belowMin = p.quantity_min > 0 && p.quantity_current < p.quantity_min;
+
+      if (filterEstoque === 'zero' && p.quantity_current !== 0) return false;
+      if (filterEstoque === 'positive' && p.quantity_current <= 0) return false;
+      if (filterEstoque === 'below_min' && !belowMin) return false;
+
+      if (filterPosse === 'zero' && posTotal !== 0) return false;
+      if (filterPosse === 'positive' && posTotal <= 0) return false;
+
+      if (filterTotal === 'zero' && physTotal !== 0) return false;
+      if (filterTotal === 'positive' && physTotal <= 0) return false;
+
+      if (filterMinimo === 'defined' && !(p.quantity_min > 0)) return false;
+      if (filterMinimo === 'below_min' && !belowMin) return false;
+
+      if (filterCategory && p.category !== filterCategory) return false;
+
+      const inCart = cart.some((l) => l.itemId === p.id);
+      if (filterCart === 'in' && !inCart) return false;
+      if (filterCart === 'out' && inCart) return false;
+
+      return true;
+    });
+  }, [
+    products,
+    filterDescription,
+    filterConsumable,
+    filterEstoque,
+    filterPosse,
+    filterTotal,
+    filterMinimo,
+    filterCategory,
+    filterCart,
+    cart,
+  ]);
+
+  const selectFilterClass =
+    'w-full min-w-0 max-w-full text-[11px] font-bold text-primary bg-white border border-slate-200 rounded-md px-1.5 py-1.5 outline-none focus:ring-2 focus:ring-secondary/40';
 
   const handleDownloadInventory = () => {
     if (products.length === 0) {
@@ -997,35 +1057,137 @@ function InventoryContent() {
         </div>
       )}
 
-      {/* Filters & Search */}
-      <div className="bg-white p-4 rounded-xl border border-border shadow-sm flex flex-col md:flex-row gap-4">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-          <input 
-            type="text" 
-            placeholder="Buscar por descrição..." 
-            className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary/50 focus:border-secondary transition-all"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-        </div>
-      </div>
-
       {/* Inventory Table */}
       <div className="bg-white rounded-xl border border-border shadow-sm overflow-hidden">
+        <div className="px-4 py-2 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2 bg-slate-50/80">
+          <p className="text-[11px] font-bold text-slate-500">
+            Filtros na primeira linha do cabeçalho da tabela abaixo.
+            {!loading && products.length > 0 ? (
+              <span className="text-slate-400 font-medium">
+                {' '}
+                · Mostrando {filteredProducts.length} de {products.length}
+              </span>
+            ) : null}
+          </p>
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead className="bg-slate-50 border-b border-border">
               <tr>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Descrição do Material</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Consumível?</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Estoque</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Em Posse</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Total</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Mínimo</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Categoria</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Carrinho</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Ações</th>
+                <th className="px-4 pt-3 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Descrição do Material</th>
+                <th className="px-4 pt-3 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Consumível?</th>
+                <th className="px-4 pt-3 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Estoque</th>
+                <th className="px-4 pt-3 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Em Posse</th>
+                <th className="px-4 pt-3 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Total</th>
+                <th className="px-4 pt-3 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Mínimo</th>
+                <th className="px-4 pt-3 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Categoria</th>
+                <th className="px-4 pt-3 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Carrinho</th>
+                <th className="px-4 pt-3 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Ações</th>
+              </tr>
+              <tr className="border-b border-border bg-white [&_th]:align-top">
+                <th className="px-4 pb-3 pt-0 font-normal">
+                  <input
+                    type="text"
+                    value={filterDescription}
+                    onChange={(e) => setFilterDescription(e.target.value)}
+                    placeholder="Filtrar…"
+                    className="w-full min-w-[140px] text-[11px] font-bold text-primary bg-white border border-slate-200 rounded-md px-2 py-1.5 outline-none focus:ring-2 focus:ring-secondary/40 placeholder:font-medium placeholder:text-slate-400"
+                  />
+                </th>
+                <th className="px-4 pb-3 pt-0 font-normal text-center">
+                  <select
+                    className={`${selectFilterClass} text-center`}
+                    value={filterConsumable}
+                    onChange={(e) => setFilterConsumable(e.target.value as 'all' | 'sim' | 'nao')}
+                  >
+                    <option value="all">Todos</option>
+                    <option value="sim">Sim</option>
+                    <option value="nao">Não</option>
+                  </select>
+                </th>
+                <th className="px-4 pb-3 pt-0 font-normal text-center">
+                  <select
+                    className={`${selectFilterClass} text-center`}
+                    value={filterEstoque}
+                    onChange={(e) =>
+                      setFilterEstoque(e.target.value as 'all' | 'zero' | 'positive' | 'below_min')
+                    }
+                  >
+                    <option value="all">Todos</option>
+                    <option value="zero">Zero</option>
+                    <option value="positive">Com saldo</option>
+                    <option value="below_min">Abaixo do mín.</option>
+                  </select>
+                </th>
+                <th className="px-4 pb-3 pt-0 font-normal text-center">
+                  <select
+                    className={`${selectFilterClass} text-center`}
+                    value={filterPosse}
+                    onChange={(e) => setFilterPosse(e.target.value as 'all' | 'zero' | 'positive')}
+                  >
+                    <option value="all">Todos</option>
+                    <option value="zero">Zero</option>
+                    <option value="positive">Com posse</option>
+                  </select>
+                </th>
+                <th className="px-4 pb-3 pt-0 font-normal text-center">
+                  <select
+                    className={`${selectFilterClass} text-center`}
+                    value={filterTotal}
+                    onChange={(e) => setFilterTotal(e.target.value as 'all' | 'zero' | 'positive')}
+                  >
+                    <option value="all">Todos</option>
+                    <option value="zero">Total zero</option>
+                    <option value="positive">Total &gt; 0</option>
+                  </select>
+                </th>
+                <th className="px-4 pb-3 pt-0 font-normal text-center">
+                  <select
+                    className={`${selectFilterClass} text-center`}
+                    value={filterMinimo}
+                    onChange={(e) => setFilterMinimo(e.target.value as 'all' | 'defined' | 'below_min')}
+                  >
+                    <option value="all">Todos</option>
+                    <option value="defined">Com mínimo</option>
+                    <option value="below_min">Abaixo do mín.</option>
+                  </select>
+                </th>
+                <th className="px-4 pb-3 pt-0 font-normal text-right">
+                  <select
+                    className={`${selectFilterClass}`}
+                    value={filterCategory}
+                    onChange={(e) => setFilterCategory(e.target.value)}
+                  >
+                    <option value="">Todas</option>
+                    {categoryOptions.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                </th>
+                <th className="px-4 pb-3 pt-0 font-normal text-center">
+                  <select
+                    className={`${selectFilterClass} text-center`}
+                    value={filterCart}
+                    onChange={(e) => setFilterCart(e.target.value as 'all' | 'in' | 'out')}
+                  >
+                    <option value="all">Todos</option>
+                    <option value="in">No carrinho</option>
+                    <option value="out">Fora</option>
+                  </select>
+                </th>
+                <th className="px-4 pb-3 pt-0 font-normal text-right">
+                  <button
+                    type="button"
+                    onClick={resetInventoryFilters}
+                    className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-tight text-slate-600 hover:text-primary border border-slate-200 rounded-md px-2 py-1.5 bg-white hover:bg-slate-50"
+                    title="Limpar todos os filtros"
+                  >
+                    <FilterX size={14} />
+                    Limpar
+                  </button>
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border text-sm">
