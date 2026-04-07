@@ -57,7 +57,8 @@ const EPI_DISCARD_TAG = 'DESCARTE';
 type EpiConsumableBalanceRow = { item_id: string; description: string; unit: string; balance: number };
 
 function isEpiConsumableItem(items: Possession['items'] | null | undefined): boolean {
-  return !!items && items.category === 'EPI' && !!items.consumable;
+  // Regra do produto: todo EPI deve aparecer na carteira, independente do flag consumável.
+  return !!items && items.category === 'EPI';
 }
 
 function movementIsEpiDiscard(m: { type?: string; tag?: string | null }): boolean {
@@ -83,7 +84,7 @@ function mergeEpiWalletLines(
     quantity: number;
     consumable: boolean;
   }> = [];
-  const skipConsumableAggFor = new Set<string>();
+  const skipAggForItemsAlreadyInPossession = new Set<string>();
   for (const p of possession || []) {
     if (!p.items || p.quantity <= 0 || p.items.category !== 'EPI') continue;
     out.push({
@@ -94,10 +95,10 @@ function mergeEpiWalletLines(
       quantity: p.quantity,
       consumable: !!p.items.consumable,
     });
-    if (p.items.consumable) skipConsumableAggFor.add(p.item_id);
+    skipAggForItemsAlreadyInPossession.add(p.item_id);
   }
   for (const c of consumableRows) {
-    if (skipConsumableAggFor.has(c.item_id) || c.balance <= 0) continue;
+    if (skipAggForItemsAlreadyInPossession.has(c.item_id) || c.balance <= 0) continue;
     out.push({
       key: `c-${c.item_id}`,
       item_id: c.item_id,
@@ -776,7 +777,7 @@ export default function StaffPage() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
           <input 
             type="text" 
-            placeholder="Buscar por nome, cargo ou item (posse / EPI consumível)..." 
+            placeholder="Buscar por nome, cargo ou item (posse / EPI)..."
             className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-secondary/50 outline-none"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
@@ -807,7 +808,7 @@ export default function StaffPage() {
             }`}
           >
             <Package size={14} />
-            Com itens (posse ou EPI consumível)
+            Com itens (posse ou EPI)
           </button>
         </div>
       </div>

@@ -332,8 +332,7 @@ export default function Home() {
             <button
               type="button"
               onClick={() => setBoardEditorOpen(true)}
-              disabled={sortedColumns.length === 0}
-              className="flex items-center gap-2 bg-white text-primary border border-slate-200 px-4 py-2 rounded-lg hover:bg-slate-50 font-medium text-sm disabled:opacity-50"
+              className="flex items-center gap-2 bg-white text-primary border border-slate-200 px-4 py-2 rounded-lg hover:bg-slate-50 font-medium text-sm"
             >
               <LayoutGrid size={16} />
               Editar quadro

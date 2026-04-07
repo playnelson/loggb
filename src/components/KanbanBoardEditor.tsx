@@ -21,7 +21,7 @@ export function KanbanBoardEditor({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (isOpen && columns.length > 0) {
+    if (isOpen) {
       setLocal([...columns].sort((a, b) => a.sort_order - b.sort_order));
       setError(null);
     }

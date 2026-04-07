@@ -152,7 +152,7 @@ export default function QuickMovementModal({
         /* entrada consumível sem local: permitido */
       }
     }
-    if (effectiveQty <= 0) return 'Quantidade deve ser maior que zero.';
+    if (!Number.isFinite(effectiveQty) || effectiveQty <= 0) return 'Quantidade deve ser maior que zero.';
     if (mode === 'OUT' && effectiveQty > item.quantity_current) return 'Quantidade maior do que o saldo atual.';
     if (isUnique && !tag.trim()) return 'Informe a TAG do item único.';
     return null;
@@ -484,11 +484,15 @@ export default function QuickMovementModal({
                   <input
                     required
                     type="number"
-                    min="1"
+                    min="0.01"
+                    step="0.01"
                     disabled={isUnique}
                     className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-secondary/20 outline-none font-bold text-center text-lg disabled:opacity-60"
                     value={effectiveQty}
-                    onChange={(e) => setQuantity(Number(e.target.value))}
+                    onChange={(e) => {
+                      const next = Number(e.target.value);
+                      setQuantity(Number.isFinite(next) ? next : 0);
+                    }}
                     onFocus={(e) => e.target.select()}
                   />
                 </div>
