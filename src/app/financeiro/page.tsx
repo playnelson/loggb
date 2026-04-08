@@ -89,8 +89,16 @@ const currency = (v: number) =>
   v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2 });
 
 function parseN(v: string): number {
-  const n = Number(String(v).replace(',', '.'));
+  const n = Number(String(v).replace(/\./g, '').replace(',', '.').replace(/[^\d.-]/g, ''));
   return Number.isFinite(n) ? n : 0;
+}
+
+function formatCurrencyInput(raw: string): string {
+  const digits = String(raw ?? '').replace(/\D/g, '');
+  if (!digits) return '';
+  const cents = Number(digits);
+  const value = cents / 100;
+  return value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function toSafeFileName(v: string): string {
@@ -715,7 +723,7 @@ export default function FinanceiroPage() {
         <div className="space-y-4">
           <div className="bg-white p-4 rounded-xl border border-border shadow-sm grid md:grid-cols-5 gap-2 items-end">
             <input className="px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Título da conta" value={accTitle} onChange={(e) => setAccTitle(e.target.value)} />
-            <input className="px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Valor (R$)" value={accAmount} onChange={(e) => setAccAmount(e.target.value)} />
+            <input className="px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Valor (R$)" value={accAmount} onChange={(e) => setAccAmount(formatCurrencyInput(e.target.value))} />
             <input type="date" className="px-3 py-2 rounded-lg border border-slate-200 text-sm" value={accDueDate} onChange={(e) => setAccDueDate(e.target.value)} />
             <input className="px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Categoria" value={accCategory} onChange={(e) => setAccCategory(e.target.value)} />
             <button type="button" disabled={saving || !accTitle.trim()} onClick={() => void addAccount()} className="inline-flex items-center justify-center gap-2 bg-primary text-white px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-50">
@@ -735,7 +743,7 @@ export default function FinanceiroPage() {
             </div>
             <div className="grid md:grid-cols-5 gap-2 items-end">
               <input className="px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Título recorrente" value={tplTitle} onChange={(e) => setTplTitle(e.target.value)} />
-              <input className="px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Valor (R$)" value={tplAmount} onChange={(e) => setTplAmount(e.target.value)} />
+              <input className="px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Valor (R$)" value={tplAmount} onChange={(e) => setTplAmount(formatCurrencyInput(e.target.value))} />
               <input type="number" min={1} max={31} className="px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Dia do vencimento" value={tplDueDay} onChange={(e) => setTplDueDay(Number(e.target.value || 1))} />
               <input className="px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Categoria" value={tplCategory} onChange={(e) => setTplCategory(e.target.value)} />
               <button type="button" disabled={saving || !tplTitle.trim()} onClick={() => void addAccountTemplate()} className="inline-flex items-center justify-center gap-2 bg-primary text-white px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-50">
@@ -833,7 +841,7 @@ export default function FinanceiroPage() {
             <input className="px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder={fuelTargetType === 'veiculo' ? 'Nome do veículo' : 'Nome do equipamento'} value={fuelTargetName} onChange={(e) => setFuelTargetName(e.target.value)} />
             <input className="px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Placa / TAG / ID" value={fuelTargetCode} onChange={(e) => setFuelTargetCode(e.target.value)} />
             <input className="px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Litros" value={fuelLiters} onChange={(e) => setFuelLiters(e.target.value)} />
-            <input className="px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Preço/litro" value={fuelPrice} onChange={(e) => setFuelPrice(e.target.value)} />
+            <input className="px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Preço/litro (R$)" value={fuelPrice} onChange={(e) => setFuelPrice(formatCurrencyInput(e.target.value))} />
             <input className="px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="KM/Horas (opcional)" value={fuelOdometer} onChange={(e) => setFuelOdometer(e.target.value)} />
             <button type="button" disabled={saving || !(fuelAssetId || fuelTargetName.trim())} onClick={() => void addFuel()} className="inline-flex items-center justify-center gap-2 bg-primary text-white px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-50">
               <Plus size={16} /> Lançar
@@ -928,7 +936,7 @@ export default function FinanceiroPage() {
             <input type="date" className="px-3 py-2 rounded-lg border border-slate-200 text-sm" value={expDate} onChange={(e) => setExpDate(e.target.value)} />
             <input className="px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Descrição" value={expDescription} onChange={(e) => setExpDescription(e.target.value)} />
             <input className="px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Categoria" value={expCategory} onChange={(e) => setExpCategory(e.target.value)} />
-            <input className="px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Valor (R$)" value={expAmount} onChange={(e) => setExpAmount(e.target.value)} />
+            <input className="px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Valor (R$)" value={expAmount} onChange={(e) => setExpAmount(formatCurrencyInput(e.target.value))} />
             <input className="px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Pagamento (PIX, cartão...)" value={expMethod} onChange={(e) => setExpMethod(e.target.value)} />
             <button type="button" disabled={saving || !expDescription.trim()} onClick={() => void addExpense()} className="inline-flex items-center justify-center gap-2 bg-primary text-white px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-50">
               <Plus size={16} /> Lançar

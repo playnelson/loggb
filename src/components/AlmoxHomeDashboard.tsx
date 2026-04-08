@@ -53,6 +53,64 @@ function StatCard({
   );
 }
 
+type FinanceReminderLite = {
+  id: string;
+  title: string;
+  frequency: string;
+  reminder_time: string;
+  weekday: number | null;
+  day_of_month: number | null;
+  month_of_year: number | null;
+  interval_days: number | null;
+  created_at: string;
+};
+
+type NextEvent = {
+  when: Date;
+  label: string;
+  detail: string;
+};
+
+function nextReminderDate(rem: FinanceReminderLite, now: Date): Date | null {
+  const base = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const maxDays = 366;
+  for (let i = 0; i <= maxDays; i++) {
+    const d = new Date(base);
+    d.setDate(base.getDate() + i);
+    if (rem.frequency === 'daily') return d;
+    if (rem.frequency === 'weekly') {
+      if (rem.weekday == null) return null;
+      if (d.getDay() === rem.weekday) return d;
+      continue;
+    }
+    if (rem.frequency === 'monthly') {
+      if (rem.day_of_month == null) return null;
+      const last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+      const day = Math.min(rem.day_of_month, last);
+      if (d.getDate() === day) return d;
+      continue;
+    }
+    if (rem.frequency === 'yearly') {
+      if (rem.day_of_month == null || rem.month_of_year == null) return null;
+      if (d.getMonth() + 1 !== rem.month_of_year) continue;
+      const last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+      const day = Math.min(rem.day_of_month, last);
+      if (d.getDate() === day) return d;
+      continue;
+    }
+    if (rem.frequency === 'every_n_days') {
+      const n = rem.interval_days ?? 0;
+      if (n <= 0) return null;
+      const created = new Date(rem.created_at);
+      const c0 = new Date(created.getFullYear(), created.getMonth(), created.getDate()).getTime();
+      const d0 = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+      const diff = Math.floor((d0 - c0) / 86400000);
+      if (diff >= 0 && diff % n === 0) return d;
+    }
+  }
+  return null;
+}
+
 export function AlmoxHomeDashboard() {
   const [snap, setSnap] = useState<AlmoxDashboardSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
@@ -62,6 +120,7 @@ export function AlmoxHomeDashboard() {
     expensesMonth: number;
     remindersToday: number;
   } | null>(null);
+  const [nextFinanceEvents, setNextFinanceEvents] = useState<NextEvent[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -100,7 +159,7 @@ export function AlmoxHomeDashboard() {
           .lte('ref_date', monthEnd),
         supabase
           .from('dashboard_reminders')
-          .select('id, frequency, weekday, day_of_month, month_of_year, interval_days, active, created_at')
+          .select('id, title, frequency, reminder_time, weekday, day_of_month, month_of_year, interval_days, active, created_at')
           .eq('user_id', user.id)
           .eq('active', true),
       ]);
@@ -153,8 +212,36 @@ export function AlmoxHomeDashboard() {
             return false;
           }).length;
           setFinanceSummary({ pendingAccountsMonth, fuelMonth, expensesMonth, remindersToday });
+
+          const events: NextEvent[] = [];
+          (accR.data || []).forEach((r: unknown) => {
+            const row = r as { due_date: string; amount: number };
+            const when = new Date(`${row.due_date}T09:00:00`);
+            if (!Number.isFinite(when.getTime())) return;
+            events.push({
+              when,
+              label: 'Conta a vencer',
+              detail: `${when.toLocaleDateString('pt-BR')} · ${Number(row.amount || 0).toLocaleString('pt-BR', {
+                style: 'currency',
+                currency: 'BRL',
+              })}`,
+            });
+          });
+          (remR.data || []).forEach((r: unknown) => {
+            const rem = r as FinanceReminderLite;
+            const date = nextReminderDate(rem, now);
+            if (!date) return;
+            events.push({
+              when: date,
+              label: `Lembrete: ${rem.title || 'Sem título'}`,
+              detail: `${date.toLocaleDateString('pt-BR')} · ${String(rem.reminder_time || '').slice(0, 5)}`,
+            });
+          });
+          events.sort((a, b) => a.when.getTime() - b.when.getTime());
+          setNextFinanceEvents(events.slice(0, 12));
         } else {
           setFinanceSummary(null);
+          setNextFinanceEvents([]);
         }
         setLoading(false);
       }
@@ -269,6 +356,33 @@ export function AlmoxHomeDashboard() {
             icon={<Bell size={22} />}
             tone="emerald"
           />
+        </div>
+      )}
+
+      {nextFinanceEvents.length > 0 && (
+        <div className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden">
+          <div className="px-5 py-3 border-b bg-slate-50 flex items-center justify-between">
+            <h2 className="text-sm font-black text-primary uppercase tracking-wide flex items-center gap-2">
+              <Bell size={18} className="text-secondary" />
+              Próximos eventos do financeiro
+            </h2>
+            <Link href="/financeiro" className="text-xs font-bold text-secondary hover:underline">
+              Abrir Financeiro
+            </Link>
+          </div>
+          <ul className="divide-y divide-slate-100">
+            {nextFinanceEvents.map((ev, idx) => (
+              <li key={`${ev.label}-${ev.when.toISOString()}-${idx}`} className="px-5 py-3 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-bold text-primary truncate">{ev.label}</p>
+                  <p className="text-xs text-slate-500">{ev.detail}</p>
+                </div>
+                <span className="text-[10px] font-bold uppercase text-slate-400 whitespace-nowrap">
+                  {ev.when.toLocaleDateString('pt-BR')}
+                </span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
