@@ -21,7 +21,13 @@ function isMissingRemindersTable(err: { message?: string; code?: string } | null
 
 function parseRow(r: Record<string, unknown>): DashboardReminderRow | null {
   const freq = String(r.frequency ?? '');
-  if (freq !== 'daily' && freq !== 'weekly' && freq !== 'monthly') return null;
+  if (
+    freq !== 'daily' &&
+    freq !== 'weekly' &&
+    freq !== 'monthly' &&
+    freq !== 'yearly' &&
+    freq !== 'every_n_days'
+  ) return null;
   return {
     id: String(r.id),
     title: String(r.title ?? ''),
@@ -30,6 +36,8 @@ function parseRow(r: Record<string, unknown>): DashboardReminderRow | null {
     reminder_time: String(r.reminder_time ?? '09:00:00'),
     weekday: r.weekday == null ? null : Number(r.weekday),
     day_of_month: r.day_of_month == null ? null : Number(r.day_of_month),
+    month_of_year: r.month_of_year == null ? null : Number(r.month_of_year),
+    interval_days: r.interval_days == null ? null : Number(r.interval_days),
     active: Boolean(r.active),
     sort_order: Number(r.sort_order ?? 0),
     created_at: String(r.created_at),

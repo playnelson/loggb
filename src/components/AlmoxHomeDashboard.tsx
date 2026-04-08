@@ -15,7 +15,6 @@ import {
   Package,
   TrendingDown,
 } from 'lucide-react';
-import { DashboardReminders } from '@/components/DashboardReminders';
 
 function StatCard({
   label,
@@ -152,8 +151,6 @@ export function AlmoxHomeDashboard() {
           tone="emerald"
         />
       </div>
-
-      <DashboardReminders />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden">
