@@ -15,8 +15,43 @@ create table if not exists public.finance_accounts (
   updated_at timestamptz not null default now()
 );
 
+alter table public.finance_accounts
+  add column if not exists template_id uuid null;
+
 create index if not exists finance_accounts_user_due_idx
   on public.finance_accounts (user_id, due_date, status, created_at desc);
+
+create table if not exists public.finance_assets (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  kind text not null check (kind in ('veiculo', 'equipamento')),
+  name text not null,
+  code text not null default '',
+  active boolean not null default true,
+  notes text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists finance_assets_user_idx
+  on public.finance_assets (user_id, active, kind, name);
+
+create table if not exists public.finance_account_templates (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  title text not null,
+  amount numeric not null check (amount >= 0),
+  due_day smallint not null check (due_day between 1 and 31),
+  category text not null default 'Geral',
+  active boolean not null default true,
+  last_generated_month text null,
+  notes text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists finance_account_templates_user_idx
+  on public.finance_account_templates (user_id, active, due_day, created_at);
 
 create table if not exists public.finance_fuel_logs (
   id uuid primary key default gen_random_uuid(),
@@ -53,6 +88,8 @@ create index if not exists finance_expenses_user_date_idx
   on public.finance_expenses (user_id, ref_date desc, created_at desc);
 
 alter table public.finance_accounts enable row level security;
+alter table public.finance_assets enable row level security;
+alter table public.finance_account_templates enable row level security;
 alter table public.finance_fuel_logs enable row level security;
 alter table public.finance_expenses enable row level security;
 
@@ -74,6 +111,46 @@ using (auth.uid() = user_id) with check (auth.uid() = user_id);
 drop policy if exists "finance_accounts_delete_own" on public.finance_accounts;
 create policy "finance_accounts_delete_own"
 on public.finance_accounts for delete to authenticated
+using (auth.uid() = user_id);
+
+drop policy if exists "finance_assets_select_own" on public.finance_assets;
+create policy "finance_assets_select_own"
+on public.finance_assets for select to authenticated
+using (auth.uid() = user_id);
+
+drop policy if exists "finance_assets_insert_own" on public.finance_assets;
+create policy "finance_assets_insert_own"
+on public.finance_assets for insert to authenticated
+with check (auth.uid() = user_id);
+
+drop policy if exists "finance_assets_update_own" on public.finance_assets;
+create policy "finance_assets_update_own"
+on public.finance_assets for update to authenticated
+using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists "finance_assets_delete_own" on public.finance_assets;
+create policy "finance_assets_delete_own"
+on public.finance_assets for delete to authenticated
+using (auth.uid() = user_id);
+
+drop policy if exists "finance_account_templates_select_own" on public.finance_account_templates;
+create policy "finance_account_templates_select_own"
+on public.finance_account_templates for select to authenticated
+using (auth.uid() = user_id);
+
+drop policy if exists "finance_account_templates_insert_own" on public.finance_account_templates;
+create policy "finance_account_templates_insert_own"
+on public.finance_account_templates for insert to authenticated
+with check (auth.uid() = user_id);
+
+drop policy if exists "finance_account_templates_update_own" on public.finance_account_templates;
+create policy "finance_account_templates_update_own"
+on public.finance_account_templates for update to authenticated
+using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists "finance_account_templates_delete_own" on public.finance_account_templates;
+create policy "finance_account_templates_delete_own"
+on public.finance_account_templates for delete to authenticated
 using (auth.uid() = user_id);
 
 drop policy if exists "finance_fuel_logs_select_own" on public.finance_fuel_logs;

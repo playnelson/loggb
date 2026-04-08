@@ -30,6 +30,7 @@ type FinanceAccountRow = {
   title: string;
   amount: number;
   due_date: string;
+  template_id?: string | null;
   status: 'pending' | 'paid';
   category: string;
   notes: string;
@@ -57,6 +58,28 @@ type ExpenseRow = {
   category: string;
   amount: number;
   payment_method: string;
+  notes: string;
+  created_at: string;
+};
+
+type FinanceAssetRow = {
+  id: string;
+  kind: 'veiculo' | 'equipamento';
+  name: string;
+  code: string;
+  active: boolean;
+  notes: string;
+  created_at: string;
+};
+
+type FinanceAccountTemplateRow = {
+  id: string;
+  title: string;
+  amount: number;
+  due_day: number;
+  category: string;
+  active: boolean;
+  last_generated_month: string | null;
   notes: string;
   created_at: string;
 };
@@ -112,6 +135,8 @@ export default function FinanceiroPage() {
   const [activeTab, setActiveTab] = useState<FinanceTab>('contas');
 
   const [accounts, setAccounts] = useState<FinanceAccountRow[]>([]);
+  const [accountTemplates, setAccountTemplates] = useState<FinanceAccountTemplateRow[]>([]);
+  const [assets, setAssets] = useState<FinanceAssetRow[]>([]);
   const [fuelLogs, setFuelLogs] = useState<FuelLogRow[]>([]);
   const [expenses, setExpenses] = useState<ExpenseRow[]>([]);
   const [reminders, setReminders] = useState<DashboardReminderRow[]>([]);
@@ -120,8 +145,13 @@ export default function FinanceiroPage() {
   const [accAmount, setAccAmount] = useState('');
   const [accDueDate, setAccDueDate] = useState(todayIso());
   const [accCategory, setAccCategory] = useState('Geral');
+  const [tplTitle, setTplTitle] = useState('');
+  const [tplAmount, setTplAmount] = useState('');
+  const [tplDueDay, setTplDueDay] = useState(5);
+  const [tplCategory, setTplCategory] = useState('Geral');
 
   const [fuelDate, setFuelDate] = useState(todayIso());
+  const [fuelAssetId, setFuelAssetId] = useState('');
   const [fuelTargetType, setFuelTargetType] = useState<'veiculo' | 'equipamento'>('veiculo');
   const [fuelTargetName, setFuelTargetName] = useState('');
   const [fuelTargetCode, setFuelTargetCode] = useState('');
@@ -130,6 +160,9 @@ export default function FinanceiroPage() {
   const [fuelOdometer, setFuelOdometer] = useState('');
   const [fuelStation, setFuelStation] = useState('');
   const [fuelReportTarget, setFuelReportTarget] = useState<string>('all');
+  const [assetKind, setAssetKind] = useState<'veiculo' | 'equipamento'>('veiculo');
+  const [assetName, setAssetName] = useState('');
+  const [assetCode, setAssetCode] = useState('');
 
   const [expDate, setExpDate] = useState(todayIso());
   const [expDescription, setExpDescription] = useState('');
@@ -162,12 +195,23 @@ export default function FinanceiroPage() {
       return;
     }
 
-    const [accR, fuelR, expR, remR] = await Promise.all([
+    const [accR, tplR, assetsR, fuelR, expR, remR] = await Promise.all([
       supabase
         .from('finance_accounts')
-        .select('id, title, amount, due_date, status, category, notes, paid_at, created_at')
+        .select('id, title, amount, due_date, status, category, notes, paid_at, template_id, created_at')
         .eq('user_id', user.id)
         .order('due_date', { ascending: true }),
+      supabase
+        .from('finance_account_templates')
+        .select('id, title, amount, due_day, category, active, last_generated_month, notes, created_at')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('finance_assets')
+        .select('id, kind, name, code, active, notes, created_at')
+        .eq('user_id', user.id)
+        .order('kind', { ascending: true })
+        .order('name', { ascending: true }),
       supabase
         .from('finance_fuel_logs')
         .select('id, ref_date, vehicle, odometer_km, liters, price_per_liter, total_amount, station, notes, created_at')
@@ -190,6 +234,8 @@ export default function FinanceiroPage() {
 
     const financeMissing =
       isMissingTable(accR.error, 'finance_accounts') ||
+      isMissingTable(tplR.error, 'finance_account_templates') ||
+      isMissingTable(assetsR.error, 'finance_assets') ||
       isMissingTable(fuelR.error, 'finance_fuel_logs') ||
       isMissingTable(expR.error, 'finance_expenses');
     if (financeMissing) {
@@ -198,9 +244,11 @@ export default function FinanceiroPage() {
       return;
     }
 
-    if (accR.error || fuelR.error || expR.error || remR.error) {
+    if (accR.error || tplR.error || assetsR.error || fuelR.error || expR.error || remR.error) {
       setSchemaError(
         accR.error?.message ||
+          tplR.error?.message ||
+          assetsR.error?.message ||
           fuelR.error?.message ||
           expR.error?.message ||
           remR.error?.message ||
@@ -211,6 +259,8 @@ export default function FinanceiroPage() {
     }
 
     setAccounts((accR.data || []).map((r: unknown) => r as FinanceAccountRow));
+    setAccountTemplates((tplR.data || []).map((r: unknown) => r as FinanceAccountTemplateRow));
+    setAssets((assetsR.data || []).map((r: unknown) => r as FinanceAssetRow));
     setFuelLogs((fuelR.data || []).map((r: unknown) => r as FuelLogRow));
     setExpenses((expR.data || []).map((r: unknown) => r as ExpenseRow));
     setReminders(
@@ -256,6 +306,8 @@ export default function FinanceiroPage() {
     return fuelLogs.filter((f) => f.vehicle === fuelReportTarget);
   }, [fuelLogs, fuelReportTarget]);
 
+  const activeAssets = useMemo(() => assets.filter((a) => a.active), [assets]);
+
   const addAccount = async () => {
     if (!accTitle.trim()) return;
     setSaving(true);
@@ -282,6 +334,115 @@ export default function FinanceiroPage() {
     void load();
   };
 
+  const addAccountTemplate = async () => {
+    if (!tplTitle.trim()) return;
+    setSaving(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { error } = await supabase.from('finance_account_templates').insert([
+      {
+        user_id: user.id,
+        title: tplTitle.trim(),
+        amount: parseN(tplAmount),
+        due_day: tplDueDay,
+        category: tplCategory.trim() || 'Geral',
+        active: true,
+        updated_at: new Date().toISOString(),
+      },
+    ]);
+    setSaving(false);
+    if (error) return alert(`Erro: ${error.message}`);
+    setTplTitle('');
+    setTplAmount('');
+    setTplDueDay(5);
+    setTplCategory('Geral');
+    void load();
+  };
+
+  const generateRecurringAccounts = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth() + 1;
+    const monthKey = `${y}-${String(m).padStart(2, '0')}`;
+    let created = 0;
+    for (const t of accountTemplates.filter((x) => x.active)) {
+      const lastDay = new Date(y, m, 0).getDate();
+      const day = Math.min(Math.max(1, t.due_day), lastDay);
+      const dueDate = `${monthKey}-${String(day).padStart(2, '0')}`;
+      const existing = accounts.find((a) => a.template_id === t.id && a.due_date === dueDate);
+      if (existing) continue;
+      const { error } = await supabase.from('finance_accounts').insert([
+        {
+          user_id: user.id,
+          title: t.title,
+          amount: t.amount,
+          due_date: dueDate,
+          status: 'pending',
+          category: t.category || 'Geral',
+          template_id: t.id,
+          updated_at: new Date().toISOString(),
+        },
+      ]);
+      if (!error) created += 1;
+      await supabase
+        .from('finance_account_templates')
+        .update({ last_generated_month: monthKey, updated_at: new Date().toISOString() })
+        .eq('id', t.id)
+        .eq('user_id', user.id);
+    }
+    alert(created > 0 ? `${created} conta(s) recorrente(s) gerada(s) para ${monthKey}.` : 'Nenhuma conta nova para gerar neste mês.');
+    void load();
+  };
+
+  const setTemplateActive = async (row: FinanceAccountTemplateRow, active: boolean) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { error } = await supabase
+      .from('finance_account_templates')
+      .update({ active, updated_at: new Date().toISOString() })
+      .eq('id', row.id)
+      .eq('user_id', user.id);
+    if (error) return alert(`Erro: ${error.message}`);
+    void load();
+  };
+
+  const addAsset = async () => {
+    if (!assetName.trim()) return;
+    setSaving(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { error } = await supabase.from('finance_assets').insert([
+      {
+        user_id: user.id,
+        kind: assetKind,
+        name: assetName.trim(),
+        code: assetCode.trim(),
+        active: true,
+        updated_at: new Date().toISOString(),
+      },
+    ]);
+    setSaving(false);
+    if (error) return alert(`Erro: ${error.message}`);
+    setAssetKind('veiculo');
+    setAssetName('');
+    setAssetCode('');
+    void load();
+  };
+
+  const setAssetActive = async (row: FinanceAssetRow, active: boolean) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { error } = await supabase
+      .from('finance_assets')
+      .update({ active, updated_at: new Date().toISOString() })
+      .eq('id', row.id)
+      .eq('user_id', user.id);
+    if (error) return alert(`Erro: ${error.message}`);
+    void load();
+  };
+
   const toggleAccountPaid = async (row: FinanceAccountRow) => {
     const {
       data: { user },
@@ -297,7 +458,16 @@ export default function FinanceiroPage() {
     void load();
   };
 
-  const removeRow = async (table: 'finance_accounts' | 'finance_fuel_logs' | 'finance_expenses' | 'dashboard_reminders', id: string) => {
+  const removeRow = async (
+    table:
+      | 'finance_accounts'
+      | 'finance_account_templates'
+      | 'finance_assets'
+      | 'finance_fuel_logs'
+      | 'finance_expenses'
+      | 'dashboard_reminders',
+    id: string
+  ) => {
     if (!confirm('Remover este registro?')) return;
     const {
       data: { user },
@@ -311,15 +481,24 @@ export default function FinanceiroPage() {
   const addFuel = async () => {
     const liters = parseN(fuelLiters);
     const price = parseN(fuelPrice);
-    if (!fuelTargetName.trim() || liters <= 0) return;
+    if (!(fuelAssetId || fuelTargetName.trim()) || liters <= 0) return;
     setSaving(true);
     const {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return;
     const total = liters * price;
-    const idPart = fuelTargetCode.trim() ? ` [${fuelTargetCode.trim()}]` : '';
-    const targetLabel = `${fuelTargetType === 'veiculo' ? 'VEICULO' : 'EQUIPAMENTO'}: ${fuelTargetName.trim()}${idPart}`;
+    const selectedAsset = activeAssets.find((a) => a.id === fuelAssetId);
+    const idPart = selectedAsset
+      ? selectedAsset.code.trim()
+        ? ` [${selectedAsset.code.trim()}]`
+        : ''
+      : fuelTargetCode.trim()
+        ? ` [${fuelTargetCode.trim()}]`
+        : '';
+    const targetLabel = selectedAsset
+      ? `${selectedAsset.kind === 'veiculo' ? 'VEICULO' : 'EQUIPAMENTO'}: ${selectedAsset.name}${idPart}`
+      : `${fuelTargetType === 'veiculo' ? 'VEICULO' : 'EQUIPAMENTO'}: ${fuelTargetName.trim()}${idPart}`;
     const { error } = await supabase.from('finance_fuel_logs').insert([
       {
         user_id: user.id,
@@ -335,6 +514,7 @@ export default function FinanceiroPage() {
     ]);
     setSaving(false);
     if (error) return alert(`Erro: ${error.message}`);
+    setFuelAssetId('');
     setFuelTargetType('veiculo');
     setFuelTargetName('');
     setFuelTargetCode('');
@@ -542,6 +722,47 @@ export default function FinanceiroPage() {
               <Plus size={16} /> Adicionar
             </button>
           </div>
+          <div className="bg-white p-4 rounded-xl border border-border shadow-sm space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs font-bold uppercase text-slate-500">Contas recorrentes</p>
+              <button
+                type="button"
+                onClick={() => void generateRecurringAccounts()}
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-primary text-xs font-bold hover:bg-slate-100"
+              >
+                <Plus size={14} /> Gerar contas recorrentes do mês
+              </button>
+            </div>
+            <div className="grid md:grid-cols-5 gap-2 items-end">
+              <input className="px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Título recorrente" value={tplTitle} onChange={(e) => setTplTitle(e.target.value)} />
+              <input className="px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Valor (R$)" value={tplAmount} onChange={(e) => setTplAmount(e.target.value)} />
+              <input type="number" min={1} max={31} className="px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Dia do vencimento" value={tplDueDay} onChange={(e) => setTplDueDay(Number(e.target.value || 1))} />
+              <input className="px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Categoria" value={tplCategory} onChange={(e) => setTplCategory(e.target.value)} />
+              <button type="button" disabled={saving || !tplTitle.trim()} onClick={() => void addAccountTemplate()} className="inline-flex items-center justify-center gap-2 bg-primary text-white px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-50">
+                <Plus size={16} /> Adicionar recorrente
+              </button>
+            </div>
+            <ul className="divide-y divide-slate-100 border border-slate-100 rounded-lg overflow-hidden">
+              {accountTemplates.map((t) => (
+                <li key={t.id} className={`px-3 py-2 flex items-center gap-2 ${t.active ? 'bg-white' : 'bg-slate-50/70'}`}>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-bold text-primary truncate">{t.title}</div>
+                    <div className="text-[10px] text-slate-500">
+                      dia {t.due_day} · {currency(Number(t.amount || 0))} · {t.category}
+                      {t.last_generated_month ? ` · último: ${t.last_generated_month}` : ''}
+                    </div>
+                  </div>
+                  <label className="text-[10px] font-bold text-slate-600 flex items-center gap-1">
+                    <input type="checkbox" checked={t.active} onChange={(e) => void setTemplateActive(t, e.target.checked)} />
+                    Ativo
+                  </label>
+                  <button type="button" onClick={() => void removeRow('finance_account_templates', t.id)} className="p-2 rounded text-slate-500 hover:bg-rose-50 hover:text-rose-700">
+                    <Trash2 size={14} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
           <div className="bg-white rounded-xl border border-border shadow-sm overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 border-b">
@@ -584,6 +805,27 @@ export default function FinanceiroPage() {
         <div className="space-y-4">
           <div className="bg-white p-4 rounded-xl border border-border shadow-sm grid md:grid-cols-8 gap-2 items-end">
             <input type="date" className="px-3 py-2 rounded-lg border border-slate-200 text-sm" value={fuelDate} onChange={(e) => setFuelDate(e.target.value)} />
+            <select
+              className="px-3 py-2 rounded-lg border border-slate-200 text-sm"
+              value={fuelAssetId}
+              onChange={(e) => {
+                const id = e.target.value;
+                setFuelAssetId(id);
+                const selected = activeAssets.find((a) => a.id === id);
+                if (selected) {
+                  setFuelTargetType(selected.kind);
+                  setFuelTargetName(selected.name);
+                  setFuelTargetCode(selected.code || '');
+                }
+              }}
+            >
+              <option value="">Selecionar cadastrado…</option>
+              {activeAssets.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {(a.kind === 'veiculo' ? 'VEICULO' : 'EQUIPAMENTO') + ': ' + a.name + (a.code ? ` [${a.code}]` : '')}
+                </option>
+              ))}
+            </select>
             <select className="px-3 py-2 rounded-lg border border-slate-200 text-sm" value={fuelTargetType} onChange={(e) => setFuelTargetType(e.target.value as 'veiculo' | 'equipamento')}>
               <option value="veiculo">Veículo</option>
               <option value="equipamento">Equipamento</option>
@@ -593,9 +835,40 @@ export default function FinanceiroPage() {
             <input className="px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Litros" value={fuelLiters} onChange={(e) => setFuelLiters(e.target.value)} />
             <input className="px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Preço/litro" value={fuelPrice} onChange={(e) => setFuelPrice(e.target.value)} />
             <input className="px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="KM/Horas (opcional)" value={fuelOdometer} onChange={(e) => setFuelOdometer(e.target.value)} />
-            <button type="button" disabled={saving || !fuelTargetName.trim()} onClick={() => void addFuel()} className="inline-flex items-center justify-center gap-2 bg-primary text-white px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-50">
+            <button type="button" disabled={saving || !(fuelAssetId || fuelTargetName.trim())} onClick={() => void addFuel()} className="inline-flex items-center justify-center gap-2 bg-primary text-white px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-50">
               <Plus size={16} /> Lançar
             </button>
+          </div>
+          <div className="bg-white p-4 rounded-xl border border-border shadow-sm space-y-3">
+            <p className="text-xs font-bold uppercase text-slate-500">Cadastro de veículos e equipamentos</p>
+            <div className="grid md:grid-cols-4 gap-2 items-end">
+              <select className="px-3 py-2 rounded-lg border border-slate-200 text-sm" value={assetKind} onChange={(e) => setAssetKind(e.target.value as 'veiculo' | 'equipamento')}>
+                <option value="veiculo">Veículo</option>
+                <option value="equipamento">Equipamento</option>
+              </select>
+              <input className="px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Nome do item" value={assetName} onChange={(e) => setAssetName(e.target.value)} />
+              <input className="px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Placa / TAG / ID" value={assetCode} onChange={(e) => setAssetCode(e.target.value)} />
+              <button type="button" disabled={saving || !assetName.trim()} onClick={() => void addAsset()} className="inline-flex items-center justify-center gap-2 bg-primary text-white px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-50">
+                <Plus size={16} /> Cadastrar item
+              </button>
+            </div>
+            <ul className="divide-y divide-slate-100 border border-slate-100 rounded-lg overflow-hidden">
+              {assets.map((a) => (
+                <li key={a.id} className={`px-3 py-2 flex items-center gap-2 ${a.active ? 'bg-white' : 'bg-slate-50/70'}`}>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-bold text-primary truncate">{a.kind === 'veiculo' ? 'VEICULO' : 'EQUIPAMENTO'}: {a.name}</div>
+                    <div className="text-[10px] text-slate-500">{a.code || 'Sem identificação'}</div>
+                  </div>
+                  <label className="text-[10px] font-bold text-slate-600 flex items-center gap-1">
+                    <input type="checkbox" checked={a.active} onChange={(e) => void setAssetActive(a, e.target.checked)} />
+                    Ativo
+                  </label>
+                  <button type="button" onClick={() => void removeRow('finance_assets', a.id)} className="p-2 rounded text-slate-500 hover:bg-rose-50 hover:text-rose-700">
+                    <Trash2 size={14} />
+                  </button>
+                </li>
+              ))}
+            </ul>
           </div>
           <div className="bg-white p-4 rounded-xl border border-border shadow-sm flex flex-wrap items-end gap-2">
             <div className="min-w-[280px]">

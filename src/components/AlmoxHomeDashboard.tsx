@@ -14,6 +14,8 @@ import {
   Loader2,
   Package,
   TrendingDown,
+  Wallet,
+  Bell,
 } from 'lucide-react';
 
 function StatCard({
@@ -54,6 +56,12 @@ function StatCard({
 export function AlmoxHomeDashboard() {
   const [snap, setSnap] = useState<AlmoxDashboardSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
+  const [financeSummary, setFinanceSummary] = useState<{
+    pendingAccountsMonth: number;
+    fuelMonth: number;
+    expensesMonth: number;
+    remindersToday: number;
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -67,8 +75,87 @@ export function AlmoxHomeDashboard() {
         return;
       }
       const data = await fetchAlmoxDashboardSnapshot(supabase, user.id);
+      const now = new Date();
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+      const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
+      const [accR, fuelR, expR, remR] = await Promise.all([
+        supabase
+          .from('finance_accounts')
+          .select('amount, status, due_date')
+          .eq('user_id', user.id)
+          .eq('status', 'pending')
+          .gte('due_date', monthStart)
+          .lte('due_date', monthEnd),
+        supabase
+          .from('finance_fuel_logs')
+          .select('total_amount, ref_date')
+          .eq('user_id', user.id)
+          .gte('ref_date', monthStart)
+          .lte('ref_date', monthEnd),
+        supabase
+          .from('finance_expenses')
+          .select('amount, ref_date')
+          .eq('user_id', user.id)
+          .gte('ref_date', monthStart)
+          .lte('ref_date', monthEnd),
+        supabase
+          .from('dashboard_reminders')
+          .select('id, frequency, weekday, day_of_month, month_of_year, interval_days, active, created_at')
+          .eq('user_id', user.id)
+          .eq('active', true),
+      ]);
       if (!cancelled) {
         setSnap(data);
+        if (!accR.error && !fuelR.error && !expR.error && !remR.error) {
+          const pendingAccountsMonth = (accR.data || []).reduce(
+            (s: number, r: unknown) => s + Number((r as { amount: number }).amount || 0),
+            0
+          );
+          const fuelMonth = (fuelR.data || []).reduce(
+            (s: number, r: unknown) => s + Number((r as { total_amount: number }).total_amount || 0),
+            0
+          );
+          const expensesMonth = (expR.data || []).reduce(
+            (s: number, r: unknown) => s + Number((r as { amount: number }).amount || 0),
+            0
+          );
+          const remindersToday = (remR.data || []).filter((r: unknown) => {
+            const row = r as {
+              frequency: string;
+              weekday: number | null;
+              day_of_month: number | null;
+              month_of_year: number | null;
+              interval_days: number | null;
+              active: boolean;
+              created_at: string;
+            };
+            if (row.frequency === 'daily') return true;
+            if (row.frequency === 'weekly') return row.weekday === now.getDay();
+            if (row.frequency === 'monthly') {
+              if (row.day_of_month == null) return false;
+              const last = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+              return now.getDate() === Math.min(last, row.day_of_month);
+            }
+            if (row.frequency === 'yearly') {
+              if (row.day_of_month == null || row.month_of_year == null) return false;
+              if (row.month_of_year !== now.getMonth() + 1) return false;
+              const last = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+              return now.getDate() === Math.min(last, row.day_of_month);
+            }
+            if (row.frequency === 'every_n_days') {
+              if (!row.interval_days || row.interval_days <= 0) return false;
+              const c = new Date(row.created_at);
+              const c0 = new Date(c.getFullYear(), c.getMonth(), c.getDate()).getTime();
+              const n0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+              const diff = Math.floor((n0 - c0) / 86400000);
+              return diff >= 0 && diff % row.interval_days === 0;
+            }
+            return false;
+          }).length;
+          setFinanceSummary({ pendingAccountsMonth, fuelMonth, expensesMonth, remindersToday });
+        } else {
+          setFinanceSummary(null);
+        }
         setLoading(false);
       }
     })();
@@ -151,6 +238,39 @@ export function AlmoxHomeDashboard() {
           tone="emerald"
         />
       </div>
+
+      {financeSummary && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCard
+            label="Contas pendentes (mês)"
+            value={financeSummary.pendingAccountsMonth.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+            sub="Financeiro > Contas"
+            icon={<Wallet size={22} />}
+            tone="rose"
+          />
+          <StatCard
+            label="Abastecimentos (mês)"
+            value={financeSummary.fuelMonth.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+            sub="Financeiro > Abastecimentos"
+            icon={<ArrowUpRight size={22} />}
+            tone="amber"
+          />
+          <StatCard
+            label="Despesas (mês)"
+            value={financeSummary.expensesMonth.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+            sub="Financeiro > Despesas"
+            icon={<ArrowDownLeft size={22} />}
+            tone="slate"
+          />
+          <StatCard
+            label="Lembretes hoje"
+            value={financeSummary.remindersToday}
+            sub="Financeiro > Lembretes"
+            icon={<Bell size={22} />}
+            tone="emerald"
+          />
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden">
