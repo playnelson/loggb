@@ -40,11 +40,11 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
       <div className="flex pt-16 h-screen">
         <Sidebar collapsed={sidebarCollapsed} />
         <main
-          className={`flex-1 p-8 overflow-y-auto transition-all duration-200 ${
+          className={`flex-1 p-6 md:p-8 overflow-y-auto transition-all duration-200 ${
             sidebarCollapsed ? 'ml-20 w-[calc(100vw-80px)]' : 'ml-64 w-[calc(100vw-256px)]'
-          }`}
+          } bg-transparent`}
         >
-          {children}
+          <div className="mx-auto w-full max-w-[1800px]">{children}</div>
         </main>
       </div>
     </>

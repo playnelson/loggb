@@ -15,10 +15,10 @@ type MuralNote = {
 };
 
 const COLOR_STYLES: Record<NoteColor, string> = {
-  yellow: 'bg-[#fff8b0] border-[#e6d25c] text-amber-950',
-  mint: 'bg-[#d6f5ef] border-[#5ec4b0] text-teal-950',
-  pink: 'bg-[#ffe4f0] border-[#f0a8c8] text-rose-950',
-  sky: 'bg-[#dbeafe] border-[#7cb8f0] text-sky-950',
+  yellow: 'bg-[#fff8b0]/95 border-[#e6d25c] text-amber-950',
+  mint: 'bg-[#d6f5ef]/95 border-[#5ec4b0] text-teal-950',
+  pink: 'bg-[#ffe4f0]/95 border-[#f0a8c8] text-rose-950',
+  sky: 'bg-[#dbeafe]/95 border-[#7cb8f0] text-sky-950',
 };
 
 const COLOR_PICK: { id: NoteColor; label: string }[] = [
@@ -194,10 +194,11 @@ export function MuralPostIts() {
       </div>
 
       <div
-        className="rounded-2xl border-2 border-dashed border-slate-300 bg-[#f8fafc] min-h-[360px] p-4 md:p-6"
+        className="rounded-2xl border border-slate-200/90 bg-white/45 backdrop-blur-sm min-h-[360px] p-4 md:p-6 shadow-sm"
         style={{
-          backgroundImage: 'radial-gradient(circle, #cbd5e1 1px, transparent 1px)',
-          backgroundSize: '14px 14px',
+          backgroundImage:
+            'radial-gradient(circle, rgba(148,163,184,0.42) 1px, transparent 1px), linear-gradient(180deg, rgba(255,255,255,0.3), rgba(248,250,252,0.38))',
+          backgroundSize: '14px 14px, 100% 100%',
         }}
       >
         {notes.length === 0 ? (
@@ -209,7 +210,7 @@ export function MuralPostIts() {
             {notes.map((n) => (
               <div
                 key={n.id}
-                className={`w-[200px] min-h-[160px] rounded-sm border-2 shadow-[3px_3px_0_0_rgba(15,23,42,0.08)] p-3 flex flex-col ${COLOR_STYLES[n.color]}`}
+                className={`w-[200px] min-h-[160px] rounded-xl border shadow-[0_10px_24px_-16px_rgba(15,23,42,0.34)] p-3 flex flex-col transition-all hover:-translate-y-0.5 ${COLOR_STYLES[n.color]}`}
               >
                 <div className="flex justify-end mb-1">
                   <button

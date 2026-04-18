@@ -34,12 +34,12 @@ import { fetchPurchaseOrdersForUser, fetchPurchaseOrderItemsForOrderIds } from '
 import { formatOcForDisplay } from '@/lib/purchaseOrderOc';
 
 const STAGE_COLORS = {
-  rascunho: { card: 'bg-[#f1f5f9] border-[#cbd5e1] shadow-[4px_4px_0_0_rgba(15,23,42,0.07)]', text: 'text-slate-900' },
-  cotando: { card: 'bg-[#dbeafe] border-[#93c5fd] shadow-[4px_4px_0_0_rgba(15,23,42,0.07)]', text: 'text-blue-950' },
-  aprovado: { card: 'bg-[#ede9fe] border-[#c4b5fd] shadow-[4px_4px_0_0_rgba(15,23,42,0.07)]', text: 'text-violet-950' },
-  comprado: { card: 'bg-[#fff8b0] border-[#e6d25c] shadow-[4px_4px_0_0_rgba(15,23,42,0.07)]', text: 'text-amber-950' },
-  recebido: { card: 'bg-[#dcfce7] border-[#86efac] shadow-[4px_4px_0_0_rgba(15,23,42,0.07)]', text: 'text-emerald-950' },
-  cancelado: { card: 'bg-[#fde8e8] border-[#e8a0a0] shadow-[4px_4px_0_0_rgba(15,23,42,0.07)]', text: 'text-red-950' },
+  rascunho: { card: 'bg-[#f1f5f9] border-[#cbd5e1] shadow-[0_10px_24px_-16px_rgba(15,23,42,0.32)]', text: 'text-slate-900' },
+  cotando: { card: 'bg-[#dbeafe] border-[#93c5fd] shadow-[0_10px_24px_-16px_rgba(15,23,42,0.32)]', text: 'text-blue-950' },
+  aprovado: { card: 'bg-[#ede9fe] border-[#c4b5fd] shadow-[0_10px_24px_-16px_rgba(15,23,42,0.32)]', text: 'text-violet-950' },
+  comprado: { card: 'bg-[#fff8b0] border-[#e6d25c] shadow-[0_10px_24px_-16px_rgba(15,23,42,0.32)]', text: 'text-amber-950' },
+  recebido: { card: 'bg-[#dcfce7] border-[#86efac] shadow-[0_10px_24px_-16px_rgba(15,23,42,0.32)]', text: 'text-emerald-950' },
+  cancelado: { card: 'bg-[#fde8e8] border-[#e8a0a0] shadow-[0_10px_24px_-16px_rgba(15,23,42,0.32)]', text: 'text-red-950' },
 } as const;
 
 function postitThemeForCard(col: KanbanColumnRow) {
@@ -447,7 +447,7 @@ export default function Home() {
                         .map((_, i) => (
                           <div
                             key={i}
-                            className="aspect-square w-full max-w-[240px] mx-auto bg-slate-200/50 rounded-sm border-2 border-slate-200 animate-pulse"
+                            className="aspect-square w-full max-w-[240px] mx-auto bg-slate-200/50 rounded-xl border border-slate-200/90 animate-pulse"
                           />
                         ))}
                     </div>
@@ -501,10 +501,10 @@ export default function Home() {
                               setDraggingOrderId(null);
                               setDropTargetColumnId(null);
                             }}
-                            className={`w-full max-w-[240px] mx-auto aspect-square rounded-sm border-2 p-2.5 flex flex-col ${theme.card} ${theme.text} transition-all ${
+                            className={`w-full max-w-[240px] mx-auto aspect-square rounded-xl border p-2.5 flex flex-col ${theme.card} ${theme.text} transition-all ${
                               draggingOrderId === o.id
                                 ? 'opacity-70 ring-2 ring-slate-600 scale-[0.97] rotate-1'
-                                : 'hover:brightness-[1.02]'
+                                : 'hover:brightness-[1.02] hover:-translate-y-0.5'
                             }`}
                           >
                             <div className="flex items-center justify-between gap-1 shrink-0">

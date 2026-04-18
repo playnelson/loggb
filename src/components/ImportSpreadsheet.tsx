@@ -447,7 +447,7 @@ export default function ImportSpreadsheet({
           </div>
         )}
         {progress.status === 'idle' && (
-          <div className="border-2 border-dashed border-slate-200 rounded-xl p-10 text-center hover:border-secondary transition-colors group cursor-pointer relative bg-slate-50/50">
+          <div className="border border-dashed border-slate-300/90 rounded-xl p-10 text-center hover:border-secondary/70 transition-colors group cursor-pointer relative bg-white/65 backdrop-blur-sm shadow-sm">
             <input 
               type="file" 
               accept=".xlsx, .xls, .csv" 

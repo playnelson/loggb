@@ -191,7 +191,7 @@ export function KanbanBoardEditor({
             type="button"
             disabled={saving}
             onClick={() => void addColumn()}
-            className="w-full flex items-center justify-center gap-2 py-3 border-2 border-dashed border-slate-300 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-50"
+            className="w-full flex items-center justify-center gap-2 py-3 border border-dashed border-slate-300/90 rounded-xl text-sm font-bold text-slate-600 bg-white/65 hover:bg-white/85 shadow-sm"
           >
             <Plus size={18} />
             Nova coluna

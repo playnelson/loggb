@@ -21,7 +21,147 @@
 }
 
 body {
-  background: var(--background);
+  background:
+    radial-gradient(1200px 540px at 12% -8%, color-mix(in srgb, var(--secondary) 14%, transparent), transparent 68%),
+    radial-gradient(900px 460px at 88% 4%, color-mix(in srgb, var(--accent) 20%, transparent), transparent 62%),
+    linear-gradient(180deg, color-mix(in srgb, var(--background) 94%, white) 0%, var(--background) 100%);
   color: var(--foreground);
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  min-height: 100vh;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--secondary) 36%, transparent);
+  color: var(--foreground);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--primary) 26%, transparent) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--primary) 25%, transparent);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@layer base {
+  input,
+  textarea,
+  select {
+    background: color-mix(in srgb, white 78%, var(--background));
+    border: 1px solid color-mix(in srgb, var(--border) 84%, white);
+    border-radius: 12px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: color-mix(in srgb, var(--foreground) 38%, transparent);
+  }
+
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible {
+    outline: none;
+    border-color: color-mix(in srgb, var(--secondary) 52%, var(--border));
+    box-shadow:
+      0 0 0 3px color-mix(in srgb, var(--secondary) 22%, transparent),
+      0 6px 18px -10px color-mix(in srgb, var(--primary) 26%, transparent);
+    background: white;
+  }
+
+  button,
+  a {
+    transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease, box-shadow 0.2s ease,
+      transform 0.12s ease;
+  }
+
+  button:active {
+    transform: translateY(0.5px) scale(0.997);
+  }
+}
+
+@layer utilities {
+  .bg-white {
+    background: linear-gradient(
+      168deg,
+      color-mix(in srgb, white 90%, var(--background)) 0%,
+      color-mix(in srgb, white 78%, var(--background)) 100%
+    );
+  }
+
+  .bg-slate-50 {
+    background-color: color-mix(in srgb, var(--background) 76%, white);
+  }
+
+  .bg-slate-100 {
+    background-color: color-mix(in srgb, var(--background) 65%, white);
+  }
+
+  .border,
+  .border-border,
+  .border-slate-100,
+  .border-slate-200,
+  .border-slate-300 {
+    border-color: color-mix(in srgb, var(--border) 86%, white);
+  }
+
+  .rounded-lg {
+    border-radius: 0.9rem;
+  }
+
+  .rounded-xl {
+    border-radius: 1rem;
+  }
+
+  .rounded-2xl {
+    border-radius: 1.2rem;
+  }
+
+  .shadow-sm {
+    box-shadow:
+      0 1px 2px color-mix(in srgb, var(--primary) 5%, transparent),
+      0 10px 24px -18px color-mix(in srgb, var(--primary) 18%, transparent);
+  }
+
+  .shadow-md {
+    box-shadow:
+      0 2px 3px color-mix(in srgb, var(--primary) 6%, transparent),
+      0 16px 30px -18px color-mix(in srgb, var(--primary) 22%, transparent);
+  }
+
+  .shadow-lg {
+    box-shadow:
+      0 3px 4px color-mix(in srgb, var(--primary) 7%, transparent),
+      0 18px 34px -16px color-mix(in srgb, var(--primary) 24%, transparent);
+  }
+
+  .shadow-xl {
+    box-shadow:
+      0 4px 8px color-mix(in srgb, var(--primary) 8%, transparent),
+      0 28px 40px -22px color-mix(in srgb, var(--primary) 28%, transparent);
+  }
+
+  .shadow-2xl {
+    box-shadow:
+      0 8px 16px color-mix(in srgb, var(--primary) 10%, transparent),
+      0 36px 56px -26px color-mix(in srgb, var(--primary) 32%, transparent);
+  }
+
+  .backdrop-blur-sm,
+  .backdrop-blur {
+    backdrop-filter: blur(14px);
+  }
 }
