@@ -278,6 +278,32 @@ function InventoryContent() {
     fetchWorkSites();
   }, [fetchWorkSites]);
 
+  useEffect(() => {
+    // Mantém o carrinho sincronizado com os dados mais atuais dos itens editados.
+    setCart((prev) => {
+      let changed = false;
+      const next = prev.map((line) => {
+        const current = products.find((p) => p.id === line.itemId);
+        if (!current) return line;
+        if (
+          line.description === current.description &&
+          line.unit === current.unit &&
+          line.consumable === Boolean(current.consumable)
+        ) {
+          return line;
+        }
+        changed = true;
+        return {
+          ...line,
+          description: current.description,
+          unit: current.unit,
+          consumable: Boolean(current.consumable),
+        };
+      });
+      return changed ? next : prev;
+    });
+  }, [products]);
+
   const categoryNames = categories?.map((c) => c.name) ?? [...FALLBACK_CATEGORIES];
   const categoryOptions = Array.from(
     new Set([...(categoryNames || []), ...products.map((p) => p.category).filter(Boolean)])
@@ -475,6 +501,21 @@ function InventoryContent() {
     if (error) {
       alert('Erro ao atualizar: ' + error.message);
     } else {
+      // Se virou consumível, removemos saldos de carteira/local para não manter
+      // material "não consumível legado" em posse após a alteração de cadastro.
+      if (!editingItem.consumable && formData.consumable) {
+        const [employeePosDel, sitePosDel] = await Promise.all([
+          supabase.from('possession').delete().eq('item_id', editingItem.id),
+          supabase.from('site_possession').delete().eq('item_id', editingItem.id),
+        ]);
+        if (employeePosDel.error || sitePosDel.error) {
+          const msg =
+            employeePosDel.error?.message ||
+            sitePosDel.error?.message ||
+            'Falha ao limpar posse antiga.';
+          alert(`Item atualizado, mas houve erro ao limpar carteiras antigas: ${msg}`);
+        }
+      }
       setEditingItem(null);
       fetchProducts();
     }
@@ -792,6 +833,8 @@ function InventoryContent() {
 
     for (let i = 0; i < cart.length; i++) {
       const line = cart[i];
+      const currentItem = products.find((p) => p.id === line.itemId);
+      const isConsumableNow = currentItem ? Boolean(currentItem.consumable) : line.consumable;
       const mvRes = await recordMovement(supabase, {
         item_id: line.itemId,
         employee_id: cartDestination === 'employee' ? cartEmployeeId : null,
@@ -807,7 +850,7 @@ function InventoryContent() {
         return;
       }
 
-      if (!line.consumable) {
+      if (!isConsumableNow) {
         if (cartDestination === 'employee') {
           const { data: currentPos } = await supabase
             .from('possession')

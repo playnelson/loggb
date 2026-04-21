@@ -57,8 +57,9 @@ const EPI_DISCARD_TAG = 'DESCARTE';
 type EpiConsumableBalanceRow = { item_id: string; description: string; unit: string; balance: number };
 
 function isEpiConsumableItem(items: Possession['items'] | null | undefined): boolean {
-  // Regra do produto: todo EPI deve aparecer na carteira, independente do flag consumável.
-  return !!items && items.category === 'EPI';
+  // EPI consumível é calculado por saldo de movimentos (OUT - IN).
+  // Se o item mudou para não consumível, deve sair desse cálculo e ficar só pela posse.
+  return !!items && items.category === 'EPI' && !!items.consumable;
 }
 
 function movementIsEpiDiscard(m: { type?: string; tag?: string | null }): boolean {
