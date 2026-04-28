@@ -24,6 +24,7 @@ interface Product {
   consumable: boolean;
   unit: string;
   unique_item?: boolean;
+  tag?: string | null;
 }
 
 interface Employee {
@@ -61,7 +62,6 @@ export default function QuickMovementModal({
   const [selectedEmployee, setSelectedEmployee] = useState('');
   const [selectedSiteId, setSelectedSiteId] = useState('');
   const [quantity, setQuantity] = useState(1);
-  const [tag, setTag] = useState('');
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -108,13 +108,12 @@ export default function QuickMovementModal({
       setQuantity(1);
       setSelectedEmployee('');
       setSelectedSiteId('');
-      setTag('');
       setSuccess(false);
       setError(null);
       void fetchEmployees();
       void fetchWorkSites();
     }
-  }, [isOpen, initialMode, fetchEmployees, fetchWorkSites]);
+  }, [isOpen, initialMode, fetchEmployees, fetchWorkSites, item]);
 
   const needsEmployee = useMemo(() => {
     if (!item || counterparty !== 'employee') return false;
@@ -139,6 +138,8 @@ export default function QuickMovementModal({
   }, [item, mode, counterparty]);
 
   const isUnique = Boolean(item?.unique_item);
+  const registeredTag = item?.tag?.trim() ?? '';
+  const movementTag = registeredTag;
 
   const effectiveQty = useMemo(() => (isUnique ? 1 : quantity), [isUnique, quantity]);
 
@@ -154,7 +155,7 @@ export default function QuickMovementModal({
     }
     if (!Number.isFinite(effectiveQty) || effectiveQty <= 0) return 'Quantidade deve ser maior que zero.';
     if (mode === 'OUT' && effectiveQty > item.quantity_current) return 'Quantidade maior do que o saldo atual.';
-    if (isUnique && !tag.trim()) return 'Informe a TAG do item único.';
+    if (isUnique && !movementTag) return 'Este item único está sem TAG no cadastro. Edite o item e informe a TAG para continuar.';
     return null;
   }, [
     item,
@@ -167,7 +168,7 @@ export default function QuickMovementModal({
     mode,
     effectiveQty,
     isUnique,
-    tag,
+    movementTag,
   ]);
 
   const insertMovement = useCallback(async (payload: Record<string, unknown>) => {
@@ -212,7 +213,7 @@ export default function QuickMovementModal({
       quantity: effectiveQty,
       performed_by: user.id,
     };
-    if (isUnique) movePayload.tag = tag.trim();
+    if (isUnique) movePayload.tag = movementTag;
 
     // 1b. Antes de gravar: validar carteira (colaborador ou local).
     if (!item.consumable && mode === 'IN') {
@@ -462,18 +463,13 @@ export default function QuickMovementModal({
                 <div className="space-y-2">
                   <label className="text-xs font-black uppercase flex items-center gap-2 text-secondary">
                     <Tag size={14} />
-                    TAG do item único *
+                    TAG cadastrada do item
                   </label>
-                  <input
-                    required
-                    type="text"
-                    className="w-full p-3 bg-white border-2 border-secondary/60 rounded-lg focus:ring-4 focus:ring-secondary/15 outline-none font-black tracking-wide text-primary"
-                    placeholder="Ex.: TAG-000123"
-                    value={tag}
-                    onChange={(e) => setTag(e.target.value)}
-                  />
+                  <div className="w-full p-3 bg-slate-100 border border-slate-200 rounded-lg font-black tracking-wide text-primary">
+                    {registeredTag || 'Sem TAG cadastrada'}
+                  </div>
                   <div className="text-[10px] text-slate-400 font-bold">
-                    Essa TAG vai junto no histórico da movimentação.
+                    A TAG é definida somente no cadastro do item e será usada automaticamente no histórico da movimentação.
                   </div>
                 </div>
               )}
