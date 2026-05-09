@@ -30,10 +30,7 @@ interface PoHeader {
   vendor_name: string | null;
   vendor_phone: string | null;
   vendor_contact_name: string | null;
-  store_name: string | null;
   delivery_deadline: string | null;
-  request_date: string | null;
-  approval_status: string | null;
   source_filename: string | null;
   created_at: string;
 }
@@ -90,10 +87,7 @@ export default function OrdemCompraDetailPage() {
         vendor_name: po.vendor_name,
         vendor_phone: po.vendor_phone,
         vendor_contact_name: po.vendor_contact_name,
-        store_name: po.store_name,
         delivery_deadline: po.delivery_deadline,
-        request_date: po.request_date,
-        approval_status: po.approval_status,
         source_filename: po.source_filename,
         created_at: po.created_at,
       });
@@ -123,7 +117,7 @@ export default function OrdemCompraDetailPage() {
     const { data: po, error: e1 } = await supabase
       .from('purchase_orders')
       .select(
-        'id, oc_number, title, buyer_code, buyer_name, buyer_phone, vendor_name, vendor_phone, vendor_contact_name, store_name, delivery_deadline, request_date, approval_status, source_filename, created_at'
+        'id, oc_number, title, buyer_code, buyer_name, buyer_phone, vendor_name, vendor_phone, vendor_contact_name, delivery_deadline, source_filename, created_at'
       )
       .eq('id', id)
       .eq('user_id', user.id)
@@ -239,11 +233,6 @@ export default function OrdemCompraDetailPage() {
             <h1 className="text-2xl font-bold text-primary flex items-center gap-2 flex-wrap">
               <ClipboardList className="text-secondary shrink-0" />
               <span>OC {header.oc_number || '—'}</span>
-              {header.approval_status && (
-                <span className="text-xs font-black uppercase px-2 py-1 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
-                  {header.approval_status.replace(/_/g, ' ')}
-                </span>
-              )}
             </h1>
             <p className="text-slate-600 text-sm font-medium break-all">
               {header.title || 'Ordem de compra'}
@@ -287,21 +276,11 @@ export default function OrdemCompraDetailPage() {
 
             <div className="bg-white rounded-xl border border-border p-4 space-y-2 sm:col-span-2">
               <div className="text-[10px] font-black uppercase text-slate-400 flex items-center gap-1">
-                <Truck size={12} /> Loja e prazos
+                <Truck size={12} /> Entrega
               </div>
-              <div className="flex flex-wrap gap-4 text-sm">
-                <div>
-                  <span className="text-slate-400 text-xs font-bold uppercase">Loja / coligada</span>
-                  <div className="font-medium text-primary">{header.store_name || '—'}</div>
-                </div>
-                <div>
-                  <span className="text-slate-400 text-xs font-bold uppercase">Prazo / necessidade</span>
-                  <div className="font-medium text-primary">{formatDateBR(header.delivery_deadline)}</div>
-                </div>
-                <div>
-                  <span className="text-slate-400 text-xs font-bold uppercase">Solicitação</span>
-                  <div className="font-medium text-primary">{formatDateBR(header.request_date)}</div>
-                </div>
+              <div className="text-sm">
+                <span className="text-slate-400 text-xs font-bold uppercase">Data de entrega</span>
+                <div className="font-medium text-primary">{formatDateBR(header.delivery_deadline)}</div>
               </div>
             </div>
           </div>

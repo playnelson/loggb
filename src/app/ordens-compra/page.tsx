@@ -35,7 +35,6 @@ interface OrderRow {
   oc_number: string | null;
   title: string | null;
   vendor_name: string | null;
-  store_name: string | null;
   delivery_deadline: string | null;
   created_at: string;
   purchase_order_items: { id: string; delivered: boolean }[] | null;
@@ -49,10 +48,7 @@ const emptyDraft = (): ParsedPurchaseOrder => ({
   vendor_name: null,
   vendor_phone: null,
   vendor_contact_name: null,
-  store_name: null,
   delivery_deadline: null,
-  request_date: null,
-  approval_status: null,
   title: null,
   items: [],
 });
@@ -68,7 +64,6 @@ export default function OrdensCompraPage() {
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [filterStore, setFilterStore] = useState('');
   const [filterPending, setFilterPending] = useState<'all' | 'pending' | 'done'>('all');
 
   const [importOpen, setImportOpen] = useState(false);
@@ -89,7 +84,6 @@ export default function OrdensCompraPage() {
           oc_number: o.oc_number,
           title: o.title,
           vendor_name: o.vendor_name,
-          store_name: o.store_name,
           delivery_deadline: o.delivery_deadline,
           created_at: o.created_at,
           purchase_order_items: o.items.map((i) => ({ id: i.id, delivered: i.delivered })),
@@ -108,7 +102,7 @@ export default function OrdensCompraPage() {
 
     const { data, error } = await supabase
       .from('purchase_orders')
-      .select('id, oc_number, title, vendor_name, store_name, delivery_deadline, created_at, purchase_order_items(id, delivered)')
+      .select('id, oc_number, title, vendor_name, delivery_deadline, created_at, purchase_order_items(id, delivered)')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false });
 
@@ -126,7 +120,6 @@ export default function OrdensCompraPage() {
   }, [fetchOrders]);
 
   const searchLower = search.trim().toLowerCase();
-  const storeLower = filterStore.trim().toLowerCase();
 
   const filtered = useMemo(() => {
     return orders.filter((o) => {
@@ -138,24 +131,18 @@ export default function OrdensCompraPage() {
       if (filterPending === 'pending' && !pending) return false;
       if (filterPending === 'done' && (total === 0 || done < total)) return false;
 
-      if (storeLower) {
-        const s = (o.store_name || '').toLowerCase();
-        if (!s.includes(storeLower)) return false;
-      }
-
       if (!searchLower) return true;
       const hay = [
         o.oc_number,
         o.title,
         o.vendor_name,
-        o.store_name,
       ]
         .filter(Boolean)
         .join(' ')
         .toLowerCase();
       return hay.includes(searchLower);
     });
-  }, [orders, searchLower, storeLower, filterPending]);
+  }, [orders, searchLower, filterPending]);
 
   const openNewManual = () => {
     setDraft(emptyDraft());
@@ -252,10 +239,7 @@ export default function OrdensCompraPage() {
           vendor_name: draft.vendor_name?.trim() || null,
           vendor_phone: draft.vendor_phone?.trim() || null,
           vendor_contact_name: draft.vendor_contact_name?.trim() || null,
-          store_name: draft.store_name?.trim() || null,
           delivery_deadline: draft.delivery_deadline || null,
-          request_date: draft.request_date || null,
-          approval_status: draft.approval_status?.trim() || null,
           source_filename: sourceFilename,
           created_at: new Date().toISOString(),
           items,
@@ -284,10 +268,7 @@ export default function OrdensCompraPage() {
         vendor_name: draft.vendor_name?.trim() || null,
         vendor_phone: draft.vendor_phone?.trim() || null,
         vendor_contact_name: draft.vendor_contact_name?.trim() || null,
-        store_name: draft.store_name?.trim() || null,
         delivery_deadline: draft.delivery_deadline || null,
-        request_date: draft.request_date || null,
-        approval_status: draft.approval_status?.trim() || null,
         source_filename: sourceFilename,
         raw_extracted_text: null,
         notes: null,
@@ -348,7 +329,7 @@ export default function OrdensCompraPage() {
             Ordens de compra
           </h1>
           <p className="text-slate-500 text-sm">
-            Envie o PDF da OC; o sistema preenche comprador, fornecedor, loja, prazo e itens. Marque entregas na página do pedido.
+            Envie o PDF da OC; o sistema preenche comprador, fornecedor, prazo e itens. Marque entregas na página do pedido.
           </p>
           {ORDENS_COMPRA_DEV_LOCAL && (
             <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-medium text-amber-950">
@@ -390,20 +371,11 @@ export default function OrdensCompraPage() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
               <input
                 className="w-full pl-10 pr-3 py-3 rounded-xl border border-slate-200 text-sm font-medium text-primary outline-none focus:ring-2 focus:ring-secondary/30 min-h-[48px]"
-                placeholder="Nº OC, fornecedor, loja…"
+                placeholder="Nº OC, fornecedor, título…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
-          </div>
-          <div className="w-full lg:w-48">
-            <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">Loja / coligada</label>
-            <input
-              className="w-full px-3 py-3 rounded-xl border border-slate-200 text-sm outline-none focus:ring-2 focus:ring-secondary/30 min-h-[48px]"
-              placeholder="Filtrar…"
-              value={filterStore}
-              onChange={(e) => setFilterStore(e.target.value)}
-            />
           </div>
           <div className="w-full lg:w-52">
             <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">Entrega</label>
@@ -422,7 +394,6 @@ export default function OrdensCompraPage() {
             className="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-600 hover:bg-slate-50 min-h-[48px] lg:mb-0"
             onClick={() => {
               setSearch('');
-              setFilterStore('');
               setFilterPending('all');
             }}
           >
@@ -453,7 +424,6 @@ export default function OrdensCompraPage() {
                 <tr className="bg-slate-50 border-b border-slate-100 text-left text-[10px] font-black uppercase text-slate-500">
                   <th className="px-4 py-3">OC</th>
                   <th className="px-4 py-3">Fornecedor / título</th>
-                  <th className="px-4 py-3 hidden sm:table-cell">Loja</th>
                   <th className="px-4 py-3">Prazo</th>
                   <th className="px-4 py-3">Entrega</th>
                   <th className="px-4 py-3 w-24" />
@@ -473,9 +443,6 @@ export default function OrdensCompraPage() {
                         <div className="font-medium text-primary truncate max-w-[240px] sm:max-w-md">
                           {o.title || o.vendor_name || 'Sem título'}
                         </div>
-                      </td>
-                      <td className="px-4 py-3 text-slate-600 hidden sm:table-cell">
-                        {o.store_name || '—'}
                       </td>
                       <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
                         {formatDateBR(o.delivery_deadline)}
@@ -608,14 +575,6 @@ export default function OrdensCompraPage() {
                   />
                 </label>
                 <label className="block text-xs font-bold text-slate-600">
-                  Loja / coligada
-                  <input
-                    className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 text-sm"
-                    value={draft.store_name || ''}
-                    onChange={(e) => setDraft((d) => ({ ...d, store_name: e.target.value || null }))}
-                  />
-                </label>
-                <label className="block text-xs font-bold text-slate-600">
                   Fornecedor
                   <input
                     className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 text-sm"
@@ -639,30 +598,13 @@ export default function OrdensCompraPage() {
                     onChange={(e) => setDraft((d) => ({ ...d, vendor_phone: e.target.value || null }))}
                   />
                 </label>
-                <label className="block text-xs font-bold text-slate-600">
-                  Prazo / data necessidade
+                <label className="block text-xs font-bold text-slate-600 md:col-span-2">
+                  Data de entrega
                   <input
                     type="date"
                     className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 text-sm"
                     value={draft.delivery_deadline || ''}
                     onChange={(e) => setDraft((d) => ({ ...d, delivery_deadline: e.target.value || null }))}
-                  />
-                </label>
-                <label className="block text-xs font-bold text-slate-600">
-                  Data solicitação
-                  <input
-                    type="date"
-                    className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 text-sm"
-                    value={draft.request_date || ''}
-                    onChange={(e) => setDraft((d) => ({ ...d, request_date: e.target.value || null }))}
-                  />
-                </label>
-                <label className="block text-xs font-bold text-slate-600 md:col-span-2">
-                  Status aprovação (texto do PDF)
-                  <input
-                    className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 text-sm"
-                    value={draft.approval_status || ''}
-                    onChange={(e) => setDraft((d) => ({ ...d, approval_status: e.target.value || null }))}
                   />
                 </label>
               </div>

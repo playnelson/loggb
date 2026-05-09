@@ -18,10 +18,7 @@ export interface ParsedPurchaseOrder {
   vendor_name: string | null;
   vendor_phone: string | null;
   vendor_contact_name: string | null;
-  store_name: string | null;
   delivery_deadline: string | null;
-  request_date: string | null;
-  approval_status: string | null;
   title: string | null;
   items: ParsedPurchaseOrderItem[];
 }
@@ -62,10 +59,12 @@ export function ocNumberFromFilename(name: string): string | null {
   return m ? stripLeadingZerosOc(m[1]) : null;
 }
 
-/** Título exibido na OC: sempre o nome do arquivo (sem pasta). */
+/** Título exibido na OC: nome do arquivo sem pasta e sem extensão (ex.: .pdf). */
 export function titleFromSourceFilename(sourceFilename: string): string | null {
   const base = sourceFilename.replace(/^.*[/\\]/, '').trim();
-  return base || null;
+  if (!base) return null;
+  const withoutExt = base.replace(/\.[^.]+$/i, '').trim();
+  return withoutExt || base;
 }
 
 function extractOcNumber(text: string): string | null {
@@ -93,46 +92,10 @@ function extractBuyer(text: string): { code: string | null; name: string | null 
   return { code: null, name: null };
 }
 
-function extractStore(text: string): string | null {
-  const afterBuyer = text.match(/Comprador\s*:\s*\n\s*\S+\s+[^\n]+\n\s*([^\n]+)/i);
-  if (afterBuyer) {
-    const line = afterBuyer[1].trim();
-    if (
-      /^\d{2,4}_[A-Z0-9_]+(\s+[A-Za-zÀ-Ú0-9_]+)*$/i.test(line) ||
-      /^[A-Z0-9_]{4,}$/i.test(line)
-    ) {
-      return normalizeWs(line);
-    }
-  }
-  const loose = text.match(/\b(\d{3}_[A-Z0-9_]+(?:\s+[A-Za-zÀ-Ú0-9_]+)*)\b/i);
-  return loose ? normalizeWs(loose[1]) : null;
-}
-
-function extractApprovalStatus(text: string): string | null {
-  const m = text.match(/Status\s*da\s*Aprovação\s*\n\s*([A-ZÁ-Ú0-9_]+)/i);
-  return m ? m[1].trim() : null;
-}
-
-function extractDates(text: string): { request: string | null; delivery: string | null } {
-  let request: string | null = null;
-  const req = text.match(/No\.?\s*Solicitação\s*\n\s*(\d{2}\/\d{2}\/\d{4})/i);
-  if (req) request = parseBrDate(req[1]);
-
-  let delivery: string | null = null;
+/** Somente data de entrega no PDF. */
+function extractDeliveryDeadline(text: string): string | null {
   const de = text.match(/Data\s*Entrega\s*:\s*\n\s*(\d{2}\/\d{2}\/\d{4})/i);
-  if (de) delivery = parseBrDate(de[1]);
-
-  if (!delivery) {
-    const dn = text.match(/Data\s*Necessidade\s*:\s*\n\s*(\d{2}\/\d{2}\/\d{4})/i);
-    if (dn) delivery = parseBrDate(dn[1]);
-  }
-
-  if (!delivery) {
-    const itemBlock = text.match(/\bITEM\s*\n\s*BOLETO\s*\n\s*(\d{2}\/\d{2}\/\d{4})/i);
-    if (itemBlock) delivery = parseBrDate(itemBlock[1]);
-  }
-
-  return { request, delivery };
+  return de ? parseBrDate(de[1]) : null;
 }
 
 function itemStartLine(line: string): { num: number; rest: string } | null {
@@ -171,9 +134,104 @@ function isJunkContinuation(line: string): boolean {
   if (/^\d{10,}/.test(line.replace(/\D/g, '')) && line.length > 14) return true;
   if (/^\d{5}-\d{3}\b/.test(line)) return true;
   if (/^\d+Rua\b/i.test(line)) return true;
+  if (/^\d{1,4}Rodovia\b/i.test(line)) return true;
+  if (/^Rodovia\b/i.test(line)) return true;
+  if (/\bRodovia\b/i.test(line) && /\b(papagaio|canto|km\s*\d|BR-?\d)/i.test(line)) return true;
   if (/^RN[A-Za-zÀ-ú]/i.test(line)) return true;
   if (/Mossoró|Macau|Betânia|Zona\s+Rural/i.test(line)) return true;
   return false;
+}
+
+/** Corta trecho de rodapé/endereço colado na descrição pelo fluxo do PDF (ex.: "900ML 35Rodovia Canto…"). */
+function stripAddressNoiseFromDescription(s: string): string {
+  let t = s;
+  const cutNumRodo = /\s+\d{1,4}Rodovia\b/i.exec(t);
+  if (cutNumRodo?.index != null) t = t.slice(0, cutNumRodo.index);
+  else {
+    const cutRodo = /\s+Rodovia\b/i.exec(t);
+    if (cutRodo?.index != null && /\b(papagaio|canto do|BR-?\d|km\s*\d)/i.test(t.slice(cutRodo.index))) {
+      t = t.slice(0, cutRodo.index);
+    }
+  }
+  const cutRua = /\s+Rua\s+[A-Za-zÀ-ÿ0-9]/i.exec(t);
+  if (cutRua?.index != null) t = t.slice(0, cutRua.index);
+  return normalizeWs(t);
+}
+
+/** Unidade + quantidade no fim da linha (colunas UND. e QTD. do PDF), não volume na descrição (ex.: 2,7L). */
+const GRID_UNIT_TOKEN =
+  '(?:UN|UND\\.?|PAR|PÇ|PC|PT|CX|FD|SC|GL|LT|MT|M2|M3|KG|G|ML|BD)';
+
+function parseBrazilianQuantityToken(raw: string): number | null {
+  const t = raw.trim();
+  if (!/^[\d.,]+$/.test(t)) return null;
+  const lastComma = t.lastIndexOf(',');
+  const lastDot = t.lastIndexOf('.');
+  let normalized: string;
+  if (lastComma === -1 && lastDot === -1) {
+    normalized = t;
+  } else if (lastComma > lastDot) {
+    normalized = t.replace(/\./g, '').replace(',', '.');
+  } else if (lastDot > lastComma) {
+    normalized = t.replace(/,/g, '');
+  } else {
+    normalized = t.replace(',', '.');
+  }
+  const n = parseFloat(normalized);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Colunas PREÇO/DESC./TOTAL à direita da QTD no PDF viram números extras no fim da linha. */
+const GRID_TAIL_PRICE_COLUMNS = '(?:\\s+[\\d.,]+){0,6}\\s*';
+
+/** Ajusta colagens comuns do pdf-parse entre volume, UND e QTD. */
+function normalizeGridTailGlitches(s: string): string {
+  let d = s;
+  d = d.replace(/(\d+(?:[.,]\d+)?)(ML|LT|L)(?=UN\.?\s*[\d.,])/gi, '$1$2 ');
+  d = d.replace(/\b(UN|UND\.?)(?=[\d.,])/gi, '$1 ');
+  return d;
+}
+
+function extractQtyUnitFromGridTail(desc: string): {
+  description: string;
+  quantity: number | null;
+  unit: string | null;
+} {
+  const work = normalizeGridTailGlitches(desc);
+  const unitThenQty = new RegExp(
+    `\\s+(${GRID_UNIT_TOKEN})\\s+([\\d.,]+)${GRID_TAIL_PRICE_COLUMNS}$`,
+    'i'
+  );
+  const qtyThenUnit = new RegExp(
+    `\\s+([\\d.,]+)\\s+(${GRID_UNIT_TOKEN})${GRID_TAIL_PRICE_COLUMNS}$`,
+    'i'
+  );
+
+  let m = work.match(unitThenQty);
+  if (m && m.index !== undefined) {
+    const qty = parseBrazilianQuantityToken(m[2]);
+    let unit = m[1].toLowerCase().replace(/\.$/, '');
+    if (unit === 'und') unit = 'un';
+    return {
+      description: normalizeWs(work.slice(0, m.index)),
+      quantity: qty,
+      unit: qty !== null ? unit : null,
+    };
+  }
+
+  m = work.match(qtyThenUnit);
+  if (m && m.index !== undefined) {
+    const qty = parseBrazilianQuantityToken(m[1]);
+    let unit = m[2].toLowerCase().replace(/\.$/, '');
+    if (unit === 'und') unit = 'un';
+    return {
+      description: normalizeWs(work.slice(0, m.index)),
+      quantity: qty,
+      unit: qty !== null ? unit : null,
+    };
+  }
+
+  return { description: work, quantity: null, unit: null };
 }
 
 function extractItems(text: string): ParsedPurchaseOrderItem[] {
@@ -241,27 +299,15 @@ function extractItems(text: string): ParsedPurchaseOrderItem[] {
     // parts já são só a descrição (sem o nº da linha); não usar itemStartLine aqui.
     let desc = normalizeWs(current.parts.join(' '));
     if (desc.length < 4) return;
+    desc = stripAddressNoiseFromDescription(desc);
+    if (desc.length < 4) return;
 
-    let qty: number | null = null;
-    let unit: string | null = null;
-
-    const qtyMatch =
-      desc.match(
-        /(.+?)\s+([\d.,]+)\s*(UN|UND|MT|M2|M3|KG|G|L|ML|PAR|PÇ|PC|CX|FD|SC|GL|LT)\s*$/i
-      ) || desc.match(/(.+?)\s*-\s*([\d.,]+)\s*(L|ML)\s*$/i);
-    if (qtyMatch) {
-      desc = normalizeWs(qtyMatch[1]);
-      const qRaw = qtyMatch[2].replace(/\./g, '').replace(',', '.');
-      const q = parseFloat(qRaw);
-      qty = Number.isFinite(q) ? q : null;
-      unit = qtyMatch[3].toLowerCase();
-      if (unit === 'und') unit = 'un';
-    }
+    const { description, quantity, unit } = extractQtyUnitFromGridTail(desc);
 
     items.push({
       line_number: current.line_number,
-      description: desc,
-      quantity: qty,
+      description,
+      quantity,
       unit,
     });
   };
@@ -362,7 +408,6 @@ export function parsePurchaseOrderFromText(text: string, sourceFilename: string)
   const normalized = text.replace(/\r/g, '\n');
   const buyer = extractBuyer(normalized);
   const vendor = parseVendorBlock(normalized);
-  const dates = extractDates(normalized);
 
   let oc_number = extractOcNumber(normalized) || ocNumberFromFilename(sourceFilename);
 
@@ -377,10 +422,7 @@ export function parsePurchaseOrderFromText(text: string, sourceFilename: string)
     vendor_name: vendor.vendor_name,
     vendor_phone: vendor.vendor_phone,
     vendor_contact_name: vendor.vendor_contact_name,
-    store_name: extractStore(normalized),
-    delivery_deadline: dates.delivery,
-    request_date: dates.request,
-    approval_status: extractApprovalStatus(normalized),
+    delivery_deadline: extractDeliveryDeadline(normalized),
     title,
     items,
   };

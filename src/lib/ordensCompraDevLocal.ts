@@ -30,10 +30,7 @@ export interface DevLocalPurchaseOrder {
   vendor_name: string | null;
   vendor_phone: string | null;
   vendor_contact_name: string | null;
-  store_name: string | null;
   delivery_deadline: string | null;
-  request_date: string | null;
-  approval_status: string | null;
   source_filename: string | null;
   created_at: string;
   items: DevLocalPoItem[];
