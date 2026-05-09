@@ -271,33 +271,6 @@ export default function OrdensCompraPage() {
         .select('id')
         .single();
 
-      const needsRequesterEmployee =
-        !!poErr &&
-        /requester_employee_id/i.test(
-          `${poErr.message || ''} ${poErr.details || ''} ${poErr.hint || ''}`
-        );
-      if (needsRequesterEmployee) {
-        const { data: emp, error: empErr } = await supabase
-          .from('employees')
-          .select('id')
-          .eq('user_id', user.id)
-          .maybeSingle();
-        if (empErr || !emp?.id) {
-          throw new Error(
-            'Seu ambiente exige requester_employee_id. Vincule seu usuário a um colaborador na tabela employees.'
-          );
-        }
-        const rowWithRequester = {
-          ...baseRow,
-          requester_employee_id: String(emp.id),
-        };
-        ({ data: po, error: poErr } = await supabase
-          .from('purchase_orders')
-          .insert([rowWithRequester])
-          .select('id')
-          .single());
-      }
-
       if (poErr) throw poErr;
       const pid = String(po.id);
 
@@ -322,6 +295,13 @@ export default function OrdensCompraPage() {
       await fetchOrders();
     } catch (e) {
       console.error(e);
+      const raw = `${(e as { message?: string }).message || ''} ${(e as { details?: string }).details || ''} ${(e as { hint?: string }).hint || ''}`.trim();
+      if (/requester_employee_id/i.test(raw)) {
+        setParseError(
+          'Banco legado detectado: a coluna requester_employee_id está obrigatória em purchase_orders. Este módulo de OC é isolado e não usa employees. Ajuste o schema para tornar requester_employee_id opcional (ou remova a coluna) e tente novamente.'
+        );
+        return;
+      }
       const msg =
         e && typeof e === 'object' && 'message' in e
           ? [
@@ -349,6 +329,14 @@ export default function OrdensCompraPage() {
           <p className="text-slate-500 text-sm">
             Envie o PDF da OC; o sistema preenche fornecedor, data de entrega e itens. Marque entregas na página do pedido.
           </p>
+          <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-medium text-amber-950">
+            <div className="flex items-start gap-2">
+              <AlertCircle size={14} className="mt-0.5 shrink-0" />
+              <p>
+                <strong>Recurso em construção:</strong> o módulo de ordens de compra ainda está em evolução e pode sofrer ajustes.
+              </p>
+            </div>
+          </div>
           {ORDENS_COMPRA_DEV_LOCAL && (
             <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-medium text-amber-950">
               <strong className="font-bold">Modo local (dev):</strong> sem login ou Supabase. Dados só neste navegador (

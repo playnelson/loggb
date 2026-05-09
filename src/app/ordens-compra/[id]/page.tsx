@@ -8,6 +8,7 @@ import { useParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { ORDENS_COMPRA_DEV_LOCAL, devLocalOrdersRead, devLocalOrdersWrite } from '@/lib/ordensCompraDevLocal';
 import {
+  AlertCircle,
   ArrowLeft,
   ClipboardList,
   Loader2,
@@ -228,6 +229,15 @@ export default function OrdemCompraDetailPage() {
           <ArrowLeft size={18} />
           Voltar às ordens
         </Link>
+      </div>
+
+      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-medium text-amber-950">
+        <div className="flex items-start gap-2">
+          <AlertCircle size={14} className="mt-0.5 shrink-0" />
+          <p>
+            <strong>Recurso em construção:</strong> o módulo de ordens de compra ainda está em evolução e pode sofrer ajustes.
+          </p>
+        </div>
       </div>
 
       {loading ? (
