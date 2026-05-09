@@ -8,16 +8,13 @@ import {
   LogOut,
   Settings,
   History,
-  ShoppingCart,
-  ClipboardCheck,
   MapPin,
-  Ruler,
-  Wallet,
   PanelLeftClose,
   PanelLeftOpen,
   Menu,
   X,
   MoreHorizontal,
+  ClipboardList,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useRouter, usePathname } from 'next/navigation';
@@ -36,12 +33,9 @@ export function Sidebar({
   const menuItems = [
     { name: 'Início', icon: <LayoutDashboard size={20} />, href: '/' },
     { name: 'Almoxarifado', icon: <Package size={20} />, href: '/inventory' },
+    { name: 'Ordens de compra', icon: <ClipboardList size={20} />, href: '/ordens-compra' },
     { name: 'Colaboradores', icon: <Users size={20} />, href: '/staff' },
     { name: 'Sedes e canteiros', icon: <MapPin size={20} />, href: '/sites' },
-    { name: 'Pedidos', icon: <ShoppingCart size={20} />, href: '/orders' },
-    { name: 'Financeiro', icon: <Wallet size={20} />, href: '/financeiro' },
-    { name: 'mm / pol', icon: <Ruler size={20} />, href: '/conversor' },
-    { name: 'Recebidos', icon: <ClipboardCheck size={20} />, href: '/received' },
     { name: 'Histórico', icon: <History size={20} />, href: '/history' },
     { name: 'Configurações', icon: <Settings size={20} />, href: '/settings' },
   ];

@@ -1,0 +1,301 @@
+'use client';
+
+export const dynamic = 'force-dynamic';
+
+import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
+import { useParams } from 'next/navigation';
+import { supabase } from '@/lib/supabase';
+import {
+  ArrowLeft,
+  ClipboardList,
+  Loader2,
+  Package,
+  Phone,
+  Store,
+  Truck,
+  User,
+  CheckSquare,
+  Square,
+} from 'lucide-react';
+
+interface PoHeader {
+  id: string;
+  oc_number: string | null;
+  title: string | null;
+  buyer_code: string | null;
+  buyer_name: string | null;
+  buyer_phone: string | null;
+  vendor_name: string | null;
+  vendor_phone: string | null;
+  vendor_contact_name: string | null;
+  store_name: string | null;
+  delivery_deadline: string | null;
+  request_date: string | null;
+  approval_status: string | null;
+  source_filename: string | null;
+  created_at: string;
+}
+
+interface PoItem {
+  id: string;
+  line_number: number;
+  description: string;
+  quantity: number | null;
+  unit: string;
+  delivered: boolean;
+  delivered_at: string | null;
+}
+
+function formatDateBR(iso: string | null): string {
+  if (!iso) return '—';
+  const [y, m, d] = iso.split('-');
+  if (!y || !m || !d) return iso;
+  return `${d}/${m}/${y}`;
+}
+
+export default function OrdemCompraDetailPage() {
+  const params = useParams();
+  const id = String(params.id || '');
+
+  const [header, setHeader] = useState<PoHeader | null>(null);
+  const [items, setItems] = useState<PoItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    if (!id) return;
+    setLoading(true);
+    setError(null);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setHeader(null);
+      setItems([]);
+      setLoading(false);
+      return;
+    }
+
+    const { data: po, error: e1 } = await supabase
+      .from('purchase_orders')
+      .select(
+        'id, oc_number, title, buyer_code, buyer_name, buyer_phone, vendor_name, vendor_phone, vendor_contact_name, store_name, delivery_deadline, request_date, approval_status, source_filename, created_at'
+      )
+      .eq('id', id)
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    if (e1 || !po) {
+      setError('Ordem não encontrada ou sem permissão.');
+      setHeader(null);
+      setItems([]);
+      setLoading(false);
+      return;
+    }
+
+    setHeader(po as PoHeader);
+
+    const { data: lines, error: e2 } = await supabase
+      .from('purchase_order_items')
+      .select('id, line_number, description, quantity, unit, delivered, delivered_at')
+      .eq('purchase_order_id', id)
+      .order('line_number', { ascending: true });
+
+    if (e2) {
+      setError('Erro ao carregar itens.');
+      setItems([]);
+    } else {
+      setItems((lines as PoItem[]) || []);
+    }
+    setLoading(false);
+  }, [id]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const toggleDelivered = async (item: PoItem) => {
+    const next = !item.delivered;
+    setBusyId(item.id);
+    const { error: e } = await supabase
+      .from('purchase_order_items')
+      .update({
+        delivered: next,
+        delivered_at: next ? new Date().toISOString() : null,
+      })
+      .eq('id', item.id);
+
+    setBusyId(null);
+    if (e) {
+      alert(`Erro ao atualizar: ${e.message}`);
+      return;
+    }
+    setItems((prev) =>
+      prev.map((r) =>
+        r.id === item.id
+          ? { ...r, delivered: next, delivered_at: next ? new Date().toISOString() : null }
+          : r
+      )
+    );
+  };
+
+  const doneCount = items.filter((i) => i.delivered).length;
+
+  return (
+    <div className="space-y-6 animate-in fade-in duration-500 max-w-5xl mx-auto">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <Link
+          href="/ordens-compra"
+          className="inline-flex items-center gap-2 text-sm font-bold text-secondary hover:underline w-fit"
+        >
+          <ArrowLeft size={18} />
+          Voltar às ordens
+        </Link>
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-20 text-slate-400">
+          <Loader2 className="animate-spin" size={32} />
+        </div>
+      ) : error ? (
+        <div className="p-6 rounded-xl bg-red-50 border border-red-100 text-red-800 font-medium">{error}</div>
+      ) : header ? (
+        <>
+          <div className="flex flex-col gap-2">
+            <h1 className="text-2xl font-bold text-primary flex items-center gap-2 flex-wrap">
+              <ClipboardList className="text-secondary shrink-0" />
+              <span>OC {header.oc_number || '—'}</span>
+              {header.approval_status && (
+                <span className="text-xs font-black uppercase px-2 py-1 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+                  {header.approval_status.replace(/_/g, ' ')}
+                </span>
+              )}
+            </h1>
+            <p className="text-slate-600 text-sm">
+              {header.vendor_name || header.title || 'Ordem de compra'}
+            </p>
+            {header.source_filename && (
+              <p className="text-[11px] text-slate-400">Arquivo: {header.source_filename}</p>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="bg-white rounded-xl border border-border p-4 space-y-2">
+              <div className="text-[10px] font-black uppercase text-slate-400 flex items-center gap-1">
+                <User size={12} /> Comprador
+              </div>
+              <div className="text-sm font-bold text-primary">
+                {[header.buyer_code, header.buyer_name].filter(Boolean).join(' · ') || '—'}
+              </div>
+              {header.buyer_phone && (
+                <div className="text-xs text-slate-600 flex items-center gap-1">
+                  <Phone size={12} />
+                  {header.buyer_phone}
+                </div>
+              )}
+            </div>
+
+            <div className="bg-white rounded-xl border border-border p-4 space-y-2">
+              <div className="text-[10px] font-black uppercase text-slate-400 flex items-center gap-1">
+                <Store size={12} /> Fornecedor e vendedor
+              </div>
+              <div className="text-sm font-bold text-primary">{header.vendor_name || '—'}</div>
+              {header.vendor_contact_name && (
+                <div className="text-xs text-slate-600">Vendedor: {header.vendor_contact_name}</div>
+              )}
+              {header.vendor_phone && (
+                <div className="text-xs text-slate-600 flex items-center gap-1">
+                  <Phone size={12} />
+                  {header.vendor_phone}
+                </div>
+              )}
+            </div>
+
+            <div className="bg-white rounded-xl border border-border p-4 space-y-2 sm:col-span-2">
+              <div className="text-[10px] font-black uppercase text-slate-400 flex items-center gap-1">
+                <Truck size={12} /> Loja e prazos
+              </div>
+              <div className="flex flex-wrap gap-4 text-sm">
+                <div>
+                  <span className="text-slate-400 text-xs font-bold uppercase">Loja / coligada</span>
+                  <div className="font-medium text-primary">{header.store_name || '—'}</div>
+                </div>
+                <div>
+                  <span className="text-slate-400 text-xs font-bold uppercase">Prazo / necessidade</span>
+                  <div className="font-medium text-primary">{formatDateBR(header.delivery_deadline)}</div>
+                </div>
+                <div>
+                  <span className="text-slate-400 text-xs font-bold uppercase">Solicitação</span>
+                  <div className="font-medium text-primary">{formatDateBR(header.request_date)}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl border border-border shadow-sm overflow-hidden">
+            <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
+              <div className="flex items-center gap-2">
+                <Package size={18} className="text-secondary" />
+                <h2 className="font-bold text-primary">Itens e entregas</h2>
+              </div>
+              <span className="text-xs font-bold text-slate-500">
+                {doneCount}/{items.length} recebidos
+              </span>
+            </div>
+
+            {items.length === 0 ? (
+              <div className="p-8 text-center text-slate-500 text-sm">Nenhum item nesta ordem.</div>
+            ) : (
+              <ul className="divide-y divide-slate-100">
+                {items.map((it) => (
+                  <li
+                    key={it.id}
+                    className={`px-4 py-3 flex gap-3 items-start ${
+                      it.delivered ? 'bg-emerald-50/40' : ''
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      disabled={busyId === it.id}
+                      onClick={() => void toggleDelivered(it)}
+                      className="mt-0.5 p-1 rounded-lg text-secondary hover:bg-secondary/10 disabled:opacity-50"
+                      title={it.delivered ? 'Marcar como pendente' : 'Marcar como entregue'}
+                    >
+                      {busyId === it.id ? (
+                        <Loader2 className="animate-spin" size={22} />
+                      ) : it.delivered ? (
+                        <CheckSquare size={22} />
+                      ) : (
+                        <Square size={22} />
+                      )}
+                    </button>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex flex-wrap items-baseline gap-2">
+                        <span className="text-xs font-black text-slate-400 w-6">{it.line_number}</span>
+                        <span
+                          className={`text-sm font-medium ${
+                            it.delivered ? 'text-slate-500 line-through' : 'text-primary'
+                          }`}
+                        >
+                          {it.description}
+                        </span>
+                      </div>
+                      <div className="text-xs text-slate-500 mt-1">
+                        {it.quantity != null ? `${it.quantity} ${it.unit}` : `— ${it.unit}`}
+                        {it.delivered && it.delivered_at && (
+                          <span className="ml-2 text-emerald-700 font-bold">
+                            · Recebido em {new Date(it.delivered_at).toLocaleString('pt-BR')}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
