@@ -67,6 +67,7 @@ export async function POST(req: Request) {
       const tc = await pageData.getTextContent({ disableCombineTextItems: false }) as { items: any[] };
 
       let lastY: number | null = null;
+      let lastX = 0;
       let pageText = '';
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -85,9 +86,15 @@ export async function POST(req: Request) {
         }
 
         // monta texto bruto linha a linha para extração de campos de cabeçalho
-        if (lastY !== null && Math.abs(lastY - y) > 2) pageText += '\n';
+        if (lastY !== null && Math.abs(lastY - y) > 2) {
+          pageText += '\n';
+        } else if (lastY !== null && x - lastX > 3) {
+          // insere espaço entre tokens na mesma linha quando houver distância visual
+          pageText += ' ';
+        }
         pageText += it.str;
         lastY = y;
+        lastX = x + (it.width || 0);
       }
 
       return pageText;

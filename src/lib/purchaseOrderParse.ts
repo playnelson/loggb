@@ -126,22 +126,33 @@ export function extractItemsFromPositionedItems(
     }
   }
 
-  // 2) Estima coluna ITEM (x) e UND (x) pelos dados.
-  const itemXs: number[] = [];
+  // 2) Estima coluna UND (x) pelos dados.
   const unitXs: number[] = [];
-  for (const row of rows.slice(startIdx, startIdx + 220)) {
-    const lineCell = row.cells.find((c) => isItemNumber(c.text));
-    if (lineCell) itemXs.push(lineCell.x);
+  for (const row of rows.slice(startIdx, startIdx + 260)) {
     for (const c of row.cells) {
       const k = normalizeKey(c.text);
       if (unitSet.has(k)) unitXs.push(c.x);
     }
   }
-  if (!itemXs.length || !unitXs.length) return [];
-
+  if (!unitXs.length) return [];
   const avg = (a: number[]) => a.reduce((s, n) => s + n, 0) / a.length;
-  const itemX = avg(itemXs);
   const unitX = avg(unitXs);
+
+  // 3) Estima coluna ITEM com base em linhas que parecem item real:
+  // têm UND na coluna esperada e um número curto à esquerda.
+  const itemXs: number[] = [];
+  for (const row of rows.slice(startIdx, startIdx + 260)) {
+    const hasUnitInCol = row.cells.some(
+      (c) => Math.abs(c.x - unitX) <= X_TOL && unitSet.has(normalizeKey(c.text))
+    );
+    if (!hasUnitInCol) continue;
+    const candidates = row.cells
+      .filter((c) => c.x < unitX - X_TOL && isItemNumber(c.text))
+      .sort((a, b) => a.x - b.x);
+    if (candidates.length) itemXs.push(candidates[0].x);
+  }
+  if (!itemXs.length) return [];
+  const itemX = avg(itemXs);
 
   const result: ParsedPurchaseOrderItem[] = [];
   let current: ParsedPurchaseOrderItem | null = null;
@@ -157,9 +168,10 @@ export function extractItemsFromPositionedItems(
     const rowText = normalizeKey(row.cells.map((c) => c.text).join(' '));
     if (rowText.includes('OBSERVACAO') || rowText.includes('OBSERVACOES')) break;
 
-    const lineCell = row.cells.find(
-      (c) => Math.abs(c.x - itemX) <= X_TOL && isItemNumber(c.text)
-    );
+    const lineCandidates = row.cells
+      .filter((c) => Math.abs(c.x - itemX) <= X_TOL && isItemNumber(c.text))
+      .sort((a, b) => a.x - b.x);
+    const lineCell = lineCandidates[0];
 
     if (!lineCell) {
       // Continuação de descrição em linha seguinte.
