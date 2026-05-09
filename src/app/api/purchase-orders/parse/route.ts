@@ -2,14 +2,17 @@ import { createRequire } from 'module';
 import {
   parsePurchaseOrderFromText,
   parsePurchaseOrderWarnings,
+  extractItemsFromPositionedItems,
   type ParsedPurchaseOrder,
+  type PositionedTextItem,
 } from '@/lib/purchaseOrderParse';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 
 export const runtime = 'nodejs';
 
 const requirePdf = createRequire(import.meta.url);
-const pdfParseBuffer = requirePdf('pdf-parse') as (b: Buffer) => Promise<{ text: string }>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const pdfParse = requirePdf('pdf-parse') as (b: Buffer, opts?: any) => Promise<{ text: string }>;
 
 export async function POST(req: Request) {
   try {
@@ -19,7 +22,9 @@ export async function POST(req: Request) {
 
     if (!devSkipAuth) {
       const supabase = await createSupabaseServerClient();
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       if (!user) {
         return Response.json({ error: 'Não autenticado.' }, { status: 401 });
       }
@@ -27,7 +32,10 @@ export async function POST(req: Request) {
 
     const ct = req.headers.get('content-type') || '';
     if (!ct.includes('multipart/form-data')) {
-      return Response.json({ error: 'Envie o PDF em multipart/form-data (campo file).' }, { status: 400 });
+      return Response.json(
+        { error: 'Envie o PDF em multipart/form-data (campo file).' },
+        { status: 400 }
+      );
     }
 
     const form = await req.formData();
@@ -42,16 +50,68 @@ export async function POST(req: Request) {
     }
 
     const buf = Buffer.from(await file.arrayBuffer());
-    const { text } = await pdfParseBuffer(buf);
 
-    const parsed: ParsedPurchaseOrder = parsePurchaseOrderFromText(text, name);
+    // Coleta itens com posição X/Y usando o pagerender do pdf-parse (pdf.js).
+    // Isso permite reconstruir a tabela de itens pelas coordenadas reais das colunas,
+    // independente da ordem de serialização do texto pelo pdf.js.
+    const allPositioned: PositionedTextItem[] = [];
+    let cumulativeHeight = 0;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const renderPage = async (pageData: any): Promise<string> => {
+      const [, , , pageHeight] = pageData.view as number[];
+      const yBase = cumulativeHeight;
+      cumulativeHeight += pageHeight + 50;
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const tc = await pageData.getTextContent({ disableCombineTextItems: false }) as { items: any[] };
+
+      let lastY: number | null = null;
+      let pageText = '';
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for (const it of tc.items as any[]) {
+        if (!it.str) continue;
+        const x = it.transform[4] as number;
+        const y = it.transform[5] as number;
+
+        if (it.str.trim()) {
+          allPositioned.push({
+            text: it.str.trim(),
+            x: Math.round(x),
+            // converte coordenada PDF (bottom-up) para top-down global
+            y: Math.round(yBase + (pageHeight - y)),
+          });
+        }
+
+        // monta texto bruto linha a linha para extração de campos de cabeçalho
+        if (lastY !== null && Math.abs(lastY - y) > 2) pageText += '\n';
+        pageText += it.str;
+        lastY = y;
+      }
+
+      return pageText;
+    };
+
+    const pdfResult = await pdfParse(buf, { pagerender: renderPage });
+    const rawText = pdfResult.text;
+
+    // Extrai campos de cabeçalho (comprador, fornecedor, data, nº OC) do texto
+    const parsed: ParsedPurchaseOrder = parsePurchaseOrderFromText(rawText, name);
+
+    // Substitui itens pela extração posicional (muito mais precisa para tabelas)
+    const positionedItems = extractItemsFromPositionedItems(allPositioned);
+    if (positionedItems.length > 0) {
+      parsed.items = positionedItems;
+    }
+
     const warnings = parsePurchaseOrderWarnings(parsed);
 
     return Response.json({
       parsed,
       warnings,
-      meta: { filename: name, textLength: text.length },
-      rawText: text,
+      meta: { filename: name, textLength: rawText.length },
+      rawText,
     });
   } catch (e) {
     console.error('purchase-orders/parse', e);

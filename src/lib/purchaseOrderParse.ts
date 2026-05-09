@@ -1,6 +1,5 @@
 /**
  * Extrai campos de ordens de compra a partir do texto de PDFs (layout típico ERP / OC brasileira).
- * Resultados são heurísticos; o usuário pode corrigir antes de salvar.
  */
 
 export interface ParsedPurchaseOrderItem {
@@ -22,6 +21,123 @@ export interface ParsedPurchaseOrder {
   title: string | null;
   items: ParsedPurchaseOrderItem[];
 }
+
+// ---------------------------------------------------------------------------
+// Extração posicional — usa coordenadas X/Y reais do pdf.js para reconstruir
+// a tabela independente da ordem de serialização do texto.
+// ---------------------------------------------------------------------------
+
+export interface PositionedTextItem {
+  text: string;
+  x: number; // coordenada X da página (pontos)
+  y: number; // coordenada Y top-down (0 = topo do documento)
+}
+
+function brNumberToFloat(raw: string): number | null {
+  const t = raw.trim();
+  if (!/^[\d.,]+$/.test(t)) return null;
+  const lastComma = t.lastIndexOf(',');
+  const lastDot = t.lastIndexOf('.');
+  let s: string;
+  if (lastComma > lastDot) s = t.replace(/\./g, '').replace(',', '.');
+  else if (lastDot > lastComma) s = t.replace(/,/g, '');
+  else s = t;
+  const n = parseFloat(s);
+  return isFinite(n) ? n : null;
+}
+
+/**
+ * Dado o conjunto de tokens de texto com suas posições X/Y,
+ * reconstrói a tabela de itens da OC identificando as colunas
+ * por posição (ITEM, DESCRIÇÃO, UND., QTD.) em vez de heurística de texto.
+ */
+export function extractItemsFromPositionedItems(
+  items: PositionedTextItem[]
+): ParsedPurchaseOrderItem[] {
+  if (items.length === 0) return [];
+
+  const Y_TOL = 5; // pixels de tolerância para considerar mesma linha
+
+  // --- agrupa em linhas por Y ---
+  const rowMap = new Map<number, { x: number; text: string }[]>();
+  for (const item of items) {
+    let rowY = -1;
+    for (const ry of rowMap.keys()) {
+      if (Math.abs(ry - item.y) <= Y_TOL) { rowY = ry; break; }
+    }
+    if (rowY < 0) { rowY = item.y; rowMap.set(rowY, []); }
+    rowMap.get(rowY)!.push({ x: item.x, text: item.text });
+  }
+
+  const rows = [...rowMap.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([y, cells]) => ({ y, cells: [...cells].sort((a, b) => a.x - b.x) }));
+
+  // --- localiza linha de cabeçalho ---
+  let headerIdx = -1;
+  let descX = -1, undX = -1, qtdX = -1, itemX = -1;
+
+  for (let i = 0; i < rows.length; i++) {
+    const norm = rows[i].cells.map(c => ({
+      x: c.x,
+      key: c.text.toUpperCase().replace(/[\s.]/g, ''),
+    }));
+    const d = norm.find(c => c.key.startsWith('DESCRI'));
+    const u = norm.find(c => c.key === 'UND' || c.key === 'UNIDADE');
+    const q = norm.find(c => c.key === 'QTD' || c.key === 'QUANTIDADE');
+    const it = norm.find(c => c.key === 'ITEM');
+    if (d && (u || q)) {
+      headerIdx = i;
+      descX = d.x; if (u) undX = u.x; if (q) qtdX = q.x; if (it) itemX = it.x;
+      break;
+    }
+  }
+
+  if (headerIdx < 0 || descX < 0) return [];
+
+  // limite direito da coluna de descrição
+  const descRight = Math.min(
+    undX >= 0 ? undX - 2 : Infinity,
+    qtdX >= 0 ? qtdX - 2 : Infinity
+  );
+  const COL_TOL = 45;
+  const result: ParsedPurchaseOrderItem[] = [];
+
+  for (const row of rows.slice(headerIdx + 1)) {
+    // coluna ITEM: número inteiro 1–999
+    const lineCell = row.cells.find(c => {
+      if (itemX >= 0 && Math.abs(c.x - itemX) > COL_TOL) return false;
+      const n = parseInt(c.text, 10);
+      return isFinite(n) && n > 0 && n <= 999 && c.text.trim() === String(n);
+    });
+    if (!lineCell) continue;
+
+    // coluna DESCRIÇÃO: todos os tokens entre descX e undX/qtdX
+    const descTokens = row.cells.filter(c => c.x >= descX - 10 && c.x < descRight);
+    const description = descTokens.map(c => c.text).join(' ').trim();
+    if (description.length < 2) continue;
+
+    // coluna UND
+    let unit: string | null = null;
+    if (undX >= 0) {
+      const cell = row.cells.find(c => Math.abs(c.x - undX) <= COL_TOL);
+      if (cell) { unit = cell.text.toLowerCase().replace(/\.$/, ''); if (unit === 'und') unit = 'un'; }
+    }
+
+    // coluna QTD
+    let quantity: number | null = null;
+    if (qtdX >= 0) {
+      const cell = row.cells.find(c => Math.abs(c.x - qtdX) <= COL_TOL);
+      if (cell) quantity = brNumberToFloat(cell.text);
+    }
+
+    result.push({ line_number: parseInt(lineCell.text, 10), description, quantity, unit });
+  }
+
+  return result.sort((a, b) => a.line_number - b.line_number);
+}
+
+// ---------------------------------------------------------------------------
 
 const PHONE_LINE =
   /^(?:\(?\d{2}\)?\s*)?\d{4,5}[-.\s]?\d{3,4}(?:\s*\/\s*(?:\(?\d{2}\)?\s*)?\d{4,5}[-.\s]?\d{3,4})?$/;
