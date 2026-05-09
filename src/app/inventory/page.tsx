@@ -918,14 +918,14 @@ function InventoryContent() {
           <h1 className="text-2xl font-bold text-primary">Almoxarifado LoggB</h1>
           <p className="text-slate-500 text-sm">Gestão de materiais, EPIs e ferramentas por descrição e categoria.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-col gap-2 w-full md:flex-row md:flex-nowrap md:w-auto md:gap-2">
           <button
             type="button"
             onClick={() => {
               void fetchWorkSites();
               setIsCartOpen(true);
             }}
-            className="relative flex items-center gap-2 bg-secondary text-white px-4 py-2 rounded-lg hover:opacity-95 transition-all font-medium"
+            className="relative flex w-full md:w-auto items-center justify-center gap-2 bg-secondary text-white px-3 py-3 md:px-4 md:py-2 rounded-lg hover:opacity-95 transition-all font-medium text-sm min-h-[48px]"
             title="Monte a retirada e depois escolha o colaborador"
           >
             <ShoppingCart size={18} />
@@ -940,35 +940,41 @@ function InventoryContent() {
             type="button"
             onClick={handleDownloadInventory}
             disabled={loading || products.length === 0}
-            className="flex items-center gap-2 bg-white text-primary border border-slate-200 px-4 py-2 rounded-lg hover:bg-slate-50 transition-all font-medium disabled:opacity-50"
+            className="flex w-full md:w-auto items-center justify-center gap-2 bg-white text-primary border border-slate-200 px-3 py-3 md:px-4 md:py-2 rounded-lg hover:bg-slate-50 transition-all font-medium text-sm disabled:opacity-50 min-h-[48px]"
             title="CSV: todos os itens, saldo no almoxarifado e materiais sob cautela (em posse), por colaborador"
           >
-            <Download size={18} className="text-secondary" />
-            Baixar inventário
+            <Download size={18} className="text-secondary shrink-0" />
+            <span className="truncate">
+              <span className="md:hidden">CSV</span>
+              <span className="hidden md:inline">Baixar inventário</span>
+            </span>
           </button>
           <button
             type="button"
             onClick={openCategoryManager}
-            className="flex items-center gap-2 bg-white text-primary border border-slate-200 px-4 py-2 rounded-lg hover:bg-slate-50 transition-all font-medium"
+            className="flex w-full md:w-auto items-center justify-center gap-2 bg-white text-primary border border-slate-200 px-3 py-3 md:px-4 md:py-2 rounded-lg hover:bg-slate-50 transition-all font-medium text-sm min-h-[48px]"
             title="Criar, editar e excluir categorias"
           >
-            <Tags size={18} className="text-secondary" />
+            <Tags size={18} className="text-secondary shrink-0" />
             Categorias
           </button>
           <button
             type="button"
             onClick={() => downloadInventoryImportTemplate()}
-            className="flex items-center gap-2 bg-white text-primary border border-teal-200 px-4 py-2 rounded-lg hover:bg-teal-50 transition-all font-medium"
+            className="flex w-full md:w-auto items-center justify-center gap-2 bg-white text-primary border border-teal-200 px-3 py-3 md:px-4 md:py-2 rounded-lg hover:bg-teal-50 transition-all font-medium text-sm min-h-[48px]"
             title="Planilha .xlsx formatada com instruções e colunas reconhecidas pelo importador"
           >
-            <Download size={18} className="text-teal-600" />
-            Modelo importação
+            <Download size={18} className="text-teal-600 shrink-0" />
+            <span className="truncate">
+              <span className="md:hidden">Modelo</span>
+              <span className="hidden md:inline">Modelo importação</span>
+            </span>
           </button>
           <button 
             onClick={() => setIsImportModalOpen(true)}
-            className="flex items-center gap-2 bg-slate-100 text-primary border border-slate-200 px-4 py-2 rounded-lg hover:bg-slate-200 transition-all font-medium"
+            className="flex w-full md:w-auto items-center justify-center gap-2 bg-slate-100 text-primary border border-slate-200 px-3 py-3 md:px-4 md:py-2 rounded-lg hover:bg-slate-200 transition-all font-medium text-sm min-h-[48px]"
           >
-            <FileUp size={18} className="text-secondary" />
+            <FileUp size={18} className="text-secondary shrink-0" />
             Importar
           </button>
           <button 
@@ -977,7 +983,7 @@ function InventoryContent() {
               setFormData(emptyItemForm());
               setIsModalOpen(true);
             }}
-            className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-slate-800 transition-all font-medium"
+            className="flex w-full md:w-auto items-center justify-center gap-2 bg-primary text-white px-3 py-3 md:px-4 md:py-2 rounded-lg hover:bg-slate-800 transition-all font-medium text-sm min-h-[48px]"
           >
             <Plus size={18} />
             Novo Material
@@ -1102,7 +1108,7 @@ function InventoryContent() {
 
       {/* Inventory Table */}
       <div className="bg-white rounded-xl border border-border shadow-sm overflow-hidden">
-        <div className="px-4 py-2 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2 bg-slate-50/80">
+        <div className="hidden md:flex px-4 py-2 border-b border-slate-100 flex-wrap items-center justify-between gap-2 bg-slate-50/80">
           <p className="text-[11px] font-bold text-slate-500">
             Filtros na primeira linha do cabeçalho da tabela abaixo.
             {!loading && products.length > 0 ? (
@@ -1113,7 +1119,93 @@ function InventoryContent() {
             ) : null}
           </p>
         </div>
-        <div className="overflow-x-auto">
+
+        {/* Filtros compactos — celular (mesmos estados da tabela) */}
+        <div className="md:hidden p-4 border-b border-slate-100 bg-slate-50/80 space-y-3">
+          <p className="text-xs font-bold text-slate-600 leading-snug">
+            Busque o material e refine com os filtros. Toque nos botões do card para saída, entrada ou carrinho.
+          </p>
+          {!loading && products.length > 0 ? (
+            <p className="text-[11px] font-bold text-slate-400">
+              Mostrando {filteredProducts.length} de {products.length}
+            </p>
+          ) : null}
+          <input
+            type="text"
+            value={filterDescription}
+            onChange={(e) => setFilterDescription(e.target.value)}
+            placeholder="Buscar por descrição…"
+            className="w-full text-sm font-bold text-primary bg-white border border-slate-200 rounded-xl px-3 py-3 outline-none focus:ring-2 focus:ring-secondary/40 min-h-[48px]"
+          />
+          <div className="grid grid-cols-2 gap-2">
+            <label className="col-span-2 text-[10px] font-black uppercase text-slate-400">Consumível</label>
+            <select
+              className={`${selectFilterClass} col-span-2 min-h-[44px]`}
+              value={filterConsumable}
+              onChange={(e) => setFilterConsumable(e.target.value as 'all' | 'sim' | 'nao')}
+            >
+              <option value="all">Todos</option>
+              <option value="sim">Sim</option>
+              <option value="nao">Não</option>
+            </select>
+            <label className="col-span-2 text-[10px] font-black uppercase text-slate-400">Estoque</label>
+            <select
+              className={`${selectFilterClass} col-span-2 min-h-[44px]`}
+              value={filterEstoque}
+              onChange={(e) =>
+                setFilterEstoque(e.target.value as 'all' | 'zero' | 'positive' | 'below_min')
+              }
+            >
+              <option value="all">Todos</option>
+              <option value="zero">Zero</option>
+              <option value="positive">Com saldo</option>
+              <option value="below_min">Abaixo do mín.</option>
+            </select>
+            <label className="col-span-2 text-[10px] font-black uppercase text-slate-400">Em posse</label>
+            <select
+              className={`${selectFilterClass} col-span-2 min-h-[44px]`}
+              value={filterPosse}
+              onChange={(e) => setFilterPosse(e.target.value as 'all' | 'zero' | 'positive')}
+            >
+              <option value="all">Todos</option>
+              <option value="zero">Zero</option>
+              <option value="positive">Com posse</option>
+            </select>
+            <label className="col-span-2 text-[10px] font-black uppercase text-slate-400">Categoria</label>
+            <select
+              className={`${selectFilterClass} col-span-2 min-h-[44px]`}
+              value={filterCategory}
+              onChange={(e) => setFilterCategory(e.target.value)}
+            >
+              <option value="">Todas</option>
+              {categoryOptions.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+            <label className="col-span-2 text-[10px] font-black uppercase text-slate-400">Carrinho</label>
+            <select
+              className={`${selectFilterClass} col-span-2 min-h-[44px]`}
+              value={filterCart}
+              onChange={(e) => setFilterCart(e.target.value as 'all' | 'in' | 'out')}
+            >
+              <option value="all">Todos</option>
+              <option value="in">No carrinho</option>
+              <option value="out">Fora</option>
+            </select>
+          </div>
+          <button
+            type="button"
+            onClick={resetInventoryFilters}
+            className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 text-sm font-black uppercase tracking-tight text-slate-600 border border-slate-200 rounded-xl bg-white hover:bg-slate-50"
+          >
+            <FilterX size={16} />
+            Limpar filtros
+          </button>
+        </div>
+
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead className="bg-slate-50 border-b border-border">
               <tr>
@@ -1405,6 +1497,179 @@ function InventoryContent() {
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Lista em cards — celular (mesmos dados e handlers da tabela) */}
+        <div className="md:hidden p-4 space-y-4">
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-16 text-slate-400 text-sm">
+              <Loader2 className="animate-spin mb-2" size={24} />
+              Carregando inventário...
+            </div>
+          ) : filteredProducts.length === 0 ? (
+            <p className="text-center text-slate-400 py-12">Nenhum item encontrado.</p>
+          ) : (
+            filteredProducts.map((p) => {
+              const isLowStock = p.quantity_current <= p.quantity_min;
+              const totalInPossession = p.possession?.reduce((acc, curr) => acc + curr.quantity, 0) || 0;
+              const totalQuantity = p.quantity_current + totalInPossession;
+              return (
+                <div
+                  key={p.id}
+                  className="rounded-2xl border border-border bg-white p-4 shadow-sm space-y-3"
+                >
+                  <div className="min-w-0">
+                    <h3 className="font-bold text-primary text-base leading-snug">
+                      {formatProductLabelDisplay(p.description)}
+                    </h3>
+                    <p className="text-[11px] text-slate-500 font-bold mt-1 uppercase tracking-tight">
+                      {p.location || 'Sem local'} · {p.unit}
+                    </p>
+                    {p.tag ? (
+                      <p className="text-[11px] text-slate-500 font-mono mt-1 flex items-center gap-1">
+                        <Tag size={12} className="shrink-0" />
+                        {p.tag}
+                      </p>
+                    ) : null}
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      <span
+                        className={`inline-flex items-center px-2 py-1 rounded-lg text-[10px] font-black uppercase ${
+                          p.consumable ? 'bg-green-50 text-green-700' : 'bg-slate-100 text-slate-500'
+                        }`}
+                      >
+                        {p.consumable ? 'Consumível' : 'Não consumível'}
+                      </span>
+                      <span
+                        className={`inline-flex items-center px-2 py-1 rounded-lg text-[10px] font-black uppercase ${
+                          p.category === 'Ferramenta'
+                            ? 'bg-blue-50 text-blue-700'
+                            : p.category === 'EPI'
+                              ? 'bg-purple-50 text-purple-700'
+                              : 'bg-orange-50 text-orange-700'
+                        }`}
+                      >
+                        {p.category}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="rounded-xl bg-slate-50 border border-slate-100 px-2 py-2">
+                      <div className="text-[9px] font-black uppercase text-slate-400">Estoque</div>
+                      <div
+                        className={`text-lg font-black ${isLowStock ? 'text-red-500' : 'text-primary'}`}
+                      >
+                        {p.quantity_current}
+                      </div>
+                    </div>
+                    <div className="rounded-xl bg-slate-50 border border-slate-100 px-2 py-2">
+                      <div className="text-[9px] font-black uppercase text-slate-400">Posse</div>
+                      <div className="text-lg font-black text-primary">{totalInPossession}</div>
+                    </div>
+                    <div className="rounded-xl bg-slate-50 border border-slate-100 px-2 py-2">
+                      <div className="text-[9px] font-black uppercase text-slate-400">Total</div>
+                      <div className="text-lg font-black text-primary">{totalQuantity}</div>
+                    </div>
+                  </div>
+                  {isLowStock ? (
+                    <p className="text-[11px] font-bold text-red-600 flex items-center gap-1">
+                      <AlertCircle size={14} />
+                      Abaixo ou no mínimo ({p.quantity_min})
+                    </p>
+                  ) : null}
+
+                  {totalInPossession > 0 ? (
+                    <div className="rounded-xl border border-slate-100 bg-slate-50/80 p-3">
+                      <p className="text-[10px] font-black uppercase text-slate-400 mb-2">Em posse de</p>
+                      <div className="space-y-1.5">
+                        {p.possession?.map((pos) => (
+                          <div key={pos.id} className="flex justify-between text-xs font-bold">
+                            <span className="text-slate-600 truncate pr-2">
+                              {possessionEmployeeName(pos.employees) || '—'}
+                            </span>
+                            <span className="text-primary shrink-0">{pos.quantity}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      disabled={p.quantity_current <= 0}
+                      onClick={() => addItemToCartFromRow(p)}
+                      className="min-h-[48px] flex items-center justify-center gap-2 rounded-xl bg-teal-50 text-teal-800 border border-teal-200 font-bold text-sm disabled:opacity-35 disabled:pointer-events-none"
+                    >
+                      <ShoppingCart size={18} />
+                      Carrinho
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuickMovementItem(p);
+                        setQuickMovementMode('OUT');
+                        setIsQuickMovementOpen(true);
+                      }}
+                      className="min-h-[48px] flex items-center justify-center gap-2 rounded-xl bg-red-50 text-red-700 border border-red-100 font-bold text-sm"
+                    >
+                      <ArrowUpRight size={18} />
+                      Saída
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuickMovementItem(p);
+                        setQuickMovementMode('IN');
+                        setIsQuickMovementOpen(true);
+                      }}
+                      className="min-h-[48px] flex items-center justify-center gap-2 rounded-xl bg-green-50 text-green-700 border border-green-100 font-bold text-sm"
+                    >
+                      <ArrowDownLeft size={18} />
+                      Entrada
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openHistory(p)}
+                      className="min-h-[48px] flex items-center justify-center gap-2 rounded-xl bg-slate-50 text-slate-700 border border-slate-200 font-bold text-sm"
+                    >
+                      <History size={18} />
+                      Histórico
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingItem(p);
+                        setFormData({
+                          description: p.description,
+                          category: p.category,
+                          location: p.location,
+                          consumable: p.consumable || false,
+                          unique_item: Boolean(p.unique_item),
+                          quantity_current: p.quantity_current,
+                          quantity_min: p.quantity_min,
+                          unit: p.unit,
+                          tag: p.tag ?? '',
+                        });
+                      }}
+                      className="min-h-[48px] flex items-center justify-center gap-2 rounded-xl bg-slate-50 text-blue-700 border border-slate-200 font-bold text-sm"
+                    >
+                      <Edit size={18} />
+                      Editar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(p.id, p.description)}
+                      className="min-h-[48px] flex items-center justify-center gap-2 rounded-xl bg-slate-50 text-red-600 border border-slate-200 font-bold text-sm"
+                    >
+                      <Trash2 size={18} />
+                      Excluir
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
       </div>
 

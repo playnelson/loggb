@@ -5,6 +5,19 @@ import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import { Mail, Lock, LogIn, Loader2 } from 'lucide-react';
 
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function isLimitExceededMessage(message: string) {
+  const msg = message.toLowerCase();
+  return (
+    msg.includes('rate limit') ||
+    msg.includes('too many requests') ||
+    msg.includes('limite') ||
+    msg.includes('excedido') ||
+    msg.includes('over_email_send_rate_limit')
+  );
+}
+
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -38,13 +51,36 @@ export default function LoginPage() {
     setLoading(true);
     setError(null);
 
-    const { error: signUpError } = await supabase.auth.signUp({
-      email,
-      password,
-    });
+    let signUpError: { message: string } | null = null;
+    const maxAttempts = 3;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+      });
+
+      if (!error) {
+        signUpError = null;
+        break;
+      }
+
+      signUpError = error;
+
+      if (!isLimitExceededMessage(error.message) || attempt === maxAttempts) {
+        break;
+      }
+
+      // Quando o provedor limita tentativas/requests, aguarda e tenta novamente.
+      await wait(attempt * 1200);
+    }
 
     if (signUpError) {
-      setError(signUpError.message);
+      if (isLimitExceededMessage(signUpError.message)) {
+        setError('Limite temporário de criação atingido. Aguarde 1 minuto e tente novamente.');
+      } else {
+        setError(signUpError.message);
+      }
     } else {
       setError('Cadastro realizado. Verifique seu e-mail (se habilitado) ou tente entrar.');
     }
@@ -52,16 +88,18 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+    <div className="min-h-[100dvh] bg-slate-50 flex items-center justify-center p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
       <div className="max-w-md w-full">
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold tracking-tighter text-primary">
+        <div className="text-center mb-6 sm:mb-8">
+          <h1 className="text-3xl sm:text-4xl font-bold tracking-tighter text-primary">
             LOGG<span className="text-secondary">B</span>
           </h1>
-          <p className="text-slate-500 mt-2 font-medium">Gestão de Almoxarifado Inteligente</p>
+          <p className="text-slate-500 mt-2 font-medium text-sm sm:text-base px-2">
+            Gestão de Almoxarifado Inteligente
+          </p>
         </div>
 
-        <div className="bg-white rounded-2xl border border-border shadow-xl p-8">
+        <div className="bg-white rounded-2xl border border-border shadow-xl p-6 sm:p-8">
           <h2 className="text-xl font-bold text-primary mb-6">Acesse sua conta</h2>
           
           <form onSubmit={handleLogin} className="space-y-4">

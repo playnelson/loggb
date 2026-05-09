@@ -706,7 +706,12 @@ export default function StaffPage() {
 
     if (error) {
       console.error('Error adding employee:', error);
-      alert('Erro ao cadastrar colaborador.');
+      const msg = String(error.message || '').toLowerCase();
+      if (msg.includes('limit') || msg.includes('limite') || msg.includes('exceeded') || msg.includes('excedido')) {
+        alert(`Limite de cadastro atingido para este usuário.\n\nDetalhe: ${error.message}`);
+      } else {
+        alert(`Erro ao cadastrar colaborador: ${error.message}`);
+      }
     } else {
       setIsModalOpen(false);
       setFormData({ full_name: '', role: '', status: 'Ativo' });
@@ -742,17 +747,17 @@ export default function StaffPage() {
           <h1 className="text-2xl font-bold text-primary">Quadro de Funcionários</h1>
           <p className="text-slate-500 text-sm">Monitoramento de ativos e histórico por colaborador.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
           <button 
             onClick={() => setIsImportModalOpen(true)}
-            className="flex items-center gap-2 bg-slate-100 text-primary border border-slate-200 px-4 py-2 rounded-lg hover:bg-slate-200 transition-all font-medium text-sm"
+            className="flex w-full sm:w-auto items-center justify-center gap-2 bg-slate-100 text-primary border border-slate-200 px-4 py-3 md:py-2 rounded-lg hover:bg-slate-200 transition-all font-medium text-sm min-h-[48px]"
           >
             <FileUp size={16} className="text-secondary" />
             Importar Histórico
           </button>
           <button 
             onClick={() => setIsModalOpen(true)}
-            className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-slate-800 transition-all font-medium text-sm"
+            className="flex w-full sm:w-auto items-center justify-center gap-2 bg-primary text-white px-4 py-3 md:py-2 rounded-lg hover:bg-slate-800 transition-all font-medium text-sm min-h-[48px]"
           >
             <UserPlus size={16} />
             Novo Colaborador
@@ -814,9 +819,9 @@ export default function StaffPage() {
         </div>
       </div>
 
-      {/* Staff Table */}
+      {/* Staff Table — desktop */}
       <div className="bg-white rounded-xl border border-border shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead className="bg-slate-50 border-b border-border">
               <tr>
@@ -988,6 +993,190 @@ export default function StaffPage() {
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Staff cards — mobile (mesmos dados e ações da tabela) */}
+        <div className="md:hidden p-4 space-y-4">
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-16 text-slate-400 text-sm">
+              <Loader2 className="animate-spin mb-2 text-secondary" size={24} />
+              Carregando quadro...
+            </div>
+          ) : filteredEmployees.length === 0 ? (
+            <p className="text-center text-slate-400 py-12">Nenhum funcionário encontrado.</p>
+          ) : (
+            filteredEmployees.map((e) => {
+              const epiLines = mergeEpiWalletLines(e.possession, epiConsumableByEmployee[e.id] || []);
+              return (
+                <div
+                  key={e.id}
+                  className="rounded-2xl border border-border bg-white p-4 shadow-sm space-y-4"
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center text-primary font-bold uppercase shrink-0">
+                      {e.full_name.charAt(0)}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <h2 className="font-bold text-primary text-lg leading-tight">{e.full_name}</h2>
+                      <p className="text-sm text-slate-600 font-medium mt-0.5">{e.role || 'Sem cargo informado'}</p>
+                      <div className="flex items-center gap-2 mt-2">
+                        <div
+                          className={`w-2 h-2 rounded-full ${e.status === 'Ativo' ? 'bg-green-500' : 'bg-slate-300'}`}
+                        />
+                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">{e.status}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div>
+                      <div className="flex items-center gap-1.5 mb-2">
+                        <div className="w-1 h-3 bg-purple-500 rounded-full" />
+                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-tight">
+                          Carteira de EPIs
+                        </span>
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        {epiLines.length ? (
+                          epiLines.map((row) => (
+                            <div
+                              key={row.key}
+                              className="flex items-center justify-between gap-2 bg-purple-50 border border-purple-100 px-3 py-2.5 rounded-xl"
+                            >
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm font-bold text-purple-900 leading-snug">
+                                  {formatProductLabelDisplay(row.description)}
+                                </p>
+                                <div className="flex flex-wrap items-center gap-2 mt-1">
+                                  {row.consumable && (
+                                    <span className="text-[9px] font-black uppercase text-amber-800 bg-amber-100/80 px-1.5 py-0.5 rounded">
+                                      Consumível
+                                    </span>
+                                  )}
+                                  <span className="text-xs font-black text-purple-800">×{row.quantity}</span>
+                                </div>
+                              </div>
+                              <div className="flex shrink-0">
+                                {row.consumable ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEpiDiscard({
+                                        employeeId: e.id,
+                                        item_id: row.item_id,
+                                        description: row.description,
+                                        unit: row.unit,
+                                        maxQty: row.quantity,
+                                      });
+                                      setDiscardQty(row.quantity);
+                                    }}
+                                    className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl border border-amber-200 bg-amber-50 text-amber-900"
+                                    title="Registrar descarte (troca/uso — não retorna ao estoque)"
+                                  >
+                                    <Trash2 size={18} />
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const p = e.possession?.find((x) => x.item_id === row.item_id);
+                                      if (!p) return;
+                                      setReturnItem({ employeeId: e.id, item: p });
+                                      setReturnQty(p.quantity);
+                                    }}
+                                    className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl border border-purple-200 bg-white text-purple-800"
+                                    title="Devolver ao estoque"
+                                  >
+                                    <RotateCcw size={18} />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <p className="text-xs text-slate-400 italic pl-1">Carteira EPI vazia.</p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center gap-1.5 mb-2">
+                        <div className="w-1 h-3 bg-blue-500 rounded-full" />
+                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-tight">
+                          Demais materiais
+                        </span>
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        {e.possession?.filter(
+                          (p) => p.quantity > 0 && !!p.items && !p.items.consumable && p.items.category !== 'EPI'
+                        ).length ? (
+                          e.possession
+                            .filter(
+                              (p) => p.quantity > 0 && !!p.items && !p.items.consumable && p.items.category !== 'EPI'
+                            )
+                            .map((p, idx) => (
+                              <div
+                                key={idx}
+                                className="flex items-center justify-between gap-2 bg-blue-50 border border-blue-100 px-3 py-2.5 rounded-xl"
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-sm font-bold text-blue-900 leading-snug">
+                                    {formatProductLabelDisplay(p.items?.description)}
+                                  </p>
+                                  <span className="text-xs font-black text-blue-800 mt-1 inline-block">
+                                    ×{p.quantity}
+                                  </span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setReturnItem({ employeeId: e.id, item: p });
+                                    setReturnQty(p.quantity);
+                                  }}
+                                  className="min-h-[44px] min-w-[44px] shrink-0 flex items-center justify-center rounded-xl border border-blue-200 bg-white text-blue-800"
+                                  title="Devolver Item"
+                                >
+                                  <RotateCcw size={18} />
+                                </button>
+                              </div>
+                            ))
+                        ) : (
+                          <p className="text-xs text-slate-400 italic pl-1">Sem outros materiais em posse.</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2 pt-1 border-t border-slate-100">
+                    <button
+                      type="button"
+                      onClick={() => openEpiFichaModal(e)}
+                      className="flex-1 min-h-[48px] inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold text-primary"
+                    >
+                      <FileText size={18} />
+                      Fichas
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void openTimeline(e)}
+                      className="flex-1 min-h-[48px] inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold text-primary"
+                    >
+                      <History size={18} />
+                      Histórico
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void openWallet(e)}
+                      className="flex-1 min-w-[100%] sm:min-w-0 sm:flex-1 min-h-[48px] inline-flex items-center justify-center gap-2 rounded-xl border border-secondary/30 bg-secondary/10 text-sm font-bold text-primary"
+                    >
+                      <Package size={18} />
+                      Carteira completa
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
       </div>
 
