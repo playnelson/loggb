@@ -177,7 +177,7 @@ export function extractItemsFromPositionedItems(
       // Continuação de descrição em linha seguinte.
       if (current) {
         const continuation = row.cells
-          .filter((c) => c.x > itemX + X_TOL && c.x < unitX - X_TOL)
+          .filter((c) => c.x > itemX + 6 && c.x < unitX - 8)
           .map((c) => c.text)
           .join(' ')
           .trim();
@@ -193,7 +193,7 @@ export function extractItemsFromPositionedItems(
     const lineNumber = parseItemNumber(lineCell.text);
 
     const desc = row.cells
-      .filter((c) => c.x > itemX + X_TOL && c.x < unitX - X_TOL)
+      .filter((c) => c.x > itemX + 6 && c.x < unitX - 8)
       .map((c) => c.text)
       .join(' ')
       .trim();
@@ -254,6 +254,18 @@ const GARBLED_PHONE = /^\d{2,3}\d{3,4}-\d{6,}\d{2,3}-\d{3,4}$/;
 
 function normalizeWs(s: string): string {
   return s.replace(/\s+/g, ' ').trim();
+}
+
+function findGridMarkerIndex(text: string): number {
+  const patterns: RegExp[] = [
+    /TOTAL\s*DESCRIÇÃO\s*QTD\.?/i,
+    /DESCRIÇÃO\s*QTD\.?/i,
+  ];
+  for (const p of patterns) {
+    const m = p.exec(text);
+    if (m?.index != null) return m.index + m[0].length;
+  }
+  return -1;
 }
 
 /** Dois telefones colados no PDF (ex.: 843317-0145843316-2223). */
@@ -498,10 +510,10 @@ function joinedPartsHaveGridQty(parts: string[]): boolean {
 
 function extractItemsForKnownOcLayout(text: string): ParsedPurchaseOrderItem[] {
   const norm = text.replace(/\r/g, '\n');
-  const startMatch = norm.match(/\bUND\.\s*[\t ]*DESC\./i);
-  if (!startMatch || startMatch.index == null) return [];
+  const markerIdx = findGridMarkerIndex(norm);
+  if (markerIdx < 0) return [];
 
-  const tail = norm.slice(startMatch.index + startMatch[0].length);
+  const tail = norm.slice(markerIdx);
   const stopIdx = tail.search(/\n\s*OBSERVAÇÕES\b/i);
   const region = stopIdx >= 0 ? tail.slice(0, stopIdx) : tail;
   const lines = region
@@ -589,15 +601,7 @@ function extractItems(text: string): ParsedPurchaseOrderItem[] {
   if (byLayout.length) return byLayout;
 
   const norm = text.replace(/\t/g, ' ');
-  const markers = ['TOTALDESCRIÇÃOQTD.', 'DESCRIÇÃOQTD.', 'DESCRIÇÃOQTD'];
-  let sliceAt = -1;
-  for (const m of markers) {
-    const i = norm.indexOf(m);
-    if (i >= 0) {
-      sliceAt = i + m.length;
-      break;
-    }
-  }
+  const sliceAt = findGridMarkerIndex(norm);
   if (sliceAt < 0) return [];
 
   const tail = norm.slice(sliceAt);
@@ -703,15 +707,7 @@ function parseVendorBlock(text: string): {
   vendor_contact_name: string | null;
 } {
   const norm = text.replace(/\t/g, ' ');
-  const markers = ['TOTALDESCRIÇÃOQTD.', 'DESCRIÇÃOQTD.', 'DESCRIÇÃOQTD'];
-  let idx = -1;
-  for (const m of markers) {
-    const i = norm.indexOf(m);
-    if (i >= 0) {
-      idx = i + m.length;
-      break;
-    }
-  }
+  const idx = findGridMarkerIndex(norm);
   if (idx < 0) {
     return { vendor_name: null, vendor_phone: null, vendor_contact_name: null };
   }

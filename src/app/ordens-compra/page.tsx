@@ -254,7 +254,7 @@ export default function OrdensCompraPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Sessão expirada.');
 
-      const row = {
+      const baseRow: Record<string, string | null> = {
         user_id: user.id,
         oc_number: draft.oc_number?.trim() || null,
         title: sourceFilename?.trim()
@@ -265,11 +265,38 @@ export default function OrdensCompraPage() {
         source_filename: sourceFilename,
       };
 
-      const { data: po, error: poErr } = await supabase
+      let { data: po, error: poErr } = await supabase
         .from('purchase_orders')
-        .insert([row])
+        .insert([baseRow])
         .select('id')
         .single();
+
+      const needsRequesterEmployee =
+        !!poErr &&
+        /requester_employee_id/i.test(
+          `${poErr.message || ''} ${poErr.details || ''} ${poErr.hint || ''}`
+        );
+      if (needsRequesterEmployee) {
+        const { data: emp, error: empErr } = await supabase
+          .from('employees')
+          .select('id')
+          .eq('user_id', user.id)
+          .maybeSingle();
+        if (empErr || !emp?.id) {
+          throw new Error(
+            'Seu ambiente exige requester_employee_id. Vincule seu usuário a um colaborador na tabela employees.'
+          );
+        }
+        const rowWithRequester = {
+          ...baseRow,
+          requester_employee_id: String(emp.id),
+        };
+        ({ data: po, error: poErr } = await supabase
+          .from('purchase_orders')
+          .insert([rowWithRequester])
+          .select('id')
+          .single());
+      }
 
       if (poErr) throw poErr;
       const pid = String(po.id);
