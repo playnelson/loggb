@@ -142,11 +142,6 @@ export function Header({
           Almoxarifado
         </span>
       </div>
-      <div className="flex items-center gap-4">
-        <div className="w-8 h-8 rounded-full border border-slate-200 bg-white/85 flex items-center justify-center text-primary font-bold shadow-sm">
-          YS
-        </div>
-      </div>
     </header>
   );
 }

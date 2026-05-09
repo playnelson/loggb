@@ -40,7 +40,8 @@ function movementCounterpartyLabel(move: {
 interface PossessionDetail {
   id: string;
   quantity: number;
-  employees?: { full_name: string } | { full_name: string }[] | null;
+  employee_id?: string;
+  employees?: { id: string; full_name: string } | { id: string; full_name: string }[] | null;
 }
 
 interface Product {

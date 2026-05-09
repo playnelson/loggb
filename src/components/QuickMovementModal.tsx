@@ -17,6 +17,12 @@ import {
   MapPin
 } from 'lucide-react';
 
+type PossessionRow = {
+  quantity: number;
+  employee_id?: string | null;
+  employees?: { id: string; full_name: string } | { id: string; full_name: string }[] | null;
+};
+
 interface Product {
   id: string;
   description: string;
@@ -25,6 +31,31 @@ interface Product {
   unit: string;
   unique_item?: boolean;
   tag?: string | null;
+  possession?: PossessionRow[];
+}
+
+function nestedEmployeeId(employees: PossessionRow['employees']): string | null {
+  if (!employees) return null;
+  const one = Array.isArray(employees) ? employees[0] : employees;
+  return one?.id ? String(one.id) : null;
+}
+
+function nestedEmployeeName(employees: PossessionRow['employees']): string {
+  if (!employees) return 'Colaborador';
+  const one = Array.isArray(employees) ? employees[0] : employees;
+  return String(one?.full_name || 'Colaborador');
+}
+
+/** Colaboradores com quantidade > 0 na carteira para este item. */
+function employeePossessionHolders(item: Product): { id: string; full_name: string }[] {
+  const rows = item.possession?.filter((p) => Number(p.quantity) > 0) ?? [];
+  const out: { id: string; full_name: string }[] = [];
+  for (const p of rows) {
+    const id = p.employee_id ? String(p.employee_id) : nestedEmployeeId(p.employees);
+    if (!id) continue;
+    out.push({ id, full_name: nestedEmployeeName(p.employees) });
+  }
+  return out;
 }
 
 interface Employee {
@@ -143,8 +174,51 @@ export default function QuickMovementModal({
 
   const effectiveQty = useMemo(() => (isUnique ? 1 : quantity), [isUnique, quantity]);
 
+  const restrictUniqueReturnToPossessionHolders = useMemo(
+    () => Boolean(item && item.unique_item && !item.consumable && mode === 'IN'),
+    [item, mode]
+  );
+
+  const possessionHolders = useMemo(() => (item ? employeePossessionHolders(item) : []), [item]);
+
+  const employeeOptionsForSelect = useMemo(() => {
+    if (!restrictUniqueReturnToPossessionHolders) {
+      return employees.map((e) => ({ id: e.id, full_name: e.full_name }));
+    }
+    if (possessionHolders.length === 0) {
+      return [];
+    }
+    const nameById = new Map(employees.map((e) => [e.id, e.full_name]));
+    return possessionHolders.map((h) => ({
+      id: h.id,
+      full_name: nameById.get(h.id) ?? h.full_name,
+    }));
+  }, [restrictUniqueReturnToPossessionHolders, possessionHolders, employees]);
+
+  useEffect(() => {
+    if (!isOpen || !item) return;
+    if (item.unique_item && !item.consumable && mode === 'IN') {
+      setCounterparty('employee');
+      if (possessionHolders.length === 1) {
+        setSelectedEmployee(possessionHolders[0].id);
+      }
+    }
+  }, [isOpen, item, mode, possessionHolders]);
+
   const validate = useCallback((): string | null => {
     if (!item) return 'Item inválido.';
+    if (restrictUniqueReturnToPossessionHolders && counterparty === 'site') {
+      return 'Este equipamento único está com colaborador: a devolução ao almoxarifado deve ser feita por ele (origem Colaborador).';
+    }
+    if (restrictUniqueReturnToPossessionHolders && counterparty === 'employee') {
+      const holderIds = new Set(possessionHolders.map((h) => h.id));
+      if (possessionHolders.length === 0) {
+        return 'Este equipamento único não está em posse de nenhum colaborador no cadastro; não é possível registrar a devolução por colaborador.';
+      }
+      if (!selectedEmployee || !holderIds.has(selectedEmployee)) {
+        return 'Só quem está com este equipamento na carteira pode devolvê-lo. Selecione esse colaborador.';
+      }
+    }
     if (counterparty === 'employee') {
       if (needsEmployee && !selectedEmployee) return mode === 'IN' ? 'Selecione quem está devolvendo.' : 'Selecione um colaborador para a saída.';
     } else {
@@ -169,6 +243,8 @@ export default function QuickMovementModal({
     effectiveQty,
     isUnique,
     movementTag,
+    restrictUniqueReturnToPossessionHolders,
+    possessionHolders,
   ]);
 
   const insertMovement = useCallback(async (payload: Record<string, unknown>) => {
@@ -218,6 +294,14 @@ export default function QuickMovementModal({
     // 1b. Antes de gravar: validar carteira (colaborador ou local).
     if (!item.consumable && mode === 'IN') {
       if (counterparty === 'employee' && selectedEmployee) {
+        if (item.unique_item) {
+          const holderIds = new Set(possessionHolders.map((h) => h.id));
+          if (possessionHolders.length > 0 && !holderIds.has(selectedEmployee)) {
+            setError('Só o colaborador que está com este equipamento na carteira pode devolvê-lo.');
+            setLoading(false);
+            return;
+          }
+        }
         const { data: currentPosPre } = await supabase
           .from('possession')
           .select('quantity')
@@ -379,15 +463,26 @@ export default function QuickMovementModal({
                   </button>
                   <button
                     type="button"
+                    disabled={restrictUniqueReturnToPossessionHolders}
+                    title={
+                      restrictUniqueReturnToPossessionHolders
+                        ? 'Equipamento único em posse: a entrada só pode ser registrada pelo colaborador que o tem.'
+                        : undefined
+                    }
                     onClick={() => setCounterparty('site')}
                     className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-bold transition-all ${
                       counterparty === 'site' ? 'bg-white text-primary shadow-sm' : 'text-slate-500 hover:text-slate-700'
-                    }`}
+                    } disabled:opacity-45 disabled:cursor-not-allowed disabled:hover:text-slate-500`}
                   >
                     <MapPin size={16} />
                     Canteiro / sede
                   </button>
                 </div>
+                {restrictUniqueReturnToPossessionHolders && possessionHolders.length > 0 && (
+                  <p className="text-[10px] text-slate-500 font-bold leading-relaxed">
+                    Equipamento único: só aparecem (e só podem devolver) os colaboradores com este item na carteira.
+                  </p>
+                )}
               </div>
 
               {counterparty === 'employee' && (needsEmployee || showEmployeeOptionalOnIn) && (
@@ -409,13 +504,21 @@ export default function QuickMovementModal({
                         ? (showEmployeeOptionalOnIn ? 'Entrada no estoque (sem colaborador)' : 'Selecione quem está devolvendo...')
                         : 'Selecione o colaborador...'}
                     </option>
-                    {employees.map(e => (
-                      <option key={e.id} value={e.id}>{e.full_name}</option>
+                    {employeeOptionsForSelect.map((e) => (
+                      <option key={e.id} value={e.id}>
+                        {e.full_name}
+                      </option>
                     ))}
                   </select>
                   {showEmployeeOptionalOnIn && (
                     <div className="text-[10px] text-slate-400 font-bold">
                       Se você escolher um colaborador, a devolução ficará registrada no painel dele.
+                    </div>
+                  )}
+                  {restrictUniqueReturnToPossessionHolders && possessionHolders.length === 0 && (
+                    <div className="text-[10px] text-amber-800 font-bold bg-amber-50 border border-amber-100 rounded-lg px-2 py-1.5">
+                      Nenhum colaborador com este equipamento na carteira. Confira a posse no almoxarifado ou registre a
+                      saída antes de devolver.
                     </div>
                   )}
                 </div>

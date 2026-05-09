@@ -13,10 +13,16 @@ const pdfParseBuffer = requirePdf('pdf-parse') as (b: Buffer) => Promise<{ text:
 
 export async function POST(req: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return Response.json({ error: 'Não autenticado.' }, { status: 401 });
+    const devSkipAuth =
+      process.env.NODE_ENV === 'development' &&
+      process.env.NEXT_PUBLIC_ORDENS_COMPRA_DEV_LOCAL === '1';
+
+    if (!devSkipAuth) {
+      const supabase = await createSupabaseServerClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        return Response.json({ error: 'Não autenticado.' }, { status: 401 });
+      }
     }
 
     const ct = req.headers.get('content-type') || '';

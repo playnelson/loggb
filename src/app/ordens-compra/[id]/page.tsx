@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { ORDENS_COMPRA_DEV_LOCAL, devLocalOrdersRead, devLocalOrdersWrite } from '@/lib/ordensCompraDevLocal';
 import {
   ArrowLeft,
   ClipboardList,
@@ -68,6 +69,49 @@ export default function OrdemCompraDetailPage() {
     if (!id) return;
     setLoading(true);
     setError(null);
+
+    if (ORDENS_COMPRA_DEV_LOCAL && typeof window !== 'undefined') {
+      const list = devLocalOrdersRead();
+      const po = list.find((o) => o.id === id);
+      if (!po) {
+        setError('Ordem não encontrada (modo local).');
+        setHeader(null);
+        setItems([]);
+        setLoading(false);
+        return;
+      }
+      setHeader({
+        id: po.id,
+        oc_number: po.oc_number,
+        title: po.title,
+        buyer_code: po.buyer_code,
+        buyer_name: po.buyer_name,
+        buyer_phone: po.buyer_phone,
+        vendor_name: po.vendor_name,
+        vendor_phone: po.vendor_phone,
+        vendor_contact_name: po.vendor_contact_name,
+        store_name: po.store_name,
+        delivery_deadline: po.delivery_deadline,
+        request_date: po.request_date,
+        approval_status: po.approval_status,
+        source_filename: po.source_filename,
+        created_at: po.created_at,
+      });
+      setItems(
+        po.items.map((i) => ({
+          id: i.id,
+          line_number: i.line_number,
+          description: i.description,
+          quantity: i.quantity,
+          unit: i.unit,
+          delivered: i.delivered,
+          delivered_at: i.delivered_at,
+        }))
+      );
+      setLoading(false);
+      return;
+    }
+
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       setHeader(null);
@@ -117,6 +161,31 @@ export default function OrdemCompraDetailPage() {
   const toggleDelivered = async (item: PoItem) => {
     const next = !item.delivered;
     setBusyId(item.id);
+
+    if (ORDENS_COMPRA_DEV_LOCAL && typeof window !== 'undefined') {
+      const list = devLocalOrdersRead();
+      const po = list.find((o) => o.id === id);
+      if (!po) {
+        setBusyId(null);
+        return;
+      }
+      const line = po.items.find((i) => i.id === item.id);
+      if (line) {
+        line.delivered = next;
+        line.delivered_at = next ? new Date().toISOString() : null;
+        devLocalOrdersWrite(list);
+      }
+      setBusyId(null);
+      setItems((prev) =>
+        prev.map((r) =>
+          r.id === item.id
+            ? { ...r, delivered: next, delivered_at: next ? new Date().toISOString() : null }
+            : r
+        )
+      );
+      return;
+    }
+
     const { error: e } = await supabase
       .from('purchase_order_items')
       .update({
@@ -161,6 +230,11 @@ export default function OrdemCompraDetailPage() {
         <div className="p-6 rounded-xl bg-red-50 border border-red-100 text-red-800 font-medium">{error}</div>
       ) : header ? (
         <>
+          {ORDENS_COMPRA_DEV_LOCAL && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-xs font-medium text-amber-950">
+              Modo local: dados só no navegador; sem sincronizar com o Supabase.
+            </div>
+          )}
           <div className="flex flex-col gap-2">
             <h1 className="text-2xl font-bold text-primary flex items-center gap-2 flex-wrap">
               <ClipboardList className="text-secondary shrink-0" />
@@ -171,11 +245,11 @@ export default function OrdemCompraDetailPage() {
                 </span>
               )}
             </h1>
-            <p className="text-slate-600 text-sm">
-              {header.vendor_name || header.title || 'Ordem de compra'}
+            <p className="text-slate-600 text-sm font-medium break-all">
+              {header.title || 'Ordem de compra'}
             </p>
-            {header.source_filename && (
-              <p className="text-[11px] text-slate-400">Arquivo: {header.source_filename}</p>
+            {header.vendor_name && (
+              <p className="text-slate-500 text-xs">Fornecedor: {header.vendor_name}</p>
             )}
           </div>
 

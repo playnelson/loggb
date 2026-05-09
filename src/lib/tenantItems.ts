@@ -4,7 +4,7 @@ export type SupabaseBrowserClient = ReturnType<typeof createBrowserClient>;
 
 /** Select de itens para o almoxarifado (posse aninhada). */
 export const ITEMS_SELECT_WITHOUT_TAG =
-  'id, code, description, category, location, consumable, unique_item, quantity_current, quantity_min, unit, updated_at, user_id, possession (id, quantity, employees (full_name))';
+  'id, code, description, category, location, consumable, unique_item, quantity_current, quantity_min, unit, updated_at, user_id, possession (id, quantity, employee_id, employees (id, full_name))';
 
 export const ITEMS_SELECT_WITH_TAG = ITEMS_SELECT_WITHOUT_TAG.replace(
   'unique_item,',

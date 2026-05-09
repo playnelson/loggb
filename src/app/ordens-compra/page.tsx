@@ -6,9 +6,17 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import {
+  titleFromSourceFilename,
   type ParsedPurchaseOrder,
   type ParsedPurchaseOrderItem,
 } from '@/lib/purchaseOrderParse';
+import {
+  ORDENS_COMPRA_DEV_LOCAL,
+  devLocalNewId,
+  devLocalOrdersRead,
+  devLocalOrdersWrite,
+  type DevLocalPurchaseOrder,
+} from '@/lib/ordensCompraDevLocal';
 import {
   ClipboardList,
   FileUp,
@@ -73,6 +81,24 @@ export default function OrdensCompraPage() {
 
   const fetchOrders = useCallback(async () => {
     setLoading(true);
+    if (ORDENS_COMPRA_DEV_LOCAL && typeof window !== 'undefined') {
+      const list = devLocalOrdersRead();
+      setOrders(
+        list.map((o) => ({
+          id: o.id,
+          oc_number: o.oc_number,
+          title: o.title,
+          vendor_name: o.vendor_name,
+          store_name: o.store_name,
+          delivery_deadline: o.delivery_deadline,
+          created_at: o.created_at,
+          purchase_order_items: o.items.map((i) => ({ id: i.id, delivered: i.delivered })),
+        }))
+      );
+      setLoading(false);
+      return;
+    }
+
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       setOrders([]);
@@ -199,13 +225,59 @@ export default function OrdensCompraPage() {
     setSaveLoading(true);
     setParseError(null);
     try {
+      if (ORDENS_COMPRA_DEV_LOCAL && typeof window !== 'undefined') {
+        const existing = devLocalOrdersRead();
+        const newId = devLocalNewId();
+        const items = draft.items
+          .map((it, i) => ({
+            id: devLocalNewId(),
+            line_number: it.line_number || i + 1,
+            description: it.description.trim() || `Item ${i + 1}`,
+            quantity: it.quantity,
+            unit: (it.unit || 'un').slice(0, 10),
+            delivered: false,
+            delivered_at: null,
+          }))
+          .filter((l) => l.description.length > 0);
+
+        const row: DevLocalPurchaseOrder = {
+          id: newId,
+          oc_number: draft.oc_number?.trim() || null,
+          title: sourceFilename?.trim()
+            ? titleFromSourceFilename(sourceFilename)
+            : draft.title?.trim() || null,
+          buyer_code: draft.buyer_code?.trim() || null,
+          buyer_name: draft.buyer_name?.trim() || null,
+          buyer_phone: draft.buyer_phone?.trim() || null,
+          vendor_name: draft.vendor_name?.trim() || null,
+          vendor_phone: draft.vendor_phone?.trim() || null,
+          vendor_contact_name: draft.vendor_contact_name?.trim() || null,
+          store_name: draft.store_name?.trim() || null,
+          delivery_deadline: draft.delivery_deadline || null,
+          request_date: draft.request_date || null,
+          approval_status: draft.approval_status?.trim() || null,
+          source_filename: sourceFilename,
+          created_at: new Date().toISOString(),
+          items,
+        };
+
+        devLocalOrdersWrite([row, ...existing]);
+        setImportOpen(false);
+        setDraft(emptyDraft());
+        setSourceFilename(null);
+        await fetchOrders();
+        return;
+      }
+
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Sessão expirada.');
 
       const row = {
         user_id: user.id,
         oc_number: draft.oc_number?.trim() || null,
-        title: draft.title?.trim() || null,
+        title: sourceFilename?.trim()
+          ? titleFromSourceFilename(sourceFilename)
+          : draft.title?.trim() || null,
         buyer_code: draft.buyer_code?.trim() || null,
         buyer_name: draft.buyer_name?.trim() || null,
         buyer_phone: draft.buyer_phone?.trim() || null,
@@ -251,7 +323,17 @@ export default function OrdensCompraPage() {
       await fetchOrders();
     } catch (e) {
       console.error(e);
-      setParseError(e instanceof Error ? e.message : 'Erro ao salvar.');
+      const msg =
+        e && typeof e === 'object' && 'message' in e
+          ? [
+              String((e as { message?: unknown }).message || ''),
+              (e as { details?: string }).details,
+              (e as { hint?: string }).hint,
+            ]
+              .filter(Boolean)
+              .join(' — ')
+          : '';
+      setParseError(msg || (e instanceof Error ? e.message : 'Erro ao salvar.'));
     } finally {
       setSaveLoading(false);
     }
@@ -268,6 +350,14 @@ export default function OrdensCompraPage() {
           <p className="text-slate-500 text-sm">
             Envie o PDF da OC; o sistema preenche comprador, fornecedor, loja, prazo e itens. Marque entregas na página do pedido.
           </p>
+          {ORDENS_COMPRA_DEV_LOCAL && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-medium text-amber-950">
+              <strong className="font-bold">Modo local (dev):</strong> sem login ou Supabase. Dados só neste navegador (
+              <code className="text-[10px]">localStorage</code>). Ative com{' '}
+              <code className="text-[10px]">NEXT_PUBLIC_ORDENS_COMPRA_DEV_LOCAL=1</code> no{' '}
+              <code className="text-[10px]">.env.local</code>.
+            </div>
+          )}
         </div>
         <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
           <label className="flex flex-1 sm:flex-initial items-center justify-center gap-2 bg-white text-primary border border-slate-200 px-4 py-3 sm:py-2 rounded-lg hover:bg-slate-50 cursor-pointer font-medium text-sm min-h-[48px]">
@@ -381,7 +471,7 @@ export default function OrdensCompraPage() {
                       </td>
                       <td className="px-4 py-3 min-w-[180px]">
                         <div className="font-medium text-primary truncate max-w-[240px] sm:max-w-md">
-                          {o.vendor_name || o.title || 'Sem título'}
+                          {o.title || o.vendor_name || 'Sem título'}
                         </div>
                       </td>
                       <td className="px-4 py-3 text-slate-600 hidden sm:table-cell">
@@ -469,13 +559,29 @@ export default function OrdensCompraPage() {
                   />
                 </label>
                 <label className="block text-xs font-bold text-slate-600">
-                  Título
+                  Título (nome do arquivo)
                   <input
-                    className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 text-sm"
-                    value={draft.title || ''}
-                    onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value || null }))}
+                    className={`mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 text-sm ${
+                      sourceFilename ? 'bg-slate-50 text-slate-700' : ''
+                    }`}
+                    readOnly={Boolean(sourceFilename)}
+                    value={
+                      sourceFilename
+                        ? titleFromSourceFilename(sourceFilename) || ''
+                        : draft.title || ''
+                    }
+                    onChange={
+                      sourceFilename
+                        ? undefined
+                        : (e) => setDraft((d) => ({ ...d, title: e.target.value || null }))
+                    }
                   />
                 </label>
+                {sourceFilename ? (
+                  <p className="md:col-span-2 text-[10px] text-slate-500 -mt-2">
+                    O título segue o arquivo importado e não pode ser alterado aqui.
+                  </p>
+                ) : null}
                 <label className="block text-xs font-bold text-slate-600">
                   Comprador (código)
                   <input

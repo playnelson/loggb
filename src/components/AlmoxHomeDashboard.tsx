@@ -14,8 +14,6 @@ import {
   Loader2,
   Package,
   TrendingDown,
-  Wallet,
-  Bell,
 } from 'lucide-react';
 
 function StatCard({
@@ -53,74 +51,9 @@ function StatCard({
   );
 }
 
-type FinanceReminderLite = {
-  id: string;
-  title: string;
-  frequency: string;
-  reminder_time: string;
-  weekday: number | null;
-  day_of_month: number | null;
-  month_of_year: number | null;
-  interval_days: number | null;
-  created_at: string;
-};
-
-type NextEvent = {
-  when: Date;
-  label: string;
-  detail: string;
-};
-
-function nextReminderDate(rem: FinanceReminderLite, now: Date): Date | null {
-  const base = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const maxDays = 366;
-  for (let i = 0; i <= maxDays; i++) {
-    const d = new Date(base);
-    d.setDate(base.getDate() + i);
-    if (rem.frequency === 'daily') return d;
-    if (rem.frequency === 'weekly') {
-      if (rem.weekday == null) return null;
-      if (d.getDay() === rem.weekday) return d;
-      continue;
-    }
-    if (rem.frequency === 'monthly') {
-      if (rem.day_of_month == null) return null;
-      const last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
-      const day = Math.min(rem.day_of_month, last);
-      if (d.getDate() === day) return d;
-      continue;
-    }
-    if (rem.frequency === 'yearly') {
-      if (rem.day_of_month == null || rem.month_of_year == null) return null;
-      if (d.getMonth() + 1 !== rem.month_of_year) continue;
-      const last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
-      const day = Math.min(rem.day_of_month, last);
-      if (d.getDate() === day) return d;
-      continue;
-    }
-    if (rem.frequency === 'every_n_days') {
-      const n = rem.interval_days ?? 0;
-      if (n <= 0) return null;
-      const created = new Date(rem.created_at);
-      const c0 = new Date(created.getFullYear(), created.getMonth(), created.getDate()).getTime();
-      const d0 = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-      const diff = Math.floor((d0 - c0) / 86400000);
-      if (diff >= 0 && diff % n === 0) return d;
-    }
-  }
-  return null;
-}
-
 export function AlmoxHomeDashboard() {
   const [snap, setSnap] = useState<AlmoxDashboardSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
-  const [financeSummary, setFinanceSummary] = useState<{
-    pendingAccountsMonth: number;
-    fuelMonth: number;
-    expensesMonth: number;
-    remindersToday: number;
-  } | null>(null);
-  const [nextFinanceEvents, setNextFinanceEvents] = useState<NextEvent[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -134,115 +67,8 @@ export function AlmoxHomeDashboard() {
         return;
       }
       const data = await fetchAlmoxDashboardSnapshot(supabase, user.id);
-      const now = new Date();
-      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
-      const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
-      const [accR, fuelR, expR, remR] = await Promise.all([
-        supabase
-          .from('finance_accounts')
-          .select('amount, status, due_date')
-          .eq('user_id', user.id)
-          .eq('status', 'pending')
-          .gte('due_date', monthStart)
-          .lte('due_date', monthEnd),
-        supabase
-          .from('finance_fuel_logs')
-          .select('total_amount, ref_date')
-          .eq('user_id', user.id)
-          .gte('ref_date', monthStart)
-          .lte('ref_date', monthEnd),
-        supabase
-          .from('finance_expenses')
-          .select('amount, ref_date')
-          .eq('user_id', user.id)
-          .gte('ref_date', monthStart)
-          .lte('ref_date', monthEnd),
-        supabase
-          .from('dashboard_reminders')
-          .select('id, title, frequency, reminder_time, weekday, day_of_month, month_of_year, interval_days, active, created_at')
-          .eq('user_id', user.id)
-          .eq('active', true),
-      ]);
       if (!cancelled) {
         setSnap(data);
-        if (!accR.error && !fuelR.error && !expR.error && !remR.error) {
-          const pendingAccountsMonth = (accR.data || []).reduce(
-            (s: number, r: unknown) => s + Number((r as { amount: number }).amount || 0),
-            0
-          );
-          const fuelMonth = (fuelR.data || []).reduce(
-            (s: number, r: unknown) => s + Number((r as { total_amount: number }).total_amount || 0),
-            0
-          );
-          const expensesMonth = (expR.data || []).reduce(
-            (s: number, r: unknown) => s + Number((r as { amount: number }).amount || 0),
-            0
-          );
-          const remindersToday = (remR.data || []).filter((r: unknown) => {
-            const row = r as {
-              frequency: string;
-              weekday: number | null;
-              day_of_month: number | null;
-              month_of_year: number | null;
-              interval_days: number | null;
-              active: boolean;
-              created_at: string;
-            };
-            if (row.frequency === 'daily') return true;
-            if (row.frequency === 'weekly') return row.weekday === now.getDay();
-            if (row.frequency === 'monthly') {
-              if (row.day_of_month == null) return false;
-              const last = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-              return now.getDate() === Math.min(last, row.day_of_month);
-            }
-            if (row.frequency === 'yearly') {
-              if (row.day_of_month == null || row.month_of_year == null) return false;
-              if (row.month_of_year !== now.getMonth() + 1) return false;
-              const last = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-              return now.getDate() === Math.min(last, row.day_of_month);
-            }
-            if (row.frequency === 'every_n_days') {
-              if (!row.interval_days || row.interval_days <= 0) return false;
-              const c = new Date(row.created_at);
-              const c0 = new Date(c.getFullYear(), c.getMonth(), c.getDate()).getTime();
-              const n0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-              const diff = Math.floor((n0 - c0) / 86400000);
-              return diff >= 0 && diff % row.interval_days === 0;
-            }
-            return false;
-          }).length;
-          setFinanceSummary({ pendingAccountsMonth, fuelMonth, expensesMonth, remindersToday });
-
-          const events: NextEvent[] = [];
-          (accR.data || []).forEach((r: unknown) => {
-            const row = r as { due_date: string; amount: number };
-            const when = new Date(`${row.due_date}T09:00:00`);
-            if (!Number.isFinite(when.getTime())) return;
-            events.push({
-              when,
-              label: 'Conta a vencer',
-              detail: `${when.toLocaleDateString('pt-BR')} · ${Number(row.amount || 0).toLocaleString('pt-BR', {
-                style: 'currency',
-                currency: 'BRL',
-              })}`,
-            });
-          });
-          (remR.data || []).forEach((r: unknown) => {
-            const rem = r as FinanceReminderLite;
-            const date = nextReminderDate(rem, now);
-            if (!date) return;
-            events.push({
-              when: date,
-              label: `Lembrete: ${rem.title || 'Sem título'}`,
-              detail: `${date.toLocaleDateString('pt-BR')} · ${String(rem.reminder_time || '').slice(0, 5)}`,
-            });
-          });
-          events.sort((a, b) => a.when.getTime() - b.when.getTime());
-          setNextFinanceEvents(events.slice(0, 12));
-        } else {
-          setFinanceSummary(null);
-          setNextFinanceEvents([]);
-        }
         setLoading(false);
       }
     })();
@@ -325,66 +151,6 @@ export function AlmoxHomeDashboard() {
           tone="emerald"
         />
       </div>
-
-      {financeSummary && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard
-            label="Contas pendentes (mês)"
-            value={financeSummary.pendingAccountsMonth.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-            sub="Financeiro > Contas"
-            icon={<Wallet size={22} />}
-            tone="rose"
-          />
-          <StatCard
-            label="Abastecimentos (mês)"
-            value={financeSummary.fuelMonth.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-            sub="Financeiro > Abastecimentos"
-            icon={<ArrowUpRight size={22} />}
-            tone="amber"
-          />
-          <StatCard
-            label="Despesas (mês)"
-            value={financeSummary.expensesMonth.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-            sub="Financeiro > Despesas"
-            icon={<ArrowDownLeft size={22} />}
-            tone="slate"
-          />
-          <StatCard
-            label="Lembretes hoje"
-            value={financeSummary.remindersToday}
-            sub="Financeiro > Lembretes"
-            icon={<Bell size={22} />}
-            tone="emerald"
-          />
-        </div>
-      )}
-
-      {nextFinanceEvents.length > 0 && (
-        <div className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden">
-          <div className="px-5 py-3 border-b bg-slate-50 flex items-center justify-between">
-            <h2 className="text-sm font-black text-primary uppercase tracking-wide flex items-center gap-2">
-              <Bell size={18} className="text-secondary" />
-              Próximos eventos do financeiro
-            </h2>
-            <Link href="/financeiro" className="text-xs font-bold text-secondary hover:underline">
-              Abrir Financeiro
-            </Link>
-          </div>
-          <ul className="divide-y divide-slate-100">
-            {nextFinanceEvents.map((ev, idx) => (
-              <li key={`${ev.label}-${ev.when.toISOString()}-${idx}`} className="px-5 py-3 flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-bold text-primary truncate">{ev.label}</p>
-                  <p className="text-xs text-slate-500">{ev.detail}</p>
-                </div>
-                <span className="text-[10px] font-bold uppercase text-slate-400 whitespace-nowrap">
-                  {ev.when.toLocaleDateString('pt-BR')}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden">

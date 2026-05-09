@@ -34,6 +34,14 @@ function normalizeWs(s: string): string {
   return s.replace(/\s+/g, ' ').trim();
 }
 
+/** Dois telefones colados no PDF (ex.: 843317-0145843316-2223). */
+function splitConcatenatedPhones(s: string): string {
+  const t = s.replace(/\s/g, '');
+  const m = t.match(/^(\d{2}\d{4,6}-\d{4})(\d{2}\d{4,6}-\d{4})$/);
+  if (m) return `${m[1]} / ${m[2]}`;
+  return s;
+}
+
 function parseBrDate(s: string | null | undefined): string | null {
   if (!s) return null;
   const m = s.trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
@@ -52,6 +60,12 @@ export function ocNumberFromFilename(name: string): string | null {
   const base = name.replace(/\.[^.]+$/i, '');
   const m = base.match(/\bOC\s*[-_]?\s*(\d{3,8})\b/i) || base.match(/(\d{4,8})/);
   return m ? stripLeadingZerosOc(m[1]) : null;
+}
+
+/** Título exibido na OC: sempre o nome do arquivo (sem pasta). */
+export function titleFromSourceFilename(sourceFilename: string): string | null {
+  const base = sourceFilename.replace(/^.*[/\\]/, '').trim();
+  return base || null;
 }
 
 function extractOcNumber(text: string): string | null {
@@ -83,11 +97,15 @@ function extractStore(text: string): string | null {
   const afterBuyer = text.match(/Comprador\s*:\s*\n\s*\S+\s+[^\n]+\n\s*([^\n]+)/i);
   if (afterBuyer) {
     const line = afterBuyer[1].trim();
-    if (/^\d{2,4}_[A-Z0-9_]+$/i.test(line) || /^[A-Z0-9_]{4,}$/i.test(line)) {
-      return line;
+    if (
+      /^\d{2,4}_[A-Z0-9_]+(\s+[A-Za-zÀ-Ú0-9_]+)*$/i.test(line) ||
+      /^[A-Z0-9_]{4,}$/i.test(line)
+    ) {
+      return normalizeWs(line);
     }
   }
-  return null;
+  const loose = text.match(/\b(\d{3}_[A-Z0-9_]+(?:\s+[A-Za-zÀ-Ú0-9_]+)*)\b/i);
+  return loose ? normalizeWs(loose[1]) : null;
 }
 
 function extractApprovalStatus(text: string): string | null {
@@ -118,11 +136,28 @@ function extractDates(text: string): { request: string | null; delivery: string 
 }
 
 function itemStartLine(line: string): { num: number; rest: string } | null {
-  const m = line.match(/^(\d+)\s+([A-Za-zÀ-ÿ0-9"'.].*)$/);
+  // Com espaço: a descrição deve começar com letra/citação (evita "84 99986-0896" como item 84).
+  const m = line.match(/^(\d+)\s+([A-Za-zÀ-ÿ"'.].*)$/);
   if (m) return { num: parseInt(m[1], 10), rest: m[2].trim() };
+  // Colado ao número: 1CHAVE, 10MORSA (PDFs sem espaço entre nº e texto).
   const m2 = line.match(/^(\d+)([A-Za-zÀ-ÿ"'.].*)$/);
   if (m2) return { num: parseInt(m2[1], 10), rest: m2[2].trim() };
   return null;
+}
+
+/** Evita CEP/códigos colados ao PDF (ex.: 59600340CEP :) serem tratados como linha de item. */
+function isPlausibleItemStart(st: { num: number; rest: string }): boolean {
+  if (st.num <= 0) return false;
+  if (st.num > 999) return false;
+  if (st.rest.length < 3) return false;
+  if (/^CEPT?\s*:?\s*$/i.test(st.rest)) return false;
+  if (/^PARCELAS?\b/i.test(st.rest)) return false;
+  if (/^DIAS?\b/i.test(st.rest.trim())) return false;
+  if (/^Rua\b/i.test(st.rest.trim())) return false;
+  if (/^Rodovia\b/i.test(st.rest.trim())) return false;
+  if (/^x\d/i.test(st.rest.trim())) return false;
+  if (/^UNR?\$/i.test(st.rest.trim())) return false;
+  return true;
 }
 
 function isJunkContinuation(line: string): boolean {
@@ -134,6 +169,10 @@ function isJunkContinuation(line: string): boolean {
   if (/^UND\.?$|^DESC\.?$/i.test(line)) return true;
   if (/^\d+,\d+UNR?\$/i.test(line)) return true;
   if (/^\d{10,}/.test(line.replace(/\D/g, '')) && line.length > 14) return true;
+  if (/^\d{5}-\d{3}\b/.test(line)) return true;
+  if (/^\d+Rua\b/i.test(line)) return true;
+  if (/^RN[A-Za-zÀ-ú]/i.test(line)) return true;
+  if (/Mossoró|Macau|Betânia|Zona\s+Rural/i.test(line)) return true;
   return false;
 }
 
@@ -151,18 +190,33 @@ function extractItems(text: string): ParsedPurchaseOrderItem[] {
     .map((l) => l.trim())
     .filter(Boolean);
 
+  // Neste layout, linhas tipo "3 PARCELAS" vêm antes da grade; o 1º item vem depois de um preço R$.
   let startIdx = -1;
+  let sawGridPrice = false;
   for (let i = 0; i < rawLines.length; i++) {
-    if (itemStartLine(rawLines[i])) {
+    if (/^R\$\d/.test(rawLines[i])) sawGridPrice = true;
+    if (!sawGridPrice) continue;
+    const st = itemStartLine(rawLines[i]);
+    if (st && isPlausibleItemStart(st)) {
       startIdx = i;
       break;
     }
   }
   if (startIdx === -1) {
     for (let i = 0; i < rawLines.length; i++) {
+      const st = itemStartLine(rawLines[i]);
+      if (st && isPlausibleItemStart(st)) {
+        startIdx = i;
+        break;
+      }
+    }
+  }
+  if (startIdx === -1) {
+    for (let i = 0; i < rawLines.length; i++) {
       if (/^R\$\d/.test(rawLines[i])) {
         for (let j = i + 1; j < Math.min(i + 8, rawLines.length); j++) {
-          if (itemStartLine(rawLines[j])) {
+          const st = itemStartLine(rawLines[j]);
+          if (st && isPlausibleItemStart(st)) {
             startIdx = j;
             break;
           }
@@ -184,10 +238,10 @@ function extractItems(text: string): ParsedPurchaseOrderItem[] {
 
   const flush = () => {
     if (!current || current.parts.length === 0) return;
-    const merged = normalizeWs(current.parts.join(' '));
-    const start = itemStartLine(merged);
-    if (!start) return;
-    let desc = start.rest;
+    // parts já são só a descrição (sem o nº da linha); não usar itemStartLine aqui.
+    let desc = normalizeWs(current.parts.join(' '));
+    if (desc.length < 4) return;
+
     let qty: number | null = null;
     let unit: string | null = null;
 
@@ -204,14 +258,12 @@ function extractItems(text: string): ParsedPurchaseOrderItem[] {
       if (unit === 'und') unit = 'un';
     }
 
-    if (desc.length >= 4) {
-      items.push({
-        line_number: current.line_number,
-        description: desc,
-        quantity: qty,
-        unit,
-      });
-    }
+    items.push({
+      line_number: current.line_number,
+      description: desc,
+      quantity: qty,
+      unit,
+    });
   };
 
   for (const ln of lines) {
@@ -221,7 +273,7 @@ function extractItems(text: string): ParsedPurchaseOrderItem[] {
       continue;
     }
     const st = itemStartLine(ln);
-    if (st) {
+    if (st && isPlausibleItemStart(st)) {
       flush();
       current = { line_number: st.num, parts: [st.rest] };
       continue;
@@ -256,7 +308,8 @@ function parseVendorBlock(text: string): {
   const block: string[] = [];
   for (const ln of rawLines) {
     if (/^R\$\d/.test(ln)) break;
-    if (itemStartLine(ln)) break;
+    const ist = itemStartLine(ln);
+    if (ist && isPlausibleItemStart(ist)) break;
     if (/^UND\.?$|^DESC\.?$/i.test(ln)) break;
     block.push(ln);
     if (block.length > 12) break;
@@ -279,17 +332,24 @@ function parseVendorBlock(text: string): {
     if (/^Celular:|^Fornecedor:|^Data\s|^Cond\.|^Tipo\s|^A\/C:|^CNPJ:|^Email:/i.test(ln)) {
       continue;
     }
+    if (/@/.test(ln)) continue;
     if (ln.length > 2 && !/^\d+$/.test(ln)) {
       nameCandidates.push(ln);
     }
   }
 
   let vendor_name: string | null = null;
-  const scored = nameCandidates.filter((n) => n.length > 3);
+  const scored = nameCandidates.filter((n) => n.length > 3 && !/@/.test(n));
   const withSuffix = scored.find((n) => /\b(LTDA|S\.A\.|ME\.?|EIRELI|IMPORTA|INDUSTRIA)\b/i.test(n));
-  vendor_name = withSuffix || (scored.length ? scored[scored.length - 1] : null);
+  const looksLikeShortCompany = scored.filter(
+    (n) => /^[A-ZÀ-Ú0-9][A-ZÀ-Ú0-9 .'&-]{2,60}$/i.test(n) && !/\d{5,}/.test(n)
+  );
+  vendor_name =
+    withSuffix ||
+    looksLikeShortCompany[0] ||
+    (scored.length ? scored.find((n) => !/^\d+[\s-]/.test(n)) || scored[0] : null);
 
-  const vendor_phone = phones[0] ? normalizeWs(phones[0]) : null;
+  const vendor_phone = phones[0] ? normalizeWs(splitConcatenatedPhones(phones[0])) : null;
 
   return {
     vendor_name,
@@ -307,9 +367,7 @@ export function parsePurchaseOrderFromText(text: string, sourceFilename: string)
   let oc_number = extractOcNumber(normalized) || ocNumberFromFilename(sourceFilename);
 
   const items = extractItems(normalized);
-  const title =
-    vendor.vendor_name ||
-    (oc_number ? `OC ${oc_number}` : sourceFilename.replace(/\.[^.]+$/i, ''));
+  const title = sourceFilename.trim() ? titleFromSourceFilename(sourceFilename) : null;
 
   return {
     oc_number,

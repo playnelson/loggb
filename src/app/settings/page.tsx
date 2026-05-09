@@ -74,7 +74,7 @@ export default function SettingsPage() {
     setClaimMessage(null);
     if (
       !confirm(
-        'Isso associa à SUA conta todos os registros que ainda não têm responsável (user_id vazio): materiais, colaboradores e pedidos de compra.\n\n' +
+        'Isso associa à SUA conta todos os registros que ainda não têm responsável (user_id vazio): materiais e colaboradores.\n\n' +
           'Use somente se você é o dono desses dados ou se há um único uso do sistema. Se outra pessoa usa o mesmo banco com outra conta, ela pode deixar de ver esses registros até corrigir manualmente no Supabase.\n\n' +
           'Continuar?'
       )
@@ -95,10 +95,6 @@ export default function SettingsPage() {
       const rEmp = await supabase.from('employees').update({ user_id: uid }).is('user_id', null).select('id');
       if (rEmp.error) parts.push(`Colaboradores: ${rEmp.error.message}`);
       else parts.push(`Colaboradores: ${rEmp.data?.length ?? 0}.`);
-
-      const rOrd = await supabase.from('purchase_orders').update({ user_id: uid }).is('user_id', null).select('id');
-      if (rOrd.error) parts.push(`Pedidos: ${rOrd.error.message}`);
-      else parts.push(`Pedidos: ${rOrd.data?.length ?? 0}.`);
 
       const rSites = await supabase.from('work_sites').update({ user_id: uid }).is('user_id', null).select('id');
       if (!rSites.error) {

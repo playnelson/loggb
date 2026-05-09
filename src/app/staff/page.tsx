@@ -606,6 +606,14 @@ export default function StaffPage() {
     [walletEmployee, walletEpiConsumableFromMovements]
   );
 
+  const walletDemaisMateriaisLines = useMemo(
+    () =>
+      (walletEmployee?.possession || []).filter(
+        (p) => p.quantity > 0 && !!p.items && !p.items.consumable && p.items.category !== 'EPI'
+      ),
+    [walletEmployee]
+  );
+
   const handleWalletReturn = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!walletReturn || returnQty <= 0) return;
@@ -981,7 +989,7 @@ export default function StaffPage() {
                             type="button"
                             onClick={() => void openWallet(e)}
                             className="text-slate-400 hover:text-secondary p-2 bg-slate-50 border border-slate-200 rounded-lg transition-all"
-                            title="Carteiras (EPI + demais) e histórico — EPI consumível: descarte aqui; devolução ao estoque no Almoxarifado"
+                            title="Carteiras (EPI + demais) em tabelas e histórico de movimentações"
                           >
                             <Package size={16} />
                           </button>
@@ -1460,125 +1468,126 @@ export default function StaffPage() {
               )}
 
               <p className="text-[11px] text-slate-500 font-bold">
-                Demais materiais: só não consumíveis em posse. Na carteira EPI entram também consumíveis com saldo em uso;
-                use <span className="text-purple-800">Descarte</span> para registrar troca/uso sem devolver ao estoque.
+                Visão apenas do que está em posse (e consumíveis EPI com saldo em uso). Retiradas, devoluções e descartes
+                aparecem no histórico abaixo.
               </p>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-                  <div className="p-4 border-b bg-purple-50/80 flex items-center justify-between">
+                <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden flex flex-col min-h-0">
+                  <div className="p-4 border-b bg-purple-50/80 flex items-center justify-between shrink-0">
                     <div className="text-xs font-black text-purple-900 uppercase tracking-wide">Carteira EPI</div>
-                    <div className="text-xs font-bold text-purple-800">{walletMergedEpiLines.length}</div>
+                    <div className="text-xs font-bold text-purple-800 tabular-nums">{walletMergedEpiLines.length}</div>
                   </div>
-                  <div className="p-4 space-y-2">
-                    {walletMergedEpiLines.map((row) => (
-                      <div
-                        key={row.key}
-                        className="flex items-center justify-between bg-purple-50/50 border border-purple-100 rounded-xl px-3 py-2"
-                      >
-                        <div className="min-w-0">
-                          <div className="font-bold text-primary text-sm truncate">{formatProductLabelDisplay(row.description)}</div>
-                          <div className="text-[10px] text-slate-400 font-bold uppercase">{row.unit}</div>
-                          {row.consumable && (
-                            <div className="text-[9px] font-bold text-amber-800 mt-0.5">Consumível — saldo em uso</div>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <div className="text-sm font-black text-primary">×{row.quantity}</div>
-                          {row.consumable ? (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (!walletEmployeeId) return;
-                                setEpiDiscard({
-                                  employeeId: walletEmployeeId,
-                                  item_id: row.item_id,
-                                  description: row.description,
-                                  unit: row.unit,
-                                  maxQty: row.quantity,
-                                });
-                                setDiscardQty(row.quantity);
-                              }}
-                              className="px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-lg text-xs font-black text-amber-900 hover:bg-amber-100"
-                              title="Registrar descarte (não retorna ao estoque)"
-                            >
-                              Descarte
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (!walletEmployeeId) return;
-                                setWalletReturn({
-                                  employeeId: walletEmployeeId,
-                                  item_id: row.item_id,
-                                  description: row.description,
-                                  unit: row.unit,
-                                  maxQty: row.quantity,
-                                });
-                                setReturnQty(row.quantity);
-                              }}
-                              className="px-3 py-1.5 bg-white border border-purple-200 rounded-lg text-xs font-black text-purple-800 hover:bg-purple-50"
-                              title="Devolver ao estoque"
-                            >
-                              Devolver
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                    {walletMergedEpiLines.length === 0 && (
-                      <div className="text-sm text-slate-400 italic">Sem itens na carteira EPI.</div>
-                    )}
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm border-collapse min-w-[400px]">
+                      <thead>
+                        <tr className="bg-purple-50/40 border-b border-purple-100">
+                          <th scope="col" className="text-left py-2.5 px-3 text-[10px] font-black uppercase tracking-wide text-purple-900">
+                            Material
+                          </th>
+                          <th scope="col" className="text-left py-2.5 px-3 text-[10px] font-black uppercase tracking-wide text-purple-900 w-[120px]">
+                            Tipo
+                          </th>
+                          <th scope="col" className="text-left py-2.5 px-3 text-[10px] font-black uppercase tracking-wide text-purple-900 w-[72px]">
+                            Un.
+                          </th>
+                          <th scope="col" className="text-right py-2.5 px-3 text-[10px] font-black uppercase tracking-wide text-purple-900 w-[72px]">
+                            Qtd
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {walletMergedEpiLines.map((row) => (
+                          <tr key={row.key} className="border-b border-slate-100 hover:bg-purple-50/30">
+                            <td className="py-2.5 px-3 align-middle">
+                              <div
+                                className="font-bold text-primary leading-snug max-w-[280px]"
+                                title={formatProductLabelDisplay(row.description)}
+                              >
+                                {formatProductLabelDisplay(row.description)}
+                              </div>
+                            </td>
+                            <td className="py-2.5 px-3 align-middle text-[11px] font-bold text-slate-600">
+                              {row.consumable ? (
+                                <span className="text-amber-800">Consumível (em uso)</span>
+                              ) : (
+                                <span className="text-slate-700">Em posse</span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3 align-middle text-[11px] text-slate-500 font-bold uppercase tabular-nums">
+                              {row.unit}
+                            </td>
+                            <td className="py-2.5 px-3 align-middle text-right font-black text-primary tabular-nums">
+                              {row.quantity}
+                            </td>
+                          </tr>
+                        ))}
+                        {walletMergedEpiLines.length === 0 && (
+                          <tr>
+                            <td colSpan={4} className="py-8 px-3 text-center text-sm text-slate-400 italic">
+                              Sem itens na carteira EPI.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
 
-                <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-                  <div className="p-4 border-b bg-blue-50/80 flex items-center justify-between">
+                <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden flex flex-col min-h-0">
+                  <div className="p-4 border-b bg-blue-50/80 flex items-center justify-between shrink-0">
                     <div className="text-xs font-black text-blue-900 uppercase tracking-wide">Demais materiais em posse</div>
-                    <div className="text-xs font-bold text-blue-800">
-                      {(walletEmployee?.possession || []).filter(
-                        (p) => p.quantity > 0 && !!p.items && !p.items.consumable && p.items.category !== 'EPI'
-                      ).length}
-                    </div>
+                    <div className="text-xs font-bold text-blue-800 tabular-nums">{walletDemaisMateriaisLines.length}</div>
                   </div>
-                  <div className="p-4 space-y-2">
-                    {(walletEmployee?.possession || [])
-                      .filter((p) => p.quantity > 0 && !!p.items && !p.items.consumable && p.items.category !== 'EPI')
-                      .map((p, idx) => (
-                        <div key={idx} className="flex items-center justify-between bg-blue-50/50 border border-blue-100 rounded-xl px-3 py-2">
-                          <div className="min-w-0">
-                            <div className="font-bold text-primary text-sm truncate">
-                              {formatProductLabelDisplay(p.items.description)}
-                            </div>
-                            <div className="text-[10px] text-slate-400 font-bold uppercase">{p.items.unit}</div>
-                          </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            <div className="text-sm font-black text-primary">×{p.quantity}</div>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (!walletEmployeeId) return;
-                                setWalletReturn({
-                                  employeeId: walletEmployeeId,
-                                  item_id: p.item_id,
-                                  description: p.items.description,
-                                  unit: p.items.unit,
-                                  maxQty: p.quantity,
-                                });
-                                setReturnQty(p.quantity);
-                              }}
-                              className="px-3 py-1.5 bg-white border border-blue-200 rounded-lg text-xs font-black text-blue-800 hover:bg-blue-50"
-                              title="Devolver ao estoque"
-                            >
-                              Devolver
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    {(walletEmployee?.possession || []).filter(
-                      (p) => p.quantity > 0 && !!p.items && !p.items.consumable && p.items.category !== 'EPI'
-                    ).length === 0 && <div className="text-sm text-slate-400 italic">Sem outros materiais em posse.</div>}
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm border-collapse min-w-[400px]">
+                      <thead>
+                        <tr className="bg-blue-50/40 border-b border-blue-100">
+                          <th scope="col" className="text-left py-2.5 px-3 text-[10px] font-black uppercase tracking-wide text-blue-900">
+                            Material
+                          </th>
+                          <th scope="col" className="text-left py-2.5 px-3 text-[10px] font-black uppercase tracking-wide text-blue-900 w-[100px]">
+                            Categoria
+                          </th>
+                          <th scope="col" className="text-left py-2.5 px-3 text-[10px] font-black uppercase tracking-wide text-blue-900 w-[72px]">
+                            Un.
+                          </th>
+                          <th scope="col" className="text-right py-2.5 px-3 text-[10px] font-black uppercase tracking-wide text-blue-900 w-[72px]">
+                            Qtd
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {walletDemaisMateriaisLines.map((p) => (
+                          <tr key={p.item_id} className="border-b border-slate-100 hover:bg-blue-50/30">
+                            <td className="py-2.5 px-3 align-middle">
+                              <div
+                                className="font-bold text-primary leading-snug max-w-[280px]"
+                                title={formatProductLabelDisplay(p.items.description)}
+                              >
+                                {formatProductLabelDisplay(p.items.description)}
+                              </div>
+                            </td>
+                            <td className="py-2.5 px-3 align-middle text-[11px] font-bold text-slate-600">
+                              {p.items.category || '—'}
+                            </td>
+                            <td className="py-2.5 px-3 align-middle text-[11px] text-slate-500 font-bold uppercase tabular-nums">
+                              {p.items.unit}
+                            </td>
+                            <td className="py-2.5 px-3 align-middle text-right font-black text-primary tabular-nums">
+                              {p.quantity}
+                            </td>
+                          </tr>
+                        ))}
+                        {walletDemaisMateriaisLines.length === 0 && (
+                          <tr>
+                            <td colSpan={4} className="py-8 px-3 text-center text-sm text-slate-400 italic">
+                              Sem outros materiais em posse.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               </div>
@@ -1612,7 +1621,7 @@ export default function StaffPage() {
                   <p className="text-[10px] text-slate-400 font-bold mt-2">
                     {walletLoading
                       ? 'Carregando…'
-                      : `${filteredWalletMovements.length} de ${walletMovements.length} registro(s). EPI consumível: descarte aqui; devolução ao estoque no Almoxarifado.`}
+                      : `${filteredWalletMovements.length} de ${walletMovements.length} registro(s). Em retiradas de não consumível: Devolver. EPI consumível em uso: Descarte nesta linha ou no quadro; devolução ao estoque pelo Almoxarifado.`}
                   </p>
                 </div>
                 <div className="p-4 max-h-[min(50vh,420px)] overflow-y-auto">
@@ -1626,6 +1635,9 @@ export default function StaffPage() {
                       {filteredWalletMovements.slice(0, 400).map((m) => {
                         const isOut = String(m.type) === 'OUT';
                         const isDiscard = movementIsEpiDiscard(m);
+                        const epiConsumableBalanceRow = walletMergedEpiLines.find(
+                          (r) => r.item_id === String(m.item_id) && r.consumable
+                        );
                         return (
                           <div key={m.id} className="flex flex-wrap items-start justify-between gap-2 bg-slate-50 border border-slate-100 rounded-xl px-3 py-2">
                             <div className="min-w-0 flex-1">
@@ -1704,6 +1716,25 @@ export default function StaffPage() {
                                   title="Devolver ao estoque (não consumível)"
                                 >
                                   Devolver
+                                </button>
+                              )}
+                              {isOut && epiConsumableBalanceRow && walletEmployeeId && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEpiDiscard({
+                                      employeeId: walletEmployeeId,
+                                      item_id: epiConsumableBalanceRow.item_id,
+                                      description: epiConsumableBalanceRow.description,
+                                      unit: epiConsumableBalanceRow.unit,
+                                      maxQty: epiConsumableBalanceRow.quantity,
+                                    });
+                                    setDiscardQty(epiConsumableBalanceRow.quantity);
+                                  }}
+                                  className="px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-lg text-xs font-black text-amber-900 hover:bg-amber-100"
+                                  title="Registrar descarte (não retorna ao estoque)"
+                                >
+                                  Descarte
                                 </button>
                               )}
                             </div>

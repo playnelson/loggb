@@ -8,6 +8,15 @@ export async function proxy(request: NextRequest) {
     },
   });
 
+  const devOrdensLocal =
+    process.env.NODE_ENV === 'development' &&
+    process.env.NEXT_PUBLIC_ORDENS_COMPRA_DEV_LOCAL === '1' &&
+    request.nextUrl.pathname.startsWith('/ordens-compra');
+
+  if (devOrdensLocal) {
+    return response;
+  }
+
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
