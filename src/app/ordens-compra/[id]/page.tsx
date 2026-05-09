@@ -24,15 +24,18 @@ interface PoHeader {
   id: string;
   oc_number: string | null;
   title: string | null;
-  buyer_code: string | null;
-  buyer_name: string | null;
-  buyer_phone: string | null;
+  comprador_line: string | null;
   vendor_name: string | null;
-  vendor_phone: string | null;
-  vendor_contact_name: string | null;
+  vendor_contact_line: string | null;
   delivery_deadline: string | null;
   source_filename: string | null;
   created_at: string;
+}
+
+function compradorFromNotes(notes: string | null | undefined): string | null {
+  const t = (notes || '').trim();
+  if (!t) return null;
+  return t.replace(/^Comprador:\s*/i, '').trim() || t;
 }
 
 interface PoItem {
@@ -77,16 +80,16 @@ export default function OrdemCompraDetailPage() {
         setLoading(false);
         return;
       }
+      const legacyPhone = (po as { vendor_phone?: string | null }).vendor_phone;
       setHeader({
         id: po.id,
         oc_number: po.oc_number,
         title: po.title,
-        buyer_code: po.buyer_code,
-        buyer_name: po.buyer_name,
-        buyer_phone: po.buyer_phone,
+        comprador_line:
+          [po.buyer_code, po.buyer_name, po.buyer_phone].filter(Boolean).join(' · ') || null,
         vendor_name: po.vendor_name,
-        vendor_phone: po.vendor_phone,
-        vendor_contact_name: po.vendor_contact_name,
+        vendor_contact_line:
+          [po.vendor_contact_name, legacyPhone].filter(Boolean).join(' · ') || null,
         delivery_deadline: po.delivery_deadline,
         source_filename: po.source_filename,
         created_at: po.created_at,
@@ -117,7 +120,7 @@ export default function OrdemCompraDetailPage() {
     const { data: po, error: e1 } = await supabase
       .from('purchase_orders')
       .select(
-        'id, oc_number, title, buyer_code, buyer_name, buyer_phone, vendor_name, vendor_phone, vendor_contact_name, delivery_deadline, source_filename, created_at'
+        'id, oc_number, title, vendor_name, vendor_contact_name, delivery_deadline, source_filename, notes, created_at'
       )
       .eq('id', id)
       .eq('user_id', user.id)
@@ -131,7 +134,18 @@ export default function OrdemCompraDetailPage() {
       return;
     }
 
-    setHeader(po as PoHeader);
+    const row = po as Record<string, unknown>;
+    setHeader({
+      id: String(row.id),
+      oc_number: (row.oc_number as string | null) ?? null,
+      title: (row.title as string | null) ?? null,
+      comprador_line: compradorFromNotes((row.notes as string | null) ?? null),
+      vendor_name: (row.vendor_name as string | null) ?? null,
+      vendor_contact_line: (row.vendor_contact_name as string | null) ?? null,
+      delivery_deadline: (row.delivery_deadline as string | null) ?? null,
+      source_filename: (row.source_filename as string | null) ?? null,
+      created_at: String(row.created_at ?? ''),
+    });
 
     const { data: lines, error: e2 } = await supabase
       .from('purchase_order_items')
@@ -247,15 +261,7 @@ export default function OrdemCompraDetailPage() {
               <div className="text-[10px] font-black uppercase text-slate-400 flex items-center gap-1">
                 <User size={12} /> Comprador
               </div>
-              <div className="text-sm font-bold text-primary">
-                {[header.buyer_code, header.buyer_name].filter(Boolean).join(' · ') || '—'}
-              </div>
-              {header.buyer_phone && (
-                <div className="text-xs text-slate-600 flex items-center gap-1">
-                  <Phone size={12} />
-                  {header.buyer_phone}
-                </div>
-              )}
+              <div className="text-sm font-bold text-primary">{header.comprador_line || '—'}</div>
             </div>
 
             <div className="bg-white rounded-xl border border-border p-4 space-y-2">
@@ -263,13 +269,10 @@ export default function OrdemCompraDetailPage() {
                 <Store size={12} /> Fornecedor e vendedor
               </div>
               <div className="text-sm font-bold text-primary">{header.vendor_name || '—'}</div>
-              {header.vendor_contact_name && (
-                <div className="text-xs text-slate-600">Vendedor: {header.vendor_contact_name}</div>
-              )}
-              {header.vendor_phone && (
-                <div className="text-xs text-slate-600 flex items-center gap-1">
-                  <Phone size={12} />
-                  {header.vendor_phone}
+              {header.vendor_contact_line && (
+                <div className="text-xs text-slate-600 flex items-start gap-1">
+                  <Phone size={12} className="shrink-0 mt-0.5" />
+                  <span>{header.vendor_contact_line}</span>
                 </div>
               )}
             </div>

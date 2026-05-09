@@ -28,7 +28,6 @@ export interface DevLocalPurchaseOrder {
   buyer_name: string | null;
   buyer_phone: string | null;
   vendor_name: string | null;
-  vendor_phone: string | null;
   vendor_contact_name: string | null;
   delivery_deadline: string | null;
   source_filename: string | null;

@@ -46,7 +46,6 @@ const emptyDraft = (): ParsedPurchaseOrder => ({
   buyer_name: null,
   buyer_phone: null,
   vendor_name: null,
-  vendor_phone: null,
   vendor_contact_name: null,
   delivery_deadline: null,
   title: null,
@@ -237,7 +236,6 @@ export default function OrdensCompraPage() {
           buyer_name: draft.buyer_name?.trim() || null,
           buyer_phone: draft.buyer_phone?.trim() || null,
           vendor_name: draft.vendor_name?.trim() || null,
-          vendor_phone: draft.vendor_phone?.trim() || null,
           vendor_contact_name: draft.vendor_contact_name?.trim() || null,
           delivery_deadline: draft.delivery_deadline || null,
           source_filename: sourceFilename,
@@ -256,22 +254,23 @@ export default function OrdensCompraPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Sessão expirada.');
 
+      const compradorBits = [draft.buyer_code, draft.buyer_name, draft.buyer_phone].filter(
+        (s) => (s || '').trim().length > 0
+      ) as string[];
+      const notes =
+        compradorBits.length > 0 ? `Comprador: ${compradorBits.map((s) => s.trim()).join(' · ')}` : null;
+
       const row = {
         user_id: user.id,
         oc_number: draft.oc_number?.trim() || null,
         title: sourceFilename?.trim()
           ? titleFromSourceFilename(sourceFilename)
           : draft.title?.trim() || null,
-        buyer_code: draft.buyer_code?.trim() || null,
-        buyer_name: draft.buyer_name?.trim() || null,
-        buyer_phone: draft.buyer_phone?.trim() || null,
         vendor_name: draft.vendor_name?.trim() || null,
-        vendor_phone: draft.vendor_phone?.trim() || null,
         vendor_contact_name: draft.vendor_contact_name?.trim() || null,
         delivery_deadline: draft.delivery_deadline || null,
         source_filename: sourceFilename,
-        raw_extracted_text: null,
-        notes: null,
+        notes,
       };
 
       const { data: po, error: poErr } = await supabase
@@ -582,20 +581,13 @@ export default function OrdensCompraPage() {
                     onChange={(e) => setDraft((d) => ({ ...d, vendor_name: e.target.value || null }))}
                   />
                 </label>
-                <label className="block text-xs font-bold text-slate-600">
-                  Vendedor (contato)
+                <label className="block text-xs font-bold text-slate-600 md:col-span-2">
+                  Vendedor (contato e telefone)
                   <input
                     className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 text-sm"
                     value={draft.vendor_contact_name || ''}
                     onChange={(e) => setDraft((d) => ({ ...d, vendor_contact_name: e.target.value || null }))}
-                  />
-                </label>
-                <label className="block text-xs font-bold text-slate-600">
-                  Telefone vendedor / fornecedor
-                  <input
-                    className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 text-sm"
-                    value={draft.vendor_phone || ''}
-                    onChange={(e) => setDraft((d) => ({ ...d, vendor_phone: e.target.value || null }))}
+                    placeholder="Nome e telefone como no PDF"
                   />
                 </label>
                 <label className="block text-xs font-bold text-slate-600 md:col-span-2">

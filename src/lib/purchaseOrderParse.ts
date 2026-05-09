@@ -16,7 +16,7 @@ export interface ParsedPurchaseOrder {
   buyer_name: string | null;
   buyer_phone: string | null;
   vendor_name: string | null;
-  vendor_phone: string | null;
+  /** Nome do vendedor e telefone em um único texto (como no PDF). */
   vendor_contact_name: string | null;
   delivery_deadline: string | null;
   title: string | null;
@@ -92,10 +92,20 @@ function extractBuyer(text: string): { code: string | null; name: string | null 
   return { code: null, name: null };
 }
 
-/** Somente data de entrega no PDF. */
+/** Somente data de entrega no PDF (vários layouts de extração). */
 function extractDeliveryDeadline(text: string): string | null {
-  const de = text.match(/Data\s*Entrega\s*:\s*\n\s*(\d{2}\/\d{2}\/\d{4})/i);
-  return de ? parseBrDate(de[1]) : null;
+  const patterns: RegExp[] = [
+    /Data\s*Entrega\s*:\s*\n\s*(\d{2}\/\d{2}\/\d{4})/i,
+    /Data\s*Entrega\s*:\s*(\d{2}\/\d{2}\/\d{4})/i,
+    /Data\s+de\s+Entrega\s*:\s*(\d{2}\/\d{2}\/\d{4})/i,
+    /Entrega\s*:\s*(\d{2}\/\d{2}\/\d{4})/i,
+    /Data\s*Entrega\s*[:\s]+\s*(\d{2}\/\d{2}\/\d{4})/i,
+  ];
+  for (const p of patterns) {
+    const m = text.match(p);
+    if (m?.[1]) return parseBrDate(m[1]);
+  }
+  return null;
 }
 
 function itemStartLine(line: string): { num: number; rest: string } | null {
@@ -189,7 +199,12 @@ function normalizeGridTailGlitches(s: string): string {
   let d = s;
   d = d.replace(/(\d+(?:[.,]\d+)?)(ML|LT|L)(?=UN\.?\s*[\d.,])/gi, '$1$2 ');
   d = d.replace(/\b(UN|UND\.?)(?=[\d.,])/gi, '$1 ');
+  d = d.replace(/([\d.,]{2,})(UN\.?)(?=\s|$|[\d.,])/gi, '$1 $2');
   return d;
+}
+
+function stripTrailingCurrencyToken(s: string): string {
+  return s.replace(/\s+R\$\s*[\d.,]+\s*$/gi, '').trim();
 }
 
 function extractQtyUnitFromGridTail(desc: string): {
@@ -197,7 +212,7 @@ function extractQtyUnitFromGridTail(desc: string): {
   quantity: number | null;
   unit: string | null;
 } {
-  const work = normalizeGridTailGlitches(desc);
+  const work = normalizeGridTailGlitches(stripTrailingCurrencyToken(desc.trim()));
   const unitThenQty = new RegExp(
     `\\s+(${GRID_UNIT_TOKEN})\\s+([\\d.,]+)${GRID_TAIL_PRICE_COLUMNS}$`,
     'i'
@@ -234,12 +249,31 @@ function extractQtyUnitFromGridTail(desc: string): {
   return { description: work, quantity: null, unit: null };
 }
 
-function extractItems(text: string): ParsedPurchaseOrderItem[] {
-  const marker = 'TOTALDESCRIÇÃOQTD.';
-  const idx = text.indexOf(marker);
-  if (idx === -1) return [];
+/** Indica se o texto já contém par UND/QTD da grade (após normalização). */
+function joinedPartsHaveGridQty(parts: string[]): boolean {
+  let desc = normalizeWs(parts.join(' '));
+  if (desc.length < 4) return false;
+  desc = stripAddressNoiseFromDescription(desc);
+  if (desc.length < 4) return false;
+  desc = stripTrailingCurrencyToken(desc);
+  const { quantity } = extractQtyUnitFromGridTail(desc);
+  return quantity != null;
+}
 
-  const tail = text.slice(idx + marker.length);
+function extractItems(text: string): ParsedPurchaseOrderItem[] {
+  const norm = text.replace(/\t/g, ' ');
+  const markers = ['TOTALDESCRIÇÃOQTD.', 'DESCRIÇÃOQTD.', 'DESCRIÇÃOQTD'];
+  let sliceAt = -1;
+  for (const m of markers) {
+    const i = norm.indexOf(m);
+    if (i >= 0) {
+      sliceAt = i + m.length;
+      break;
+    }
+  }
+  if (sliceAt < 0) return [];
+
+  const tail = norm.slice(sliceAt);
   const stopIdx = tail.search(/\n\s*OBSERVAÇÕES\b/im);
   const region = (stopIdx === -1 ? tail : tail.slice(0, stopIdx)).replace(/\r/g, '\n');
 
@@ -314,8 +348,10 @@ function extractItems(text: string): ParsedPurchaseOrderItem[] {
 
   for (const ln of lines) {
     if (/^R\$\d/.test(ln)) {
-      flush();
-      current = null;
+      if (current && joinedPartsHaveGridQty(current.parts)) {
+        flush();
+        current = null;
+      }
       continue;
     }
     const st = itemStartLine(ln);
@@ -339,13 +375,21 @@ function parseVendorBlock(text: string): {
   vendor_phone: string | null;
   vendor_contact_name: string | null;
 } {
-  const marker = 'TOTALDESCRIÇÃOQTD.';
-  const idx = text.indexOf(marker);
-  if (idx === -1) {
+  const norm = text.replace(/\t/g, ' ');
+  const markers = ['TOTALDESCRIÇÃOQTD.', 'DESCRIÇÃOQTD.', 'DESCRIÇÃOQTD'];
+  let idx = -1;
+  for (const m of markers) {
+    const i = norm.indexOf(m);
+    if (i >= 0) {
+      idx = i + m.length;
+      break;
+    }
+  }
+  if (idx < 0) {
     return { vendor_name: null, vendor_phone: null, vendor_contact_name: null };
   }
 
-  const tail = text.slice(idx + marker.length).replace(/\r/g, '\n');
+  const tail = norm.slice(idx).replace(/\r/g, '\n');
   const rawLines = tail
     .split('\n')
     .map((l) => l.trim())
@@ -405,7 +449,7 @@ function parseVendorBlock(text: string): {
 }
 
 export function parsePurchaseOrderFromText(text: string, sourceFilename: string): ParsedPurchaseOrder {
-  const normalized = text.replace(/\r/g, '\n');
+  const normalized = text.replace(/\r/g, '\n').replace(/\t/g, ' ');
   const buyer = extractBuyer(normalized);
   const vendor = parseVendorBlock(normalized);
 
@@ -414,14 +458,16 @@ export function parsePurchaseOrderFromText(text: string, sourceFilename: string)
   const items = extractItems(normalized);
   const title = sourceFilename.trim() ? titleFromSourceFilename(sourceFilename) : null;
 
+  const vendorContactMerged =
+    [vendor.vendor_contact_name, vendor.vendor_phone].filter(Boolean).join(' · ') || null;
+
   return {
     oc_number,
     buyer_code: buyer.code,
     buyer_name: buyer.name,
     buyer_phone: null,
     vendor_name: vendor.vendor_name,
-    vendor_phone: vendor.vendor_phone,
-    vendor_contact_name: vendor.vendor_contact_name,
+    vendor_contact_name: vendorContactMerged,
     delivery_deadline: extractDeliveryDeadline(normalized),
     title,
     items,
@@ -433,5 +479,12 @@ export function parsePurchaseOrderWarnings(parsed: ParsedPurchaseOrder): string[
   if (!parsed.oc_number) w.push('Número da OC não detectado; confira o PDF ou informe manualmente.');
   if (!parsed.vendor_name) w.push('Fornecedor não detectado com certeza.');
   if (!parsed.items.length) w.push('Nenhuma linha de item foi lida; adicione os produtos manualmente.');
+  else if (
+    parsed.items.some(
+      (i) => i.quantity == null || !(i.unit && String(i.unit).trim())
+    )
+  )
+    w.push('Alguns itens sem quantidade ou unidade lidas da grade; confira no PDF.');
+  if (!parsed.delivery_deadline) w.push('Data de entrega não detectada no PDF; informe manualmente se precisar.');
   return w;
 }
