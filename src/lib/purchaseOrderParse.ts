@@ -191,9 +191,6 @@ function parseBrazilianQuantityToken(raw: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** Colunas PREÇO/DESC./TOTAL à direita da QTD no PDF viram números extras no fim da linha. */
-const GRID_TAIL_PRICE_COLUMNS = '(?:\\s+[\\d.,]+){0,6}\\s*';
-
 /** Ajusta colagens comuns do pdf-parse entre volume, UND e QTD. */
 function normalizeGridTailGlitches(s: string): string {
   let d = s;
@@ -213,37 +210,50 @@ function extractQtyUnitFromGridTail(desc: string): {
   unit: string | null;
 } {
   const work = normalizeGridTailGlitches(stripTrailingCurrencyToken(desc.trim()));
-  const unitThenQty = new RegExp(
-    `\\s+(${GRID_UNIT_TOKEN})\\s+([\\d.,]+)${GRID_TAIL_PRICE_COLUMNS}$`,
-    'i'
-  );
-  const qtyThenUnit = new RegExp(
-    `\\s+([\\d.,]+)\\s+(${GRID_UNIT_TOKEN})${GRID_TAIL_PRICE_COLUMNS}$`,
-    'i'
-  );
 
-  let m = work.match(unitThenQty);
-  if (m && m.index !== undefined) {
+  // Busca o ultimo par UND/QTD da linha, sem exigir que esteja exatamente no final.
+  // Em alguns PDFs o texto traz "UN 15,0000 R$ 163,0273 0,00 2.445,41".
+  const unitThenQty = new RegExp(`\\b(${GRID_UNIT_TOKEN})\\s*([\\d.,]+)\\b`, 'gi');
+  const qtyThenUnit = new RegExp(`\\b([\\d.,]+)\\s*(${GRID_UNIT_TOKEN})\\b`, 'gi');
+
+  let best:
+    | { index: number; desc: string; qty: number | null; unit: string | null }
+    | null = null;
+
+  for (const m of work.matchAll(unitThenQty)) {
+    const idx = m.index ?? -1;
+    if (idx < 0) continue;
     const qty = parseBrazilianQuantityToken(m[2]);
+    if (qty == null) continue;
     let unit = m[1].toLowerCase().replace(/\.$/, '');
     if (unit === 'und') unit = 'un';
-    return {
-      description: normalizeWs(work.slice(0, m.index)),
-      quantity: qty,
-      unit: qty !== null ? unit : null,
+    best = {
+      index: idx,
+      desc: normalizeWs(work.slice(0, idx)),
+      qty,
+      unit,
     };
   }
 
-  m = work.match(qtyThenUnit);
-  if (m && m.index !== undefined) {
+  for (const m of work.matchAll(qtyThenUnit)) {
+    const idx = m.index ?? -1;
+    if (idx < 0) continue;
     const qty = parseBrazilianQuantityToken(m[1]);
+    if (qty == null) continue;
     let unit = m[2].toLowerCase().replace(/\.$/, '');
     if (unit === 'und') unit = 'un';
-    return {
-      description: normalizeWs(work.slice(0, m.index)),
-      quantity: qty,
-      unit: qty !== null ? unit : null,
-    };
+    if (!best || idx >= best.index) {
+      best = {
+        index: idx,
+        desc: normalizeWs(work.slice(0, idx)),
+        qty,
+        unit,
+      };
+    }
+  }
+
+  if (best) {
+    return { description: best.desc, quantity: best.qty, unit: best.unit };
   }
 
   return { description: work, quantity: null, unit: null };
