@@ -51,6 +51,7 @@ export async function POST(req: Request) {
       parsed,
       warnings,
       meta: { filename: name, textLength: text.length },
+      rawText: text,
     });
   } catch (e) {
     console.error('purchase-orders/parse', e);
