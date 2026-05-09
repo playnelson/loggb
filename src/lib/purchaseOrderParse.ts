@@ -56,83 +56,180 @@ export function extractItemsFromPositionedItems(
 ): ParsedPurchaseOrderItem[] {
   if (items.length === 0) return [];
 
-  const Y_TOL = 5; // pixels de tolerância para considerar mesma linha
+  const Y_TOL = 4;
+  const X_TOL = 30;
 
-  // --- agrupa em linhas por Y ---
+  const normalizeKey = (s: string) =>
+    s
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toUpperCase()
+      .replace(/\s+/g, '')
+      .replace(/[.]/g, '');
+
+  const unitSet = new Set([
+    'UN',
+    'UND',
+    'PC',
+    'PÇ',
+    'PAR',
+    'CX',
+    'KG',
+    'G',
+    'M',
+    'M2',
+    'M3',
+    'LT',
+    'L',
+    'ML',
+  ]);
+
+  const isItemNumber = (s: string) => {
+    const t = s.trim().replace(/[.)-]+$/, '');
+    if (!/^\d{1,3}$/.test(t)) return false;
+    const n = parseInt(t, 10);
+    return n > 0 && n <= 999;
+  };
+
+  const parseItemNumber = (s: string) => parseInt(s.trim().replace(/[.)-]+$/, ''), 10);
+
+  const isQtyToken = (s: string) => brNumberToFloat(s) != null;
+
+  // Agrupa por linhas (Y).
   const rowMap = new Map<number, { x: number; text: string }[]>();
-  for (const item of items) {
+  for (const it of items) {
     let rowY = -1;
     for (const ry of rowMap.keys()) {
-      if (Math.abs(ry - item.y) <= Y_TOL) { rowY = ry; break; }
+      if (Math.abs(ry - it.y) <= Y_TOL) {
+        rowY = ry;
+        break;
+      }
     }
-    if (rowY < 0) { rowY = item.y; rowMap.set(rowY, []); }
-    rowMap.get(rowY)!.push({ x: item.x, text: item.text });
+    if (rowY < 0) {
+      rowY = it.y;
+      rowMap.set(rowY, []);
+    }
+    rowMap.get(rowY)!.push({ x: it.x, text: it.text });
   }
 
   const rows = [...rowMap.entries()]
     .sort(([a], [b]) => a - b)
     .map(([y, cells]) => ({ y, cells: [...cells].sort((a, b) => a.x - b.x) }));
 
-  // --- localiza linha de cabeçalho ---
-  let headerIdx = -1;
-  let descX = -1, undX = -1, qtdX = -1, itemX = -1;
-
+  // 1) Tenta achar cabeçalho para definir início da grade.
+  let startIdx = 0;
   for (let i = 0; i < rows.length; i++) {
-    const norm = rows[i].cells.map(c => ({
-      x: c.x,
-      key: c.text.toUpperCase().replace(/[\s.]/g, ''),
-    }));
-    const d = norm.find(c => c.key.startsWith('DESCRI'));
-    const u = norm.find(c => c.key === 'UND' || c.key === 'UNIDADE');
-    const q = norm.find(c => c.key === 'QTD' || c.key === 'QUANTIDADE');
-    const it = norm.find(c => c.key === 'ITEM');
-    if (d && (u || q)) {
-      headerIdx = i;
-      descX = d.x; if (u) undX = u.x; if (q) qtdX = q.x; if (it) itemX = it.x;
+    const joined = normalizeKey(rows[i].cells.map((c) => c.text).join(' '));
+    if (joined.includes('ITEM') && joined.includes('DESCRI') && joined.includes('QTD')) {
+      startIdx = i + 1;
       break;
     }
   }
 
-  if (headerIdx < 0 || descX < 0) return [];
-
-  // limite direito da coluna de descrição
-  const descRight = Math.min(
-    undX >= 0 ? undX - 2 : Infinity,
-    qtdX >= 0 ? qtdX - 2 : Infinity
-  );
-  const COL_TOL = 45;
-  const result: ParsedPurchaseOrderItem[] = [];
-
-  for (const row of rows.slice(headerIdx + 1)) {
-    // coluna ITEM: número inteiro 1–999
-    const lineCell = row.cells.find(c => {
-      if (itemX >= 0 && Math.abs(c.x - itemX) > COL_TOL) return false;
-      const n = parseInt(c.text, 10);
-      return isFinite(n) && n > 0 && n <= 999 && c.text.trim() === String(n);
-    });
-    if (!lineCell) continue;
-
-    // coluna DESCRIÇÃO: todos os tokens entre descX e undX/qtdX
-    const descTokens = row.cells.filter(c => c.x >= descX - 10 && c.x < descRight);
-    const description = descTokens.map(c => c.text).join(' ').trim();
-    if (description.length < 2) continue;
-
-    // coluna UND
-    let unit: string | null = null;
-    if (undX >= 0) {
-      const cell = row.cells.find(c => Math.abs(c.x - undX) <= COL_TOL);
-      if (cell) { unit = cell.text.toLowerCase().replace(/\.$/, ''); if (unit === 'und') unit = 'un'; }
+  // 2) Estima coluna ITEM (x) e UND (x) pelos dados.
+  const itemXs: number[] = [];
+  const unitXs: number[] = [];
+  for (const row of rows.slice(startIdx, startIdx + 220)) {
+    const lineCell = row.cells.find((c) => isItemNumber(c.text));
+    if (lineCell) itemXs.push(lineCell.x);
+    for (const c of row.cells) {
+      const k = normalizeKey(c.text);
+      if (unitSet.has(k)) unitXs.push(c.x);
     }
-
-    // coluna QTD
-    let quantity: number | null = null;
-    if (qtdX >= 0) {
-      const cell = row.cells.find(c => Math.abs(c.x - qtdX) <= COL_TOL);
-      if (cell) quantity = brNumberToFloat(cell.text);
-    }
-
-    result.push({ line_number: parseInt(lineCell.text, 10), description, quantity, unit });
   }
+  if (!itemXs.length || !unitXs.length) return [];
+
+  const avg = (a: number[]) => a.reduce((s, n) => s + n, 0) / a.length;
+  const itemX = avg(itemXs);
+  const unitX = avg(unitXs);
+
+  const result: ParsedPurchaseOrderItem[] = [];
+  let current: ParsedPurchaseOrderItem | null = null;
+
+  const flush = () => {
+    if (!current) return;
+    current.description = current.description.replace(/\s+/g, ' ').trim();
+    if (current.description.length >= 2) result.push(current);
+    current = null;
+  };
+
+  for (const row of rows.slice(startIdx)) {
+    const rowText = normalizeKey(row.cells.map((c) => c.text).join(' '));
+    if (rowText.includes('OBSERVACAO') || rowText.includes('OBSERVACOES')) break;
+
+    const lineCell = row.cells.find(
+      (c) => Math.abs(c.x - itemX) <= X_TOL && isItemNumber(c.text)
+    );
+
+    if (!lineCell) {
+      // Continuação de descrição em linha seguinte.
+      if (current) {
+        const continuation = row.cells
+          .filter((c) => c.x > itemX + X_TOL && c.x < unitX - X_TOL)
+          .map((c) => c.text)
+          .join(' ')
+          .trim();
+        if (continuation) {
+          current.description = `${current.description} ${continuation}`.trim();
+        }
+      }
+      continue;
+    }
+
+    flush();
+
+    const lineNumber = parseItemNumber(lineCell.text);
+
+    const desc = row.cells
+      .filter((c) => c.x > itemX + X_TOL && c.x < unitX - X_TOL)
+      .map((c) => c.text)
+      .join(' ')
+      .trim();
+
+    let unit: string | null = null;
+    const unitCell = row.cells.find((c) => Math.abs(c.x - unitX) <= X_TOL && unitSet.has(normalizeKey(c.text)));
+    if (unitCell) {
+      const u = normalizeKey(unitCell.text).toLowerCase();
+      unit = u === 'und' ? 'un' : u;
+    }
+
+    // QTD: primeiro número à direita da UND; se não achar, tenta número logo à esquerda.
+    let quantity: number | null = null;
+    if (unitCell) {
+      const rightNums = row.cells
+        .filter((c) => c.x > unitCell.x + 8)
+        .map((c) => ({ x: c.x, q: brNumberToFloat(c.text) }))
+        .filter((v) => v.q != null) as { x: number; q: number }[];
+      if (rightNums.length) {
+        rightNums.sort((a, b) => a.x - b.x);
+        quantity = rightNums[0].q;
+      } else {
+        const leftNums = row.cells
+          .filter((c) => c.x < unitCell.x - 8)
+          .map((c) => ({ x: c.x, q: brNumberToFloat(c.text) }))
+          .filter((v) => v.q != null) as { x: number; q: number }[];
+        if (leftNums.length) {
+          leftNums.sort((a, b) => b.x - a.x);
+          quantity = leftNums[0].q;
+        }
+      }
+    } else {
+      // Sem UND na linha: tenta o primeiro número à direita da descrição.
+      const nums = row.cells
+        .filter((c) => c.x > unitX - X_TOL && isQtyToken(c.text))
+        .map((c) => ({ x: c.x, q: brNumberToFloat(c.text)! }))
+        .sort((a, b) => a.x - b.x);
+      if (nums.length) quantity = nums[0].q;
+    }
+
+    current = {
+      line_number: lineNumber,
+      description: desc,
+      quantity,
+      unit,
+    };
+  }
+  flush();
 
   return result.sort((a, b) => a.line_number - b.line_number);
 }
@@ -216,6 +313,7 @@ function extractDeliveryDeadline(text: string): string | null {
     /Data\s+de\s+Entrega\s*:\s*(\d{2}\/\d{2}\/\d{4})/i,
     /Entrega\s*:\s*(\d{2}\/\d{2}\/\d{4})/i,
     /Data\s*Entrega\s*[:\s]+\s*(\d{2}\/\d{2}\/\d{4})/i,
+    /ITEM\s*\n\s*BOLETO\s*\n\s*(\d{2}\/\d{2}\/\d{4})/i,
   ];
   for (const p of patterns) {
     const m = text.match(p);
@@ -386,7 +484,98 @@ function joinedPartsHaveGridQty(parts: string[]): boolean {
   return quantity != null;
 }
 
+function extractItemsForKnownOcLayout(text: string): ParsedPurchaseOrderItem[] {
+  const norm = text.replace(/\r/g, '\n');
+  const startMatch = norm.match(/\bUND\.\s*[\t ]*DESC\./i);
+  if (!startMatch || startMatch.index == null) return [];
+
+  const tail = norm.slice(startMatch.index + startMatch[0].length);
+  const stopIdx = tail.search(/\n\s*OBSERVAÇÕES\b/i);
+  const region = stopIdx >= 0 ? tail.slice(0, stopIdx) : tail;
+  const lines = region
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  if (!lines.length) return [];
+
+  const startLineRe = /^R\$\s*[\d.,]+\s+([\d.,]+)\s+(\d{1,3})\s+(.+)$/i;
+  const unitRe = /\b(UN|UND|PC|PÇ|PAR|MT|M2|M3|KG|G|LT|ML)\b/i;
+  const out: ParsedPurchaseOrderItem[] = [];
+
+  let current: {
+    line_number: number;
+    quantity: number | null;
+    unit: string | null;
+    parts: string[];
+  } | null = null;
+
+  const flush = () => {
+    if (!current) return;
+    let desc = normalizeWs(current.parts.join(' '));
+    desc = stripAddressNoiseFromDescription(desc);
+    desc = desc
+      .replace(/\s+\d+(?:[.,]\d+)?\s+(?:UN|UND|PC|PÇ|PAR|MT|M2|M3|KG|G|LT|ML)\s+R\$\s*[\d.,]+\s*$/i, '')
+      .replace(/\s+\d+(?:[.,]\d+)?\s+(?:UN|UND|PC|PÇ|PAR|MT|M2|M3|KG|G|LT|ML)\s*$/i, '')
+      .replace(/\s+R\$\s*[\d.,]+\s*$/i, '')
+      .trim();
+    if (desc.length < 2) {
+      current = null;
+      return;
+    }
+    out.push({
+      line_number: current.line_number,
+      description: desc,
+      quantity: current.quantity,
+      unit: current.unit,
+    });
+    current = null;
+  };
+
+  for (const ln of lines) {
+    const m = ln.match(startLineRe);
+    if (m) {
+      flush();
+      const qty = brNumberToFloat(m[1]);
+      const lineNum = parseInt(m[2], 10);
+      current = {
+        line_number: lineNum,
+        quantity: qty,
+        unit: null,
+        parts: [m[3]],
+      };
+      const u = m[3].match(unitRe);
+      if (u) {
+        const uu = u[1].toLowerCase();
+        current.unit = uu === 'und' ? 'un' : uu;
+      }
+      continue;
+    }
+
+    if (!current) continue;
+    if (/^R\$\s*0,00$/i.test(ln)) continue;
+    if (/^--\s*\d+\s+of\s+\d+\s*--$/i.test(ln)) continue;
+    if (/^OBSERVAÇÕES\b/i.test(ln)) break;
+    if (isJunkContinuation(ln)) continue;
+
+    current.parts.push(ln);
+    if (!current.unit) {
+      const u = ln.match(unitRe);
+      if (u) {
+        const uu = u[1].toLowerCase();
+        current.unit = uu === 'und' ? 'un' : uu;
+      }
+    }
+  }
+  flush();
+
+  return out.sort((a, b) => a.line_number - b.line_number);
+}
+
 function extractItems(text: string): ParsedPurchaseOrderItem[] {
+  const byLayout = extractItemsForKnownOcLayout(text);
+  if (byLayout.length) return byLayout;
+
   const norm = text.replace(/\t/g, ' ');
   const markers = ['TOTALDESCRIÇÃOQTD.', 'DESCRIÇÃOQTD.', 'DESCRIÇÃOQTD'];
   let sliceAt = -1;
