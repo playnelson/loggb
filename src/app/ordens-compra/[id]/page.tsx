@@ -64,6 +64,7 @@ interface PoItem {
   description: string;
   quantity: number | null;
   unit: string;
+  received_quantity: number | null;
   delivered: boolean;
   delivered_at: string | null;
 }
@@ -141,6 +142,9 @@ export default function OrdemCompraDetailPage() {
           description: i.description,
           quantity: i.quantity,
           unit: i.unit,
+          received_quantity:
+            (i as { received_quantity?: number | null }).received_quantity ??
+            (i.delivered ? i.quantity ?? 0 : 0),
           delivered: i.delivered,
           delivered_at: i.delivered_at,
         }))
@@ -191,17 +195,52 @@ export default function OrdemCompraDetailPage() {
       created_at: String(row.created_at ?? ''),
     });
 
-    const { data: lines, error: e2 } = await supabase
+    const withReceived = await supabase
       .from('purchase_order_items')
-      .select('id, line_number, description, quantity, unit, delivered, delivered_at')
+      .select('id, line_number, description, quantity, unit, received_quantity, delivered, delivered_at')
       .eq('purchase_order_id', id)
       .order('line_number', { ascending: true });
+
+    let lines = withReceived.data as Record<string, unknown>[] | null;
+    let e2 = withReceived.error;
+    const receivedMissing =
+      !!e2 &&
+      /received_quantity/i.test(
+        `${e2.message || ''} ${e2.details || ''} ${e2.hint || ''}`
+      );
+
+    if (receivedMissing) {
+      const fallback = await supabase
+        .from('purchase_order_items')
+        .select('id, line_number, description, quantity, unit, delivered, delivered_at')
+        .eq('purchase_order_id', id)
+        .order('line_number', { ascending: true });
+      lines = fallback.data as Record<string, unknown>[] | null;
+      e2 = fallback.error;
+    }
 
     if (e2) {
       setError('Erro ao carregar itens.');
       setItems([]);
     } else {
-      setItems((lines as PoItem[]) || []);
+      setItems(
+        (lines || []).map((r) => {
+          const qty = (r.quantity as number | null) ?? null;
+          const delivered = Boolean(r.delivered);
+          const receivedRaw = (r.received_quantity as number | null | undefined) ?? null;
+          return {
+            id: String(r.id),
+            line_number: Number(r.line_number || 0),
+            description: String(r.description || ''),
+            quantity: qty,
+            unit: String(r.unit || 'un'),
+            received_quantity:
+              receivedRaw != null ? receivedRaw : delivered ? qty ?? 0 : 0,
+            delivered,
+            delivered_at: (r.delivered_at as string | null) ?? null,
+          };
+        })
+      );
     }
     setLoading(false);
   }, [id]);
@@ -213,6 +252,8 @@ export default function OrdemCompraDetailPage() {
   const toggleDelivered = async (item: PoItem) => {
     const next = !item.delivered;
     setBusyId(item.id);
+    const nowIso = new Date().toISOString();
+    const fullQty = item.quantity ?? 0;
 
     if (ORDENS_COMPRA_DEV_LOCAL && typeof window !== 'undefined') {
       const list = devLocalOrdersRead();
@@ -224,27 +265,48 @@ export default function OrdemCompraDetailPage() {
       const line = po.items.find((i) => i.id === item.id);
       if (line) {
         line.delivered = next;
-        line.delivered_at = next ? new Date().toISOString() : null;
+        line.delivered_at = next ? nowIso : null;
+        (line as { received_quantity?: number | null }).received_quantity = next ? fullQty : 0;
         devLocalOrdersWrite(list);
       }
       setBusyId(null);
       setItems((prev) =>
         prev.map((r) =>
           r.id === item.id
-            ? { ...r, delivered: next, delivered_at: next ? new Date().toISOString() : null }
+            ? {
+                ...r,
+                delivered: next,
+                delivered_at: next ? nowIso : null,
+                received_quantity: next ? fullQty : 0,
+              }
             : r
         )
       );
       return;
     }
 
-    const { error: e } = await supabase
+    const withReceived = await supabase
       .from('purchase_order_items')
       .update({
         delivered: next,
-        delivered_at: next ? new Date().toISOString() : null,
+        delivered_at: next ? nowIso : null,
+        received_quantity: next ? fullQty : 0,
       })
       .eq('id', item.id);
+
+    let e = withReceived.error;
+    const receivedMissing =
+      !!e && /received_quantity/i.test(`${e.message || ''} ${e.details || ''} ${e.hint || ''}`);
+    if (receivedMissing) {
+      const fallback = await supabase
+        .from('purchase_order_items')
+        .update({
+          delivered: next,
+          delivered_at: next ? nowIso : null,
+        })
+        .eq('id', item.id);
+      e = fallback.error;
+    }
 
     setBusyId(null);
     if (e) {
@@ -254,7 +316,89 @@ export default function OrdemCompraDetailPage() {
     setItems((prev) =>
       prev.map((r) =>
         r.id === item.id
-          ? { ...r, delivered: next, delivered_at: next ? new Date().toISOString() : null }
+          ? {
+              ...r,
+              delivered: next,
+              delivered_at: next ? nowIso : null,
+              received_quantity: next ? fullQty : 0,
+            }
+          : r
+      )
+    );
+  };
+
+  const promptPartialReceipt = async (item: PoItem) => {
+    const current = item.received_quantity ?? 0;
+    const raw = window.prompt(
+      `Quantidade recebida para item ${item.line_number}:`,
+      String(current)
+    );
+    if (raw == null) return;
+    const parsed = Number(raw.replace(',', '.'));
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      alert('Informe uma quantidade válida.');
+      return;
+    }
+    const requested = item.quantity ?? parsed;
+    const received = Math.max(0, Math.min(parsed, requested));
+    const full = received >= requested;
+    const nowIso = new Date().toISOString();
+
+    if (ORDENS_COMPRA_DEV_LOCAL && typeof window !== 'undefined') {
+      const list = devLocalOrdersRead();
+      const po = list.find((o) => o.id === id);
+      const line = po?.items.find((i) => i.id === item.id);
+      if (line) {
+        (line as { received_quantity?: number | null }).received_quantity = received;
+        line.delivered = full;
+        line.delivered_at = full ? nowIso : null;
+        devLocalOrdersWrite(list);
+      }
+      setItems((prev) =>
+        prev.map((r) =>
+          r.id === item.id
+            ? {
+                ...r,
+                received_quantity: received,
+                delivered: full,
+                delivered_at: full ? nowIso : null,
+              }
+            : r
+        )
+      );
+      return;
+    }
+
+    const withReceived = await supabase
+      .from('purchase_order_items')
+      .update({
+        received_quantity: received,
+        delivered: full,
+        delivered_at: full ? nowIso : null,
+      })
+      .eq('id', item.id);
+
+    if (withReceived.error) {
+      const rawErr = `${withReceived.error.message || ''} ${withReceived.error.details || ''} ${withReceived.error.hint || ''}`;
+      if (/received_quantity/i.test(rawErr)) {
+        alert(
+          'Seu banco ainda não tem a coluna received_quantity para recebimento parcial. Posso te passar o SQL para habilitar.'
+        );
+        return;
+      }
+      alert(`Erro ao salvar recebimento parcial: ${withReceived.error.message}`);
+      return;
+    }
+
+    setItems((prev) =>
+      prev.map((r) =>
+        r.id === item.id
+          ? {
+              ...r,
+              received_quantity: received,
+              delivered: full,
+              delivered_at: full ? nowIso : null,
+            }
           : r
       )
     );
@@ -277,6 +421,7 @@ export default function OrdemCompraDetailPage() {
       for (const line of po.items) {
         line.delivered = true;
         line.delivered_at = nowIso;
+        (line as { received_quantity?: number | null }).received_quantity = line.quantity ?? 0;
       }
       devLocalOrdersWrite(list);
       setItems((prev) =>
@@ -284,20 +429,39 @@ export default function OrdemCompraDetailPage() {
           ...r,
           delivered: true,
           delivered_at: nowIso,
+          received_quantity: r.quantity ?? 0,
         }))
       );
       setBulkBusy(false);
       return;
     }
 
-    const { error: e } = await supabase
-      .from('purchase_order_items')
-      .update({
-        delivered: true,
-        delivered_at: nowIso,
-      })
-      .eq('purchase_order_id', id)
-      .eq('delivered', false);
+    let e: { message?: string; details?: string; hint?: string } | null = null;
+    for (const r of items.filter((x) => !x.delivered)) {
+      const one = await supabase
+        .from('purchase_order_items')
+        .update({
+          delivered: true,
+          delivered_at: nowIso,
+          received_quantity: r.quantity ?? 0,
+        })
+        .eq('id', r.id);
+      if (one.error) {
+        e = one.error;
+        const rawErr = `${one.error.message || ''} ${one.error.details || ''} ${one.error.hint || ''}`;
+        if (/received_quantity/i.test(rawErr)) {
+          const fallback = await supabase
+            .from('purchase_order_items')
+            .update({
+              delivered: true,
+              delivered_at: nowIso,
+            })
+            .eq('id', r.id);
+          if (fallback.error) e = fallback.error;
+        }
+      }
+      if (e) break;
+    }
 
     setBulkBusy(false);
     if (e) {
@@ -310,6 +474,7 @@ export default function OrdemCompraDetailPage() {
         ...r,
         delivered: true,
         delivered_at: r.delivered_at || nowIso,
+        received_quantity: r.quantity ?? 0,
       }))
     );
   };
@@ -356,6 +521,7 @@ export default function OrdemCompraDetailPage() {
         description: '',
         quantity: null,
         unit: 'un',
+        received_quantity: 0,
         delivered: false,
         delivered_at: null,
       },
@@ -397,6 +563,7 @@ export default function OrdemCompraDetailPage() {
           description: it.description,
           quantity: it.quantity,
           unit: it.unit || 'un',
+          received_quantity: it.received_quantity ?? 0,
           delivered: it.delivered,
           delivered_at: it.delivered_at,
         }));
@@ -421,6 +588,7 @@ export default function OrdemCompraDetailPage() {
             description: it.description,
             quantity: it.quantity,
             unit: it.unit,
+            received_quantity: (it as { received_quantity?: number | null }).received_quantity ?? 0,
             delivered: it.delivered,
             delivered_at: it.delivered_at,
           }))
@@ -458,6 +626,7 @@ export default function OrdemCompraDetailPage() {
           description: it.description,
           quantity: it.quantity,
           unit: it.unit,
+          received_quantity: it.received_quantity ?? 0,
           delivered: it.delivered,
           delivered_at: it.delivered ? it.delivered_at || new Date().toISOString() : null,
         }));
@@ -732,7 +901,9 @@ export default function OrdemCompraDetailPage() {
                         </span>
                       </div>
                       <div className="text-xs text-slate-500 mt-1">
-                        {it.quantity != null ? `${it.quantity} ${it.unit}` : `— ${it.unit}`}
+                        {it.quantity != null
+                          ? `${it.quantity} ${it.unit} · Recebido: ${it.received_quantity ?? 0}/${it.quantity}`
+                          : `— ${it.unit}`}
                         {it.delivered && it.delivered_at && (
                           <span className="ml-2 text-emerald-700 font-bold">
                             · Recebido em {new Date(it.delivered_at).toLocaleString('pt-BR')}
@@ -740,6 +911,15 @@ export default function OrdemCompraDetailPage() {
                         )}
                       </div>
                     </div>
+                    <button
+                      type="button"
+                      disabled={bulkBusy || busyId === it.id}
+                      onClick={() => void promptPartialReceipt(it)}
+                      className="text-[11px] font-bold px-2 py-1 rounded border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                      title="Registrar recebimento parcial"
+                    >
+                      Parcial
+                    </button>
                   </li>
                 ))}
               </ul>

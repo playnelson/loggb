@@ -16,6 +16,7 @@ export interface DevLocalPoItem {
   description: string;
   quantity: number | null;
   unit: string;
+  received_quantity?: number | null;
   delivered: boolean;
   delivered_at: string | null;
 }
