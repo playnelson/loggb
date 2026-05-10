@@ -25,6 +25,9 @@ interface PoHeader {
   id: string;
   oc_number: string | null;
   title: string | null;
+  buyer_code: string | null;
+  buyer_name: string | null;
+  buyer_phone: string | null;
   comprador_line: string | null;
   vendor_name: string | null;
   vendor_contact_line: string | null;
@@ -33,10 +36,21 @@ interface PoHeader {
   created_at: string;
 }
 
-function compradorFromNotes(notes: string | null | undefined): string | null {
+function buyerFromNotes(notes: string | null | undefined): {
+  code: string | null;
+  name: string | null;
+  phone: string | null;
+  line: string | null;
+} {
   const t = (notes || '').trim();
-  if (!t) return null;
-  return t.replace(/^Comprador:\s*/i, '').trim() || t;
+  if (!t) return { code: null, name: null, phone: null, line: null };
+  const cleaned = t.replace(/^Comprador:\s*/i, '').trim();
+  if (!cleaned) return { code: null, name: null, phone: null, line: null };
+  const parts = cleaned.split('·').map((p) => p.trim()).filter(Boolean);
+  const code = parts[0] || null;
+  const name = parts[1] || null;
+  const phone = parts[2] || null;
+  return { code, name, phone, line: cleaned };
 }
 
 interface PoItem {
@@ -86,6 +100,9 @@ export default function OrdemCompraDetailPage() {
         id: po.id,
         oc_number: po.oc_number,
         title: po.title,
+        buyer_code: po.buyer_code,
+        buyer_name: po.buyer_name,
+        buyer_phone: po.buyer_phone,
         comprador_line:
           [po.buyer_code, po.buyer_name, po.buyer_phone].filter(Boolean).join(' · ') || null,
         vendor_name: po.vendor_name,
@@ -136,11 +153,15 @@ export default function OrdemCompraDetailPage() {
     }
 
     const row = po as Record<string, unknown>;
+    const buyerFromLegacyNotes = buyerFromNotes((row.notes as string | null) ?? null);
     setHeader({
       id: String(row.id),
       oc_number: (row.oc_number as string | null) ?? null,
       title: (row.title as string | null) ?? null,
-      comprador_line: compradorFromNotes((row.notes as string | null) ?? null),
+      buyer_code: buyerFromLegacyNotes.code,
+      buyer_name: buyerFromLegacyNotes.name,
+      buyer_phone: buyerFromLegacyNotes.phone,
+      comprador_line: buyerFromLegacyNotes.line,
       vendor_name: (row.vendor_name as string | null) ?? null,
       vendor_contact_line: (row.vendor_contact_name as string | null) ?? null,
       delivery_deadline: (row.delivery_deadline as string | null) ?? null,
@@ -271,20 +292,39 @@ export default function OrdemCompraDetailPage() {
               <div className="text-[10px] font-black uppercase text-slate-400 flex items-center gap-1">
                 <User size={12} /> Comprador
               </div>
-              <div className="text-sm font-bold text-primary">{header.comprador_line || '—'}</div>
+              <div className="space-y-1 text-sm">
+                <div>
+                  <span className="text-slate-400 text-[11px] font-bold uppercase">Codigo</span>
+                  <div className="font-bold text-primary">{header.buyer_code || '—'}</div>
+                </div>
+                <div>
+                  <span className="text-slate-400 text-[11px] font-bold uppercase">Nome</span>
+                  <div className="font-medium text-primary">{header.buyer_name || '—'}</div>
+                </div>
+                <div>
+                  <span className="text-slate-400 text-[11px] font-bold uppercase">Contato</span>
+                  <div className="font-medium text-primary">{header.buyer_phone || '—'}</div>
+                </div>
+              </div>
             </div>
 
             <div className="bg-white rounded-xl border border-border p-4 space-y-2">
               <div className="text-[10px] font-black uppercase text-slate-400 flex items-center gap-1">
-                <Store size={12} /> Fornecedor e vendedor
+                <Store size={12} /> Fornecedor
               </div>
-              <div className="text-sm font-bold text-primary">{header.vendor_name || '—'}</div>
-              {header.vendor_contact_line && (
-                <div className="text-xs text-slate-600 flex items-start gap-1">
-                  <Phone size={12} className="shrink-0 mt-0.5" />
-                  <span>{header.vendor_contact_line}</span>
+              <div className="space-y-1 text-sm">
+                <div>
+                  <span className="text-slate-400 text-[11px] font-bold uppercase">Nome</span>
+                  <div className="font-bold text-primary">{header.vendor_name || '—'}</div>
                 </div>
-              )}
+                <div>
+                  <span className="text-slate-400 text-[11px] font-bold uppercase">Vendedor/contato</span>
+                  <div className="font-medium text-primary flex items-start gap-1">
+                    <Phone size={12} className="shrink-0 mt-1 text-slate-500" />
+                    <span>{header.vendor_contact_line || '—'}</span>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div className="bg-white rounded-xl border border-border p-4 space-y-2 sm:col-span-2">

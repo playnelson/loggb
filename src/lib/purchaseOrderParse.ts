@@ -168,12 +168,26 @@ export function extractItemsFromPositionedItems(
     const rowText = normalizeKey(row.cells.map((c) => c.text).join(' '));
     if (rowText.includes('OBSERVACAO') || rowText.includes('OBSERVACOES')) break;
 
+    const hasUnitInExpectedCol = row.cells.some(
+      (c) => Math.abs(c.x - unitX) <= X_TOL && unitSet.has(normalizeKey(c.text))
+    );
+
     const lineCandidates = row.cells
       .filter((c) => Math.abs(c.x - itemX) <= X_TOL && isItemNumber(c.text))
       .sort((a, b) => a.x - b.x);
     const lineCell = lineCandidates[0];
 
-    if (!lineCell) {
+    // Fallback: em alguns PDFs o número do item "anda" no eixo X.
+    // Se houver UND na coluna esperada e algum número plausível à esquerda,
+    // tratamos a linha como início de novo item mesmo fora da janela do itemX.
+    const fallbackItemCell = hasUnitInExpectedCol
+      ? row.cells
+          .filter((c) => c.x < unitX - X_TOL && isItemNumber(c.text))
+          .sort((a, b) => a.x - b.x)[0]
+      : undefined;
+    const effectiveLineCell = lineCell || fallbackItemCell;
+
+    if (!effectiveLineCell) {
       // Continuação de descrição em linha seguinte.
       if (current) {
         const continuation = row.cells
@@ -190,7 +204,7 @@ export function extractItemsFromPositionedItems(
 
     flush();
 
-    const lineNumber = parseItemNumber(lineCell.text);
+    const lineNumber = parseItemNumber(effectiveLineCell.text);
 
     const desc = row.cells
       .filter((c) => c.x > itemX + 6 && c.x < unitX - 8)

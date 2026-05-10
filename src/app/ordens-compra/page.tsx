@@ -407,10 +407,10 @@ export default function OrdensCompraPage() {
             ? titleFromSourceFilename(sourceFilename)
             : draft.title?.trim() || null,
           vendor_name: draft.vendor_name?.trim() || null,
-          buyer_code: null,
-          buyer_name: null,
-          buyer_phone: null,
-          vendor_contact_name: null,
+          buyer_code: draft.buyer_code?.trim() || null,
+          buyer_name: draft.buyer_name?.trim() || null,
+          buyer_phone: draft.buyer_phone?.trim() || null,
+          vendor_contact_name: draft.vendor_contact_name?.trim() || null,
           delivery_deadline: draft.delivery_deadline || null,
           source_filename: sourceFilename,
           created_at: new Date().toISOString(),
@@ -430,12 +430,23 @@ export default function OrdensCompraPage() {
       if (!user) throw new Error('Sessão expirada.');
 
       const baseRow: Record<string, string | null> = {
+        // Mantem comprador/fornecedor acessiveis no detalhe mesmo em schemas reduzidos.
         user_id: user.id,
         oc_number: draft.oc_number?.trim() || null,
         title: sourceFilename?.trim()
           ? titleFromSourceFilename(sourceFilename)
           : draft.title?.trim() || null,
         vendor_name: draft.vendor_name?.trim() || null,
+        vendor_contact_name: draft.vendor_contact_name?.trim() || null,
+        notes:
+          [draft.buyer_code, draft.buyer_name, draft.buyer_phone]
+            .map((v) => (v || '').trim())
+            .filter(Boolean).length > 0
+            ? `Comprador: ${[draft.buyer_code, draft.buyer_name, draft.buyer_phone]
+                .map((v) => (v || '').trim())
+                .filter(Boolean)
+                .join(' · ')}`
+            : null,
         delivery_deadline: draft.delivery_deadline || null,
         source_filename: sourceFilename,
       };
