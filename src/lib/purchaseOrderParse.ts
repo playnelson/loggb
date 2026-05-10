@@ -66,6 +66,50 @@ function normalizeDescriptionText(desc: string): string {
   return t.trim();
 }
 
+function stripNonItemTailFromDescription(desc: string): string {
+  let t = desc.replace(/\s+/g, ' ').trim();
+  if (!t) return t;
+
+  const stopPatterns: RegExp[] = [
+    /\s+(?:RUA|RODOVIA|AVENIDA|ENDERE[CÇ]O)\b/i,
+    /\s+N(?:[UÚ]MERO|RO)?\s*:\s*/i,
+    /\s+CIDADE\s*:\s*/i,
+    /\s+BAIRRO\s*:\s*/i,
+    /\s+CEP\s*:\s*/i,
+    /\s+(?:TELEFONE|TEL\.?|CELULAR)\s*:\s*/i,
+    /\s+[A-Za-zÀ-ÿ]{3,}\s+TELEFONE\s*:\s*/i,
+    /\s+EMAIL\s*:\s*/i,
+    /\s+CNPJ\s*:\s*/i,
+    /\s+IE\s*:\s*/i,
+    /\s+COND\.?\s*PAGTO\b/i,
+    /\s+TIPO\s*PAGTO\b/i,
+  ];
+
+  let cut = t.length;
+  for (const re of stopPatterns) {
+    const m = re.exec(t);
+    if (m?.index != null && m.index >= 10) {
+      cut = Math.min(cut, m.index);
+    }
+  }
+  if (cut < t.length) t = t.slice(0, cut).trim();
+  return t;
+}
+
+function isLikelyNonItemMetadataLine(line: string): boolean {
+  const t = line.replace(/\s+/g, ' ').trim();
+  if (!t) return false;
+  if (
+    /\b(?:ENDERE[CÇ]O|RUA|RODOVIA|AVENIDA|CIDADE|BAIRRO|CEP|TELEFONE|CELULAR|EMAIL|CNPJ|COND\.?\s*PAGTO|TIPO\s*PAGTO)\b/i.test(
+      t
+    )
+  ) {
+    return true;
+  }
+  if (/\(?\d{2}\)?\s*\d{4,5}[-.\s]?\d{3,4}/.test(t)) return true;
+  return false;
+}
+
 const GROUP_SPLIT_ANCHORS = [
   'CHAVE',
   'FITA',
@@ -482,7 +526,9 @@ export function extractItemsFromPositionedItems(
 
   const flush = () => {
     if (!current) return;
-    current.description = normalizeDescriptionText(current.description);
+    current.description = normalizeDescriptionText(
+      stripNonItemTailFromDescription(current.description)
+    );
     if (current.description.length >= 2) result.push(current);
     current = null;
   };
@@ -539,6 +585,7 @@ export function extractItemsFromPositionedItems(
         if (continuation) {
           if (current.description.length > 110) continue;
           if (looksLikeSpillover(continuation)) continue;
+          if (isLikelyNonItemMetadataLine(continuation)) continue;
           current.description = `${current.description} ${continuation}`.trim();
         }
       }
@@ -596,7 +643,7 @@ export function extractItemsFromPositionedItems(
 
     current = {
       line_number: lineNumber,
-      description: normalizeDescriptionText(desc),
+      description: normalizeDescriptionText(stripNonItemTailFromDescription(desc)),
       quantity,
       unit: unit || (quantity != null ? 'un' : null),
     };
@@ -914,6 +961,7 @@ function extractItemsForKnownOcLayout(text: string): ParsedPurchaseOrderItem[] {
     if (!current) return;
     let desc = normalizeDescriptionText(normalizeWs(current.parts.join(' ')));
     desc = stripAddressNoiseFromDescription(desc);
+    desc = stripNonItemTailFromDescription(desc);
     desc = desc
       .replace(/\s+\d+(?:[.,]\d+)?\s+(?:UN|UND|PC|PÇ|PAR|MT|M2|M3|KG|G|LT|ML)\s+R\$\s*[\d.,]+\s*$/i, '')
       .replace(/\s+\d+(?:[.,]\d+)?\s+(?:UN|UND|PC|PÇ|PAR|MT|M2|M3|KG|G|LT|ML)\s*$/i, '')
@@ -1041,6 +1089,7 @@ function extractItems(text: string): ParsedPurchaseOrderItem[] {
     let desc = normalizeWs(current.parts.join(' '));
     if (desc.length < 4) return;
     desc = stripAddressNoiseFromDescription(desc);
+    desc = stripNonItemTailFromDescription(desc);
     if (desc.length < 4) return;
 
     const { description, quantity, unit } = extractQtyUnitFromGridTail(desc);
