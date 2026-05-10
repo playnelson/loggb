@@ -101,7 +101,9 @@ export default function OrdensCompraPage() {
 
     const { data, error } = await supabase
       .from('purchase_orders')
-      .select('id, oc_number, title, vendor_name, delivery_deadline, created_at, purchase_order_items(id, delivered)')
+      .select(
+        'id, oc_number, title, vendor_name, delivery_deadline, created_at, purchase_order_items!purchase_order_items_purchase_order_id_fkey(id, delivered)'
+      )
       .eq('user_id', user.id)
       .order('created_at', { ascending: false });
 
