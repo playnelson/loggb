@@ -83,6 +83,10 @@ function stripNonItemTailFromDescription(desc: string): string {
     /\s+IE\s*:\s*/i,
     /\s+COND\.?\s*PAGTO\b/i,
     /\s+TIPO\s*PAGTO\b/i,
+    /\s+SOLICITA[ÇC][AÃ]O\s+DE\s+MATERIAL\b/i,
+    /\s+PARA\s+ABASTECER\b/i,
+    /\s+ALMOXARIFADO\b/i,
+    /\s+JUSTIFICATIVA\b/i,
   ];
 
   let cut = t.length;
@@ -100,7 +104,7 @@ function isLikelyNonItemMetadataLine(line: string): boolean {
   const t = line.replace(/\s+/g, ' ').trim();
   if (!t) return false;
   if (
-    /\b(?:ENDERE[CÇ]O|RUA|RODOVIA|AVENIDA|CIDADE|BAIRRO|CEP|TELEFONE|CELULAR|EMAIL|CNPJ|COND\.?\s*PAGTO|TIPO\s*PAGTO)\b/i.test(
+    /\b(?:ENDERE[CÇ]O|RUA|RODOVIA|AVENIDA|CIDADE|BAIRRO|CEP|TELEFONE|CELULAR|EMAIL|CNPJ|COND\.?\s*PAGTO|TIPO\s*PAGTO|SOLICITA[ÇC][AÃ]O\s+DE\s+MATERIAL|ABASTECER|ALMOXARIFADO|JUSTIFICATIVA)\b/i.test(
       t
     )
   ) {
@@ -108,6 +112,14 @@ function isLikelyNonItemMetadataLine(line: string): boolean {
   }
   if (/\(?\d{2}\)?\s*\d{4,5}[-.\s]?\d{3,4}/.test(t)) return true;
   return false;
+}
+
+function isHardTableEndLine(line: string): boolean {
+  const t = line.replace(/\s+/g, ' ').trim();
+  if (!t) return false;
+  return /\b(?:OBSERVA[ÇC][AÃ]O(?:ES)?|SOLICITA[ÇC][AÃ]O\s+DE\s+MATERIAL|JUSTIFICATIVA|COND\.?\s*PAGTO|TIPO\s*PAGTO|ENDERE[CÇ]O|RUA|RODOVIA|CIDADE|BAIRRO|CEP|TELEFONE|CELULAR|EMAIL|CNPJ)\b/i.test(
+    t
+  );
 }
 
 const GROUP_SPLIT_ANCHORS = [
@@ -534,12 +546,11 @@ export function extractItemsFromPositionedItems(
   };
 
   for (const row of rows.slice(startIdx)) {
-    const rowText = normalizeKey(row.cells.map((c) => c.text).join(' '));
-    // Em PDFs com múltiplas páginas, "OBSERVAÇÕES" pode aparecer no rodapé
-    // da página 1 enquanto a grade continua na página seguinte.
-    // Não encerrar o parsing aqui evita perder itens finais.
-    if (rowText.includes('OBSERVACAO') || rowText.includes('OBSERVACOES')) {
-      continue;
+    const rawRowText = row.cells.map((c) => c.text).join(' ');
+    const rowText = normalizeKey(rawRowText);
+    // Regra de negócio: terminou a tabela, terminam os itens.
+    if (rowText.includes('OBSERVACAO') || rowText.includes('OBSERVACOES') || isHardTableEndLine(rawRowText)) {
+      break;
     }
 
     const hasUnitInExpectedCol = row.cells.some(
@@ -1003,7 +1014,7 @@ function extractItemsForKnownOcLayout(text: string): ParsedPurchaseOrderItem[] {
     if (!current) continue;
     if (/^R\$\s*0,00$/i.test(ln)) continue;
     if (/^--\s*\d+\s+of\s+\d+\s*--$/i.test(ln)) continue;
-    if (/^OBSERVAÇÕES\b/i.test(ln)) break;
+    if (isHardTableEndLine(ln)) break;
     if (isJunkContinuation(ln)) continue;
 
     current.parts.push(ln);
@@ -1029,7 +1040,9 @@ function extractItems(text: string): ParsedPurchaseOrderItem[] {
   if (sliceAt < 0) return [];
 
   const tail = norm.slice(sliceAt);
-  const stopIdx = tail.search(/\n\s*OBSERVAÇÕES\b/im);
+  const stopIdx = tail.search(
+    /\n\s*(?:OBSERVA[ÇC][AÃ]O(?:ES)?|SOLICITA[ÇC][AÃ]O\s+DE\s+MATERIAL|JUSTIFICATIVA|COND\.?\s*PAGTO|TIPO\s*PAGTO|ENDERE[CÇ]O|TELEFONE|CNPJ)\b/im
+  );
   const region = (stopIdx === -1 ? tail : tail.slice(0, stopIdx)).replace(/\r/g, '\n');
 
   const rawLines = region
@@ -1076,7 +1089,7 @@ function extractItems(text: string): ParsedPurchaseOrderItem[] {
   const sliced = startIdx >= 0 ? rawLines.slice(startIdx) : rawLines;
   const lines: string[] = [];
   for (const ln of sliced) {
-    if (/^OBSERVAÇÕES\b/i.test(ln)) break;
+    if (isHardTableEndLine(ln)) break;
     lines.push(ln);
   }
 
