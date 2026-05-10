@@ -32,6 +32,7 @@ export interface DevLocalPurchaseOrder {
   delivery_deadline: string | null;
   source_filename: string | null;
   created_at: string;
+  archived?: boolean;
   items: DevLocalPoItem[];
 }
 

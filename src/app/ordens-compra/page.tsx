@@ -18,12 +18,15 @@ import {
   type DevLocalPurchaseOrder,
 } from '@/lib/ordensCompraDevLocal';
 import {
+  Archive,
+  ArchiveRestore,
   ClipboardList,
   FileUp,
   FilterX,
   Loader2,
   Plus,
   Search,
+  Trash2,
   X,
   AlertCircle,
   CheckCircle2,
@@ -36,8 +39,9 @@ interface OrderRow {
   title: string | null;
   vendor_name: string | null;
   delivery_deadline: string | null;
+  stage?: string | null;
   created_at: string;
-  purchase_order_items: { id: string; delivered: boolean }[] | null;
+  purchase_order_items: { id: string; delivered: boolean; description?: string | null }[] | null;
 }
 
 const emptyDraft = (): ParsedPurchaseOrder => ({
@@ -59,11 +63,52 @@ function formatDateBR(iso: string | null): string {
   return `${d}/${m}/${y}`;
 }
 
+function isOrderArchived(row: Pick<OrderRow, 'stage'>): boolean {
+  const s = (row.stage || '').trim().toLowerCase();
+  return s === 'arquivada' || s === 'arquivado' || s === 'archived' || s === 'archive';
+}
+
+function localTodayIso(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function deadlineKind(
+  iso: string | null
+): 'no_deadline' | 'late' | 'today' | 'upcoming' {
+  if (!iso) return 'no_deadline';
+  const today = localTodayIso();
+  if (iso < today) return 'late';
+  if (iso === today) return 'today';
+  return 'upcoming';
+}
+
+function lateDaysCount(iso: string | null): number {
+  if (!iso) return 0;
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const parts = iso.split('-').map((n) => Number(n));
+  if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) return 0;
+  const dueStart = new Date(parts[0], parts[1] - 1, parts[2]);
+  const diffMs = todayStart.getTime() - dueStart.getTime();
+  const days = Math.floor(diffMs / 86400000);
+  return days > 0 ? days : 0;
+}
+
 export default function OrdensCompraPage() {
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterPending, setFilterPending] = useState<'all' | 'pending' | 'done'>('all');
+  const [statusFilter, setStatusFilter] = useState<
+    'all' | 'active' | 'pending' | 'done' | 'no_items' | 'archived'
+  >('active');
+  const [deadlineFilter, setDeadlineFilter] = useState<
+    'all' | 'late' | 'today' | 'upcoming' | 'no_deadline'
+  >('all');
 
   const [importOpen, setImportOpen] = useState(false);
   const [parseLoading, setParseLoading] = useState(false);
@@ -72,6 +117,7 @@ export default function OrdensCompraPage() {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [draft, setDraft] = useState<ParsedPurchaseOrder>(() => emptyDraft());
   const [sourceFilename, setSourceFilename] = useState<string | null>(null);
+  const [busyOrderId, setBusyOrderId] = useState<string | null>(null);
 
   const fetchOrders = useCallback(async () => {
     setLoading(true);
@@ -84,8 +130,13 @@ export default function OrdensCompraPage() {
           title: o.title,
           vendor_name: o.vendor_name,
           delivery_deadline: o.delivery_deadline,
+          stage: o.archived ? 'arquivada' : null,
           created_at: o.created_at,
-          purchase_order_items: o.items.map((i) => ({ id: i.id, delivered: i.delivered })),
+          purchase_order_items: o.items.map((i) => ({
+            id: i.id,
+            delivered: i.delivered,
+            description: i.description,
+          })),
         }))
       );
       setLoading(false);
@@ -99,13 +150,34 @@ export default function OrdensCompraPage() {
       return;
     }
 
-    const { data, error } = await supabase
+    const withStage = await supabase
       .from('purchase_orders')
       .select(
-        'id, oc_number, title, vendor_name, delivery_deadline, created_at, purchase_order_items!purchase_order_items_purchase_order_id_fkey(id, delivered)'
+        'id, oc_number, title, vendor_name, delivery_deadline, stage, created_at, purchase_order_items!purchase_order_items_purchase_order_id_fkey(id, delivered, description)'
       )
       .eq('user_id', user.id)
       .order('created_at', { ascending: false });
+
+    const stageMissing =
+      !!withStage.error &&
+      /stage/i.test(
+        `${withStage.error.message || ''} ${withStage.error.details || ''} ${withStage.error.hint || ''}`
+      );
+
+    let data = withStage.data;
+    let error = withStage.error;
+
+    if (stageMissing) {
+      const noStage = await supabase
+        .from('purchase_orders')
+        .select(
+          'id, oc_number, title, vendor_name, delivery_deadline, created_at, purchase_order_items!purchase_order_items_purchase_order_id_fkey(id, delivered, description)'
+        )
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+      data = noStage.data;
+      error = noStage.error;
+    }
 
     if (error) {
       console.error(error);
@@ -128,22 +200,122 @@ export default function OrdensCompraPage() {
       const total = items.length;
       const done = items.filter((i) => i.delivered).length;
       const pending = total > 0 && done < total;
+      const archived = isOrderArchived(o);
+      const dKind = deadlineKind(o.delivery_deadline);
+      const rowStatus: 'pending' | 'done' | 'no_items' | 'archived' =
+        archived ? 'archived' : total === 0 ? 'no_items' : done === total ? 'done' : 'pending';
 
       if (filterPending === 'pending' && !pending) return false;
       if (filterPending === 'done' && (total === 0 || done < total)) return false;
 
+      if (statusFilter === 'active' && archived) return false;
+      if (
+        statusFilter !== 'all' &&
+        statusFilter !== 'active' &&
+        statusFilter !== rowStatus
+      ) {
+        return false;
+      }
+
+      if (deadlineFilter !== 'all' && deadlineFilter !== dKind) return false;
+
       if (!searchLower) return true;
+      const itemHay = items
+        .map((i) => i.description || '')
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
       const hay = [
         o.oc_number,
         o.title,
         o.vendor_name,
+        itemHay,
       ]
         .filter(Boolean)
         .join(' ')
         .toLowerCase();
       return hay.includes(searchLower);
     });
-  }, [orders, searchLower, filterPending]);
+  }, [orders, searchLower, filterPending, statusFilter, deadlineFilter]);
+
+  const archiveOrder = async (row: OrderRow, archive: boolean) => {
+    if (busyOrderId) return;
+    setBusyOrderId(row.id);
+    setParseError(null);
+    try {
+      if (ORDENS_COMPRA_DEV_LOCAL && typeof window !== 'undefined') {
+        const list = devLocalOrdersRead();
+        const next = list.map((o) => (o.id === row.id ? { ...o, archived: archive } : o));
+        devLocalOrdersWrite(next);
+        await fetchOrders();
+        return;
+      }
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) throw new Error('Sessão expirada.');
+
+      const stageValue = archive ? 'arquivada' : 'aberta';
+      const { error } = await supabase
+        .from('purchase_orders')
+        .update({ stage: stageValue })
+        .eq('id', row.id)
+        .eq('user_id', user.id);
+      if (error) {
+        const raw = `${error.message || ''} ${error.details || ''} ${error.hint || ''}`.trim();
+        if (/stage/i.test(raw)) {
+          throw new Error(
+            'Seu banco não possui a coluna stage para arquivamento. Se quiser, eu preparo um SQL rápido para habilitar.'
+          );
+        }
+        throw error;
+      }
+
+      await fetchOrders();
+    } catch (e) {
+      setParseError(e instanceof Error ? e.message : 'Erro ao arquivar ordem.');
+    } finally {
+      setBusyOrderId(null);
+    }
+  };
+
+  const deleteOrder = async (row: OrderRow) => {
+    if (busyOrderId) return;
+    const ok = window.confirm(
+      `Apagar a OC ${row.oc_number || row.title || row.id}? Essa ação não pode ser desfeita.`
+    );
+    if (!ok) return;
+
+    setBusyOrderId(row.id);
+    setParseError(null);
+    try {
+      if (ORDENS_COMPRA_DEV_LOCAL && typeof window !== 'undefined') {
+        const list = devLocalOrdersRead();
+        devLocalOrdersWrite(list.filter((o) => o.id !== row.id));
+        await fetchOrders();
+        return;
+      }
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) throw new Error('Sessão expirada.');
+
+      const { error } = await supabase
+        .from('purchase_orders')
+        .delete()
+        .eq('id', row.id)
+        .eq('user_id', user.id);
+      if (error) throw error;
+
+      await fetchOrders();
+    } catch (e) {
+      setParseError(e instanceof Error ? e.message : 'Erro ao apagar ordem.');
+    } finally {
+      setBusyOrderId(null);
+    }
+  };
 
   const openNewManual = () => {
     setDraft(emptyDraft());
@@ -242,6 +414,7 @@ export default function OrdensCompraPage() {
           delivery_deadline: draft.delivery_deadline || null,
           source_filename: sourceFilename,
           created_at: new Date().toISOString(),
+          archived: false,
           items,
         };
 
@@ -397,12 +570,57 @@ export default function OrdensCompraPage() {
               <option value="done">Totalmente recebidas</option>
             </select>
           </div>
+          <div className="w-full lg:w-48">
+            <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">Status</label>
+            <select
+              className="w-full px-3 py-3 rounded-xl border border-slate-200 text-sm font-medium bg-white min-h-[48px]"
+              value={statusFilter}
+              onChange={(e) =>
+                setStatusFilter(
+                  e.target.value as
+                    | 'all'
+                    | 'active'
+                    | 'pending'
+                    | 'done'
+                    | 'no_items'
+                    | 'archived'
+                )
+              }
+            >
+              <option value="active">Ativas</option>
+              <option value="all">Todas</option>
+              <option value="pending">Em andamento</option>
+              <option value="done">Concluídas</option>
+              <option value="no_items">Sem itens</option>
+              <option value="archived">Arquivadas</option>
+            </select>
+          </div>
+          <div className="w-full lg:w-48">
+            <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">Prazo</label>
+            <select
+              className="w-full px-3 py-3 rounded-xl border border-slate-200 text-sm font-medium bg-white min-h-[48px]"
+              value={deadlineFilter}
+              onChange={(e) =>
+                setDeadlineFilter(
+                  e.target.value as 'all' | 'late' | 'today' | 'upcoming' | 'no_deadline'
+                )
+              }
+            >
+              <option value="all">Todos</option>
+              <option value="late">Atrasadas</option>
+              <option value="today">Vence hoje</option>
+              <option value="upcoming">No prazo</option>
+              <option value="no_deadline">Sem prazo</option>
+            </select>
+          </div>
           <button
             type="button"
             className="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-600 hover:bg-slate-50 min-h-[48px] lg:mb-0"
             onClick={() => {
               setSearch('');
               setFilterPending('all');
+              setStatusFilter('active');
+              setDeadlineFilter('all');
             }}
           >
             <FilterX size={18} />
@@ -434,7 +652,8 @@ export default function OrdensCompraPage() {
                   <th className="px-4 py-3">Fornecedor / título</th>
                   <th className="px-4 py-3">Prazo</th>
                   <th className="px-4 py-3">Entrega</th>
-                  <th className="px-4 py-3 w-24" />
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3 w-56" />
                 </tr>
               </thead>
               <tbody>
@@ -442,8 +661,17 @@ export default function OrdensCompraPage() {
                   const items = o.purchase_order_items || [];
                   const total = items.length;
                   const done = items.filter((i) => i.delivered).length;
+                  const archived = isOrderArchived(o);
+                  const rowBusy = busyOrderId === o.id;
+                  const dKind = deadlineKind(o.delivery_deadline);
+                  const lateDays = lateDaysCount(o.delivery_deadline);
+                  const rowStatus: 'Em andamento' | 'Concluída' | 'Sem itens' | 'Arquivada' =
+                    archived ? 'Arquivada' : total === 0 ? 'Sem itens' : done === total ? 'Concluída' : 'Em andamento';
                   return (
-                    <tr key={o.id} className="border-b border-slate-50 hover:bg-slate-50/80">
+                    <tr
+                      key={o.id}
+                      className={`border-b border-slate-50 hover:bg-slate-50/80 ${archived ? 'bg-slate-50/80' : ''}`}
+                    >
                       <td className="px-4 py-3 font-bold text-primary whitespace-nowrap">
                         {o.oc_number || '—'}
                       </td>
@@ -453,7 +681,15 @@ export default function OrdensCompraPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
-                        {formatDateBR(o.delivery_deadline)}
+                        <div className="font-medium text-primary">{formatDateBR(o.delivery_deadline)}</div>
+                        {!archived && total > 0 && done < total && dKind === 'late' && (
+                          <div className="text-[11px] font-bold text-red-600">
+                            Atrasada {lateDays === 1 ? 'há 1 dia' : `há ${lateDays} dias`}
+                          </div>
+                        )}
+                        {!archived && total > 0 && done < total && dKind === 'today' && (
+                          <div className="text-[11px] font-bold text-amber-700">Vence hoje</div>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         {total === 0 ? (
@@ -469,13 +705,50 @@ export default function OrdensCompraPage() {
                           </span>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-right">
-                        <Link
-                          href={`/ordens-compra/${o.id}`}
-                          className="text-secondary font-bold hover:underline text-xs sm:text-sm"
+                      <td className="px-4 py-3">
+                        <span
+                          className={`inline-flex items-center rounded-full px-2 py-1 text-[11px] font-bold ${
+                            rowStatus === 'Arquivada'
+                              ? 'bg-slate-200 text-slate-700'
+                              : rowStatus === 'Concluída'
+                                ? 'bg-emerald-100 text-emerald-700'
+                                : rowStatus === 'Sem itens'
+                                  ? 'bg-slate-100 text-slate-600'
+                                  : 'bg-amber-100 text-amber-700'
+                          }`}
                         >
-                          Abrir
-                        </Link>
+                          {rowStatus}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="inline-flex items-center gap-3">
+                          <Link
+                            href={`/ordens-compra/${o.id}`}
+                            className="text-secondary font-bold hover:underline text-xs sm:text-sm"
+                          >
+                            Abrir
+                          </Link>
+                          <button
+                            type="button"
+                            disabled={rowBusy}
+                            onClick={() => void archiveOrder(o, !archived)}
+                            className="inline-flex items-center gap-1 text-xs font-bold text-slate-600 hover:underline disabled:opacity-50"
+                            title={archived ? 'Desarquivar ordem' : 'Arquivar ordem'}
+                          >
+                            {archived ? <ArchiveRestore size={13} /> : <Archive size={13} />}
+                            {archived ? 'Desarquivar' : 'Arquivar'}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={rowBusy}
+                            onClick={() => void deleteOrder(o)}
+                            className="inline-flex items-center gap-1 text-xs font-bold text-red-600 hover:underline disabled:opacity-50"
+                            title="Apagar ordem"
+                          >
+                            <Trash2 size={13} />
+                            Apagar
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
