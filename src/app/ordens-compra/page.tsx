@@ -38,7 +38,8 @@ interface OrderRow {
   oc_number: string | null;
   title: string | null;
   vendor_name: string | null;
-  vendor_contact_name?: string | null;
+  buyer_name?: string | null;
+  notes?: string | null;
   delivery_deadline: string | null;
   stage?: string | null;
   created_at: string;
@@ -69,6 +70,19 @@ function formatDateBR(iso: string | null): string {
   const [y, m, d] = iso.split('-');
   if (!y || !m || !d) return iso;
   return `${d}/${m}/${y}`;
+}
+
+function buyerNameFromNotes(notes: string | null | undefined): string | null {
+  const t = (notes || '').trim();
+  if (!t) return null;
+  const cleaned = t.replace(/^Comprador:\s*/i, '').trim();
+  if (!cleaned) return null;
+  const parts = cleaned
+    .split('·')
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (parts.length >= 2) return parts[1];
+  return parts[0] || null;
 }
 
 function isOrderArchived(row: Pick<OrderRow, 'stage'>): boolean {
@@ -138,7 +152,8 @@ export default function OrdensCompraPage() {
           oc_number: o.oc_number,
           title: o.title,
           vendor_name: o.vendor_name,
-          vendor_contact_name: o.vendor_contact_name || null,
+          buyer_name: o.buyer_name || null,
+          notes: null,
           delivery_deadline: o.delivery_deadline,
           stage: o.archived ? 'arquivada' : null,
           created_at: o.created_at,
@@ -163,7 +178,7 @@ export default function OrdensCompraPage() {
     const withStage = await supabase
       .from('purchase_orders')
       .select(
-        'id, oc_number, title, vendor_name, vendor_contact_name, delivery_deadline, stage, created_at, purchase_order_items!purchase_order_items_purchase_order_id_fkey(id, delivered, description)'
+        'id, oc_number, title, vendor_name, notes, delivery_deadline, stage, created_at, purchase_order_items!purchase_order_items_purchase_order_id_fkey(id, delivered, description)'
       )
       .eq('user_id', user.id)
       .order('created_at', { ascending: false });
@@ -181,7 +196,7 @@ export default function OrdensCompraPage() {
       const noStage = await supabase
         .from('purchase_orders')
         .select(
-          'id, oc_number, title, vendor_name, vendor_contact_name, delivery_deadline, created_at, purchase_order_items!purchase_order_items_purchase_order_id_fkey(id, delivered, description)'
+          'id, oc_number, title, vendor_name, notes, delivery_deadline, created_at, purchase_order_items!purchase_order_items_purchase_order_id_fkey(id, delivered, description)'
         )
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
@@ -239,6 +254,8 @@ export default function OrdensCompraPage() {
         o.oc_number,
         o.title,
         o.vendor_name,
+        o.buyer_name,
+        buyerNameFromNotes(o.notes),
         itemHay,
       ]
         .filter(Boolean)
@@ -711,7 +728,7 @@ export default function OrdensCompraPage() {
                 <tr className="bg-slate-50 border-b border-slate-100 text-left text-[10px] font-black uppercase text-slate-500">
                   <th className="px-4 py-3">OC</th>
                   <th className="px-4 py-3">Fornecedor / título</th>
-                  <th className="px-4 py-3">Vendedor/contato</th>
+                  <th className="px-4 py-3">Comprador</th>
                   <th className="px-4 py-3">Prazo</th>
                   <th className="px-4 py-3">Entrega</th>
                   <th className="px-4 py-3">Status</th>
@@ -744,7 +761,7 @@ export default function OrdensCompraPage() {
                       </td>
                       <td className="px-4 py-3 text-slate-600 min-w-[180px]">
                         <span className="text-xs font-medium">
-                          {o.vendor_contact_name || '—'}
+                          {o.buyer_name || buyerNameFromNotes(o.notes) || '—'}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
