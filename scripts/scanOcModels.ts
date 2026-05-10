@@ -163,8 +163,8 @@ async function run() {
     }
 
     const maxAllowedByCoverage = Math.max(
-      best.parsed.items.length + 3,
-      Math.ceil(best.parsed.items.length * 1.5)
+      best.parsed.items.length + 6,
+      Math.ceil(best.parsed.items.length * 2)
     );
     const moderateCoverage =
       both.positionedPdf2json.items.length >= Math.max(1, best.parsed.items.length - 1) &&
@@ -174,7 +174,10 @@ async function run() {
       scorePdf2json === best.score &&
       both.positionedPdf2json.items.length > best.parsed.items.length &&
       both.positionedPdf2json.items.length <= best.parsed.items.length + 3;
-    if (moderateCoverage && (betterQuality || sameQualitySmallGain)) {
+    const highCoverageNearQuality =
+      scorePdf2json <= best.score + 1 &&
+      both.positionedPdf2json.items.length >= best.parsed.items.length + 3;
+    if (moderateCoverage && (betterQuality || sameQualitySmallGain || highCoverageNearQuality)) {
       best = {
         mode: 'pdf2json',
         parsed: both.positionedPdf2json,

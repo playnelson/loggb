@@ -53,6 +53,19 @@ function normalizeForHeuristic(s: string): string {
     .toUpperCase();
 }
 
+function normalizeDescriptionText(desc: string): string {
+  let t = desc.replace(/\s+/g, ' ').trim();
+  for (let i = 0; i < 4; i++) {
+    const next = t.replace(
+      /\b((?:[A-Za-zÀ-ÿ0-9"/.-]+\s+){1,5}[A-Za-zÀ-ÿ0-9"/.-]+)(?:\s+\1){1,}\b/gi,
+      '$1'
+    );
+    if (next === t) break;
+    t = next;
+  }
+  return t.trim();
+}
+
 const GROUP_SPLIT_ANCHORS = [
   'CHAVE',
   'FITA',
@@ -151,7 +164,7 @@ export function refineParsedItems(
   segments.forEach((seg, idx) => {
     replaced.push({
       line_number: baseLine + idx,
-      description: seg,
+      description: normalizeDescriptionText(seg),
       quantity: idx === 0 ? last.quantity : null,
       unit: idx === 0 ? last.unit : null,
     });
@@ -308,14 +321,19 @@ export function extractItemsFromPositionedItems(
 
   const flush = () => {
     if (!current) return;
-    current.description = current.description.replace(/\s+/g, ' ').trim();
+    current.description = normalizeDescriptionText(current.description);
     if (current.description.length >= 2) result.push(current);
     current = null;
   };
 
   for (const row of rows.slice(startIdx)) {
     const rowText = normalizeKey(row.cells.map((c) => c.text).join(' '));
-    if (rowText.includes('OBSERVACAO') || rowText.includes('OBSERVACOES')) break;
+    // Em PDFs com múltiplas páginas, "OBSERVAÇÕES" pode aparecer no rodapé
+    // da página 1 enquanto a grade continua na página seguinte.
+    // Não encerrar o parsing aqui evita perder itens finais.
+    if (rowText.includes('OBSERVACAO') || rowText.includes('OBSERVACOES')) {
+      continue;
+    }
 
     const hasUnitInExpectedCol = row.cells.some(
       (c) => Math.abs(c.x - unitX) <= X_TOL && unitSet.has(normalizeKey(c.text))
@@ -368,7 +386,10 @@ export function extractItemsFromPositionedItems(
 
     flush();
 
-    const lineNumber = parseItemNumber(effectiveLineCell.text);
+    let lineNumber = parseItemNumber(effectiveLineCell.text);
+    if (!Number.isFinite(lineNumber) || lineNumber <= 0) {
+      lineNumber = current ? current.line_number + 1 : result.length + 1;
+    }
 
     const desc = row.cells
       .filter((c) => c.x > itemX + 6 && c.x < unitX - 8)
@@ -414,7 +435,7 @@ export function extractItemsFromPositionedItems(
 
     current = {
       line_number: lineNumber,
-      description: desc,
+      description: normalizeDescriptionText(desc),
       quantity,
       unit: unit || (quantity != null ? 'un' : null),
     };
@@ -714,7 +735,7 @@ function extractItemsForKnownOcLayout(text: string): ParsedPurchaseOrderItem[] {
 
   const flush = () => {
     if (!current) return;
-    let desc = normalizeWs(current.parts.join(' '));
+    let desc = normalizeDescriptionText(normalizeWs(current.parts.join(' ')));
     desc = stripAddressNoiseFromDescription(desc);
     desc = desc
       .replace(/\s+\d+(?:[.,]\d+)?\s+(?:UN|UND|PC|PÇ|PAR|MT|M2|M3|KG|G|LT|ML)\s+R\$\s*[\d.,]+\s*$/i, '')
@@ -727,7 +748,7 @@ function extractItemsForKnownOcLayout(text: string): ParsedPurchaseOrderItem[] {
     }
     out.push({
       line_number: current.line_number,
-      description: desc,
+      description: normalizeDescriptionText(desc),
       quantity: current.quantity,
       unit: current.unit,
     });
@@ -849,7 +870,7 @@ function extractItems(text: string): ParsedPurchaseOrderItem[] {
 
     items.push({
       line_number: current.line_number,
-      description,
+      description: normalizeDescriptionText(description),
       quantity,
       unit,
     });
