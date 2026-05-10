@@ -353,7 +353,7 @@ export default function OrdemCompraDetailPage() {
               <div className="p-8 text-center text-slate-500 text-sm">Nenhum item nesta ordem.</div>
             ) : (
               <ul className="divide-y divide-slate-100">
-                {items.map((it) => (
+                {items.map((it, idx) => (
                   <li
                     key={it.id}
                     className={`px-4 py-3 flex gap-3 items-start ${
@@ -377,7 +377,7 @@ export default function OrdemCompraDetailPage() {
                     </button>
                     <div className="flex-1 min-w-0">
                       <div className="flex flex-wrap items-baseline gap-2">
-                        <span className="text-xs font-black text-slate-400 w-6">{it.line_number}</span>
+                        <span className="text-xs font-black text-slate-400 w-6">{idx + 1}</span>
                         <span
                           className={`text-sm font-medium ${
                             it.delivered ? 'text-slate-500 line-through' : 'text-primary'

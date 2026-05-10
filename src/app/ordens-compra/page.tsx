@@ -56,6 +56,13 @@ const emptyDraft = (): ParsedPurchaseOrder => ({
   items: [],
 });
 
+function withSequentialLineNumbers(items: ParsedPurchaseOrderItem[]): ParsedPurchaseOrderItem[] {
+  return items.map((it, idx) => ({
+    ...it,
+    line_number: idx + 1,
+  }));
+}
+
 function formatDateBR(iso: string | null): string {
   if (!iso) return '—';
   const [y, m, d] = iso.split('-');
@@ -342,7 +349,11 @@ export default function OrdensCompraPage() {
         setDraft(emptyDraft());
         return;
       }
-      setDraft(json.parsed as ParsedPurchaseOrder);
+      const parsed = json.parsed as ParsedPurchaseOrder;
+      setDraft({
+        ...parsed,
+        items: withSequentialLineNumbers(parsed.items || []),
+      });
       setWarnings((json.warnings as string[]) || []);
       setSourceFilename(file.name);
       const conf = (json.meta?.parse_confidence || 'high') as 'high' | 'medium' | 'low';
@@ -359,29 +370,29 @@ export default function OrdensCompraPage() {
     setDraft((d) => {
       const items = [...d.items];
       items[idx] = { ...items[idx], ...patch };
-      return { ...d, items };
+      return { ...d, items: withSequentialLineNumbers(items) };
     });
   };
 
   const addItemRow = () => {
     setDraft((d) => ({
       ...d,
-      items: [
+      items: withSequentialLineNumbers([
         ...d.items,
         {
-          line_number: (d.items[d.items.length - 1]?.line_number || 0) + 1,
+          line_number: 0,
           description: '',
           quantity: null,
           unit: 'un',
         },
-      ],
+      ]),
     }));
   };
 
   const removeItemRow = (idx: number) => {
     setDraft((d) => ({
       ...d,
-      items: d.items.filter((_, i) => i !== idx),
+      items: withSequentialLineNumbers(d.items.filter((_, i) => i !== idx)),
     }));
   };
 
@@ -401,7 +412,7 @@ export default function OrdensCompraPage() {
         const items = draft.items
           .map((it, i) => ({
             id: devLocalNewId(),
-            line_number: it.line_number || i + 1,
+            line_number: i + 1,
             description: it.description.trim() || `Item ${i + 1}`,
             quantity: it.quantity,
             unit: (it.unit || 'un').slice(0, 10),
@@ -473,7 +484,7 @@ export default function OrdensCompraPage() {
       const lines = draft.items
         .map((it, i) => ({
           purchase_order_id: pid,
-          line_number: it.line_number || i + 1,
+          line_number: i + 1,
           description: it.description.trim() || `Item ${i + 1}`,
           quantity: it.quantity,
           unit: (it.unit || 'un').slice(0, 10),
@@ -895,15 +906,8 @@ export default function OrdensCompraPage() {
                     <tbody>
                       {draft.items.map((it, idx) => (
                         <tr key={`${it.line_number}-${idx}`} className="border-t border-slate-100">
-                          <td className="px-2 py-1 align-top">
-                            <input
-                              className="w-full px-1 py-1 border border-slate-200 rounded"
-                              type="number"
-                              value={it.line_number}
-                              onChange={(e) =>
-                                updateItem(idx, { line_number: parseInt(e.target.value, 10) || 0 })
-                              }
-                            />
+                          <td className="px-2 py-2 align-top text-center text-slate-600 font-bold">
+                            {idx + 1}
                           </td>
                           <td className="px-2 py-1 align-top">
                             <input
