@@ -12,13 +12,18 @@ import {
   ArrowLeft,
   ClipboardList,
   Loader2,
+  Pencil,
   Package,
   Phone,
+  Plus,
+  Save,
   Store,
+  Trash2,
   Truck,
   User,
   CheckSquare,
   Square,
+  X,
 } from 'lucide-react';
 
 interface PoHeader {
@@ -79,6 +84,23 @@ export default function OrdemCompraDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [draftHeader, setDraftHeader] = useState<{
+    oc_number: string;
+    title: string;
+    vendor_name: string;
+    vendor_contact_line: string;
+    delivery_deadline: string;
+  }>({
+    oc_number: '',
+    title: '',
+    vendor_name: '',
+    vendor_contact_line: '',
+    delivery_deadline: '',
+  });
+  const [draftItems, setDraftItems] = useState<PoItem[]>([]);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -238,6 +260,233 @@ export default function OrdemCompraDetailPage() {
     );
   };
 
+  const markAllAsDelivered = async () => {
+    if (!items.length) return;
+    if (items.every((i) => i.delivered)) return;
+
+    setBulkBusy(true);
+    const nowIso = new Date().toISOString();
+
+    if (ORDENS_COMPRA_DEV_LOCAL && typeof window !== 'undefined') {
+      const list = devLocalOrdersRead();
+      const po = list.find((o) => o.id === id);
+      if (!po) {
+        setBulkBusy(false);
+        return;
+      }
+      for (const line of po.items) {
+        line.delivered = true;
+        line.delivered_at = nowIso;
+      }
+      devLocalOrdersWrite(list);
+      setItems((prev) =>
+        prev.map((r) => ({
+          ...r,
+          delivered: true,
+          delivered_at: nowIso,
+        }))
+      );
+      setBulkBusy(false);
+      return;
+    }
+
+    const { error: e } = await supabase
+      .from('purchase_order_items')
+      .update({
+        delivered: true,
+        delivered_at: nowIso,
+      })
+      .eq('purchase_order_id', id)
+      .eq('delivered', false);
+
+    setBulkBusy(false);
+    if (e) {
+      alert(`Erro ao marcar todos: ${e.message}`);
+      return;
+    }
+
+    setItems((prev) =>
+      prev.map((r) => ({
+        ...r,
+        delivered: true,
+        delivered_at: r.delivered_at || nowIso,
+      }))
+    );
+  };
+
+  const startEdit = () => {
+    if (!header) return;
+    setDraftHeader({
+      oc_number: header.oc_number || '',
+      title: header.title || '',
+      vendor_name: header.vendor_name || '',
+      vendor_contact_line: header.vendor_contact_line || '',
+      delivery_deadline: header.delivery_deadline || '',
+    });
+    setDraftItems(items.map((it) => ({ ...it })));
+    setEditing(true);
+  };
+
+  const cancelEdit = () => {
+    setEditing(false);
+    setDraftItems([]);
+    setDraftHeader({
+      oc_number: '',
+      title: '',
+      vendor_name: '',
+      vendor_contact_line: '',
+      delivery_deadline: '',
+    });
+  };
+
+  const updateDraftItem = (idx: number, patch: Partial<PoItem>) => {
+    setDraftItems((prev) => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], ...patch };
+      return next;
+    });
+  };
+
+  const addDraftItem = () => {
+    setDraftItems((prev) => [
+      ...prev,
+      {
+        id: crypto.randomUUID(),
+        line_number: prev.length + 1,
+        description: '',
+        quantity: null,
+        unit: 'un',
+        delivered: false,
+        delivered_at: null,
+      },
+    ]);
+  };
+
+  const removeDraftItem = (idx: number) => {
+    setDraftItems((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const saveEdit = async () => {
+    if (!header) return;
+    setSavingEdit(true);
+    setError(null);
+    try {
+      const normalizedItems = draftItems
+        .map((it, idx) => ({
+          ...it,
+          line_number: idx + 1,
+          description: (it.description || '').trim(),
+          unit: (it.unit || 'un').trim().slice(0, 10) || 'un',
+        }))
+        .filter((it) => it.description.length > 0);
+
+      if (ORDENS_COMPRA_DEV_LOCAL && typeof window !== 'undefined') {
+        const list = devLocalOrdersRead();
+        const po = list.find((o) => o.id === id);
+        if (!po) {
+          throw new Error('Ordem não encontrada (modo local).');
+        }
+        po.oc_number = draftHeader.oc_number.trim() || null;
+        po.title = draftHeader.title.trim() || null;
+        po.vendor_name = draftHeader.vendor_name.trim() || null;
+        po.vendor_contact_name = draftHeader.vendor_contact_line.trim() || null;
+        po.delivery_deadline = draftHeader.delivery_deadline || null;
+        po.items = normalizedItems.map((it) => ({
+          id: it.id || crypto.randomUUID(),
+          line_number: it.line_number,
+          description: it.description,
+          quantity: it.quantity,
+          unit: it.unit || 'un',
+          delivered: it.delivered,
+          delivered_at: it.delivered_at,
+        }));
+        devLocalOrdersWrite(list);
+
+        setHeader((h) =>
+          h
+            ? {
+                ...h,
+                oc_number: po.oc_number,
+                title: po.title,
+                vendor_name: po.vendor_name,
+                vendor_contact_line: po.vendor_contact_name,
+                delivery_deadline: po.delivery_deadline,
+              }
+            : h
+        );
+        setItems(
+          po.items.map((it) => ({
+            id: it.id,
+            line_number: it.line_number,
+            description: it.description,
+            quantity: it.quantity,
+            unit: it.unit,
+            delivered: it.delivered,
+            delivered_at: it.delivered_at,
+          }))
+        );
+        cancelEdit();
+        return;
+      }
+
+      const { data: auth } = await supabase.auth.getUser();
+      if (!auth.user) throw new Error('Sessão expirada.');
+
+      const { error: upErr } = await supabase
+        .from('purchase_orders')
+        .update({
+          oc_number: draftHeader.oc_number.trim() || null,
+          title: draftHeader.title.trim() || null,
+          vendor_name: draftHeader.vendor_name.trim() || null,
+          vendor_contact_name: draftHeader.vendor_contact_line.trim() || null,
+          delivery_deadline: draftHeader.delivery_deadline || null,
+        })
+        .eq('id', id)
+        .eq('user_id', auth.user.id);
+      if (upErr) throw upErr;
+
+      const { error: delErr } = await supabase
+        .from('purchase_order_items')
+        .delete()
+        .eq('purchase_order_id', id);
+      if (delErr) throw delErr;
+
+      if (normalizedItems.length > 0) {
+        const payload = normalizedItems.map((it) => ({
+          purchase_order_id: id,
+          line_number: it.line_number,
+          description: it.description,
+          quantity: it.quantity,
+          unit: it.unit,
+          delivered: it.delivered,
+          delivered_at: it.delivered ? it.delivered_at || new Date().toISOString() : null,
+        }));
+        const { error: insErr } = await supabase.from('purchase_order_items').insert(payload);
+        if (insErr) throw insErr;
+      }
+
+      setHeader((h) =>
+        h
+          ? {
+              ...h,
+              oc_number: draftHeader.oc_number.trim() || null,
+              title: draftHeader.title.trim() || null,
+              vendor_name: draftHeader.vendor_name.trim() || null,
+              vendor_contact_line: draftHeader.vendor_contact_line.trim() || null,
+              delivery_deadline: draftHeader.delivery_deadline || null,
+            }
+          : h
+      );
+      setItems(normalizedItems);
+      cancelEdit();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Falha ao salvar alterações da OC.';
+      setError(msg);
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
   const doneCount = items.filter((i) => i.delivered).length;
 
   return (
@@ -250,6 +499,38 @@ export default function OrdemCompraDetailPage() {
           <ArrowLeft size={18} />
           Voltar às ordens
         </Link>
+        {header && !editing && (
+          <button
+            type="button"
+            onClick={startEdit}
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 text-sm font-bold text-slate-700 hover:bg-slate-50"
+          >
+            <Pencil size={16} />
+            Editar OC
+          </button>
+        )}
+        {header && editing && (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={cancelEdit}
+              disabled={savingEdit}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              <X size={16} />
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={() => void saveEdit()}
+              disabled={savingEdit}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-secondary text-white text-sm font-bold hover:opacity-90 disabled:opacity-50"
+            >
+              {savingEdit ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+              Salvar alterações
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-medium text-amber-950">
@@ -277,11 +558,28 @@ export default function OrdemCompraDetailPage() {
           <div className="flex flex-col gap-2">
             <h1 className="text-2xl font-bold text-primary flex items-center gap-2 flex-wrap">
               <ClipboardList className="text-secondary shrink-0" />
-              <span>OC {header.oc_number || '—'}</span>
+              <span>OC {!editing ? header.oc_number || '—' : draftHeader.oc_number || '—'}</span>
             </h1>
-            <p className="text-slate-600 text-sm font-medium break-all">
-              {header.title || 'Ordem de compra'}
-            </p>
+            {editing ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                <input
+                  className="px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium"
+                  value={draftHeader.oc_number}
+                  placeholder="Nº da OC"
+                  onChange={(e) => setDraftHeader((d) => ({ ...d, oc_number: e.target.value }))}
+                />
+                <input
+                  className="px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium"
+                  value={draftHeader.title}
+                  placeholder="Título"
+                  onChange={(e) => setDraftHeader((d) => ({ ...d, title: e.target.value }))}
+                />
+              </div>
+            ) : (
+              <p className="text-slate-600 text-sm font-medium break-all">
+                {header.title || 'Ordem de compra'}
+              </p>
+            )}
             {header.vendor_name && (
               <p className="text-slate-500 text-xs">Fornecedor: {header.vendor_name}</p>
             )}
@@ -315,14 +613,34 @@ export default function OrdemCompraDetailPage() {
               <div className="space-y-1 text-sm">
                 <div>
                   <span className="text-slate-400 text-[11px] font-bold uppercase">Nome</span>
-                  <div className="font-bold text-primary">{header.vendor_name || '—'}</div>
+                  {editing ? (
+                    <input
+                      className="mt-1 w-full px-2 py-1 rounded border border-slate-200 text-sm font-bold text-primary"
+                      value={draftHeader.vendor_name}
+                      onChange={(e) =>
+                        setDraftHeader((d) => ({ ...d, vendor_name: e.target.value }))
+                      }
+                    />
+                  ) : (
+                    <div className="font-bold text-primary">{header.vendor_name || '—'}</div>
+                  )}
                 </div>
                 <div>
                   <span className="text-slate-400 text-[11px] font-bold uppercase">Vendedor/contato</span>
-                  <div className="font-medium text-primary flex items-start gap-1">
-                    <Phone size={12} className="shrink-0 mt-1 text-slate-500" />
-                    <span>{header.vendor_contact_line || '—'}</span>
-                  </div>
+                  {editing ? (
+                    <input
+                      className="mt-1 w-full px-2 py-1 rounded border border-slate-200 text-sm font-medium text-primary"
+                      value={draftHeader.vendor_contact_line}
+                      onChange={(e) =>
+                        setDraftHeader((d) => ({ ...d, vendor_contact_line: e.target.value }))
+                      }
+                    />
+                  ) : (
+                    <div className="font-medium text-primary flex items-start gap-1">
+                      <Phone size={12} className="shrink-0 mt-1 text-slate-500" />
+                      <span>{header.vendor_contact_line || '—'}</span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -333,7 +651,18 @@ export default function OrdemCompraDetailPage() {
               </div>
               <div className="text-sm">
                 <span className="text-slate-400 text-xs font-bold uppercase">Data de entrega</span>
-                <div className="font-medium text-primary">{formatDateBR(header.delivery_deadline)}</div>
+                {editing ? (
+                  <input
+                    type="date"
+                    className="mt-1 w-full px-2 py-1 rounded border border-slate-200 text-sm font-medium text-primary"
+                    value={draftHeader.delivery_deadline}
+                    onChange={(e) =>
+                      setDraftHeader((d) => ({ ...d, delivery_deadline: e.target.value }))
+                    }
+                  />
+                ) : (
+                  <div className="font-medium text-primary">{formatDateBR(header.delivery_deadline)}</div>
+                )}
               </div>
             </div>
           </div>
@@ -344,14 +673,30 @@ export default function OrdemCompraDetailPage() {
                 <Package size={18} className="text-secondary" />
                 <h2 className="font-bold text-primary">Itens e entregas</h2>
               </div>
-              <span className="text-xs font-bold text-slate-500">
-                {doneCount}/{items.length} recebidos
-              </span>
+              {!editing ? (
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => void markAllAsDelivered()}
+                    disabled={bulkBusy || items.length === 0 || doneCount === items.length}
+                    className="text-[11px] font-bold px-2.5 py-1.5 rounded-lg border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {bulkBusy ? 'Marcando...' : 'Marcar todos como recebidos'}
+                  </button>
+                  <span className="text-xs font-bold text-slate-500">
+                    {doneCount}/{items.length} recebidos
+                  </span>
+                </div>
+              ) : (
+                <span className="text-xs font-bold text-slate-500">
+                  Editando {draftItems.length} item(ns)
+                </span>
+              )}
             </div>
 
-            {items.length === 0 ? (
+            {!editing && items.length === 0 ? (
               <div className="p-8 text-center text-slate-500 text-sm">Nenhum item nesta ordem.</div>
-            ) : (
+            ) : !editing ? (
               <ul className="divide-y divide-slate-100">
                 {items.map((it, idx) => (
                   <li
@@ -362,7 +707,7 @@ export default function OrdemCompraDetailPage() {
                   >
                     <button
                       type="button"
-                      disabled={busyId === it.id}
+                      disabled={bulkBusy || busyId === it.id}
                       onClick={() => void toggleDelivered(it)}
                       className="mt-0.5 p-1 rounded-lg text-secondary hover:bg-secondary/10 disabled:opacity-50"
                       title={it.delivered ? 'Marcar como pendente' : 'Marcar como entregue'}
@@ -398,6 +743,74 @@ export default function OrdemCompraDetailPage() {
                   </li>
                 ))}
               </ul>
+            ) : (
+              <div className="p-4 space-y-3">
+                <div className="border border-slate-100 rounded-xl overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-50 text-[10px] font-black uppercase text-slate-500">
+                      <tr>
+                        <th className="px-2 py-2 w-10">#</th>
+                        <th className="px-2 py-2">Descrição</th>
+                        <th className="px-2 py-2 w-24">Qtd</th>
+                        <th className="px-2 py-2 w-20">Un</th>
+                        <th className="px-2 py-2 w-8" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {draftItems.map((it, idx) => (
+                        <tr key={`${it.id}-${idx}`} className="border-t border-slate-100">
+                          <td className="px-2 py-2 text-center text-slate-600 font-bold">{idx + 1}</td>
+                          <td className="px-2 py-1">
+                            <input
+                              className="w-full px-2 py-1 border border-slate-200 rounded text-xs"
+                              value={it.description}
+                              onChange={(e) => updateDraftItem(idx, { description: e.target.value })}
+                            />
+                          </td>
+                          <td className="px-2 py-1">
+                            <input
+                              className="w-full px-2 py-1 border border-slate-200 rounded text-xs"
+                              type="number"
+                              step="any"
+                              value={it.quantity ?? ''}
+                              onChange={(e) =>
+                                updateDraftItem(idx, {
+                                  quantity: e.target.value === '' ? null : parseFloat(e.target.value),
+                                })
+                              }
+                            />
+                          </td>
+                          <td className="px-2 py-1">
+                            <input
+                              className="w-full px-2 py-1 border border-slate-200 rounded text-xs"
+                              value={it.unit || ''}
+                              onChange={(e) => updateDraftItem(idx, { unit: e.target.value || 'un' })}
+                            />
+                          </td>
+                          <td className="px-2 py-1 text-right">
+                            <button
+                              type="button"
+                              onClick={() => removeDraftItem(idx)}
+                              className="text-red-500 p-1 hover:bg-red-50 rounded"
+                              title="Remover item"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <button
+                  type="button"
+                  onClick={addDraftItem}
+                  className="inline-flex items-center gap-2 text-xs font-bold text-secondary hover:underline"
+                >
+                  <Plus size={14} />
+                  Adicionar item
+                </button>
+              </div>
             )}
           </div>
         </>

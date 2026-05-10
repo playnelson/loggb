@@ -38,6 +38,7 @@ interface OrderRow {
   oc_number: string | null;
   title: string | null;
   vendor_name: string | null;
+  vendor_contact_name?: string | null;
   delivery_deadline: string | null;
   stage?: string | null;
   created_at: string;
@@ -137,6 +138,7 @@ export default function OrdensCompraPage() {
           oc_number: o.oc_number,
           title: o.title,
           vendor_name: o.vendor_name,
+          vendor_contact_name: o.vendor_contact_name || null,
           delivery_deadline: o.delivery_deadline,
           stage: o.archived ? 'arquivada' : null,
           created_at: o.created_at,
@@ -161,7 +163,7 @@ export default function OrdensCompraPage() {
     const withStage = await supabase
       .from('purchase_orders')
       .select(
-        'id, oc_number, title, vendor_name, delivery_deadline, stage, created_at, purchase_order_items!purchase_order_items_purchase_order_id_fkey(id, delivered, description)'
+        'id, oc_number, title, vendor_name, vendor_contact_name, delivery_deadline, stage, created_at, purchase_order_items!purchase_order_items_purchase_order_id_fkey(id, delivered, description)'
       )
       .eq('user_id', user.id)
       .order('created_at', { ascending: false });
@@ -179,7 +181,7 @@ export default function OrdensCompraPage() {
       const noStage = await supabase
         .from('purchase_orders')
         .select(
-          'id, oc_number, title, vendor_name, delivery_deadline, created_at, purchase_order_items!purchase_order_items_purchase_order_id_fkey(id, delivered, description)'
+          'id, oc_number, title, vendor_name, vendor_contact_name, delivery_deadline, created_at, purchase_order_items!purchase_order_items_purchase_order_id_fkey(id, delivered, description)'
         )
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
@@ -245,6 +247,11 @@ export default function OrdensCompraPage() {
       return hay.includes(searchLower);
     });
   }, [orders, searchLower, filterPending, statusFilter, deadlineFilter]);
+
+  const archivedCount = useMemo(
+    () => orders.filter((o) => isOrderArchived(o)).length,
+    [orders]
+  );
 
   const archiveOrder = async (row: OrderRow, archive: boolean) => {
     if (busyOrderId) return;
@@ -424,9 +431,9 @@ export default function OrdensCompraPage() {
         const row: DevLocalPurchaseOrder = {
           id: newId,
           oc_number: draft.oc_number?.trim() || null,
-          title: sourceFilename?.trim()
-            ? titleFromSourceFilename(sourceFilename)
-            : draft.title?.trim() || null,
+          title:
+            draft.title?.trim() ||
+            (sourceFilename?.trim() ? titleFromSourceFilename(sourceFilename) : null),
           vendor_name: draft.vendor_name?.trim() || null,
           buyer_code: draft.buyer_code?.trim() || null,
           buyer_name: draft.buyer_name?.trim() || null,
@@ -454,9 +461,9 @@ export default function OrdensCompraPage() {
         // Mantem comprador/fornecedor acessiveis no detalhe mesmo em schemas reduzidos.
         user_id: user.id,
         oc_number: draft.oc_number?.trim() || null,
-        title: sourceFilename?.trim()
-          ? titleFromSourceFilename(sourceFilename)
-          : draft.title?.trim() || null,
+        title:
+          draft.title?.trim() ||
+          (sourceFilename?.trim() ? titleFromSourceFilename(sourceFilename) : null),
         vendor_name: draft.vendor_name?.trim() || null,
         vendor_contact_name: draft.vendor_contact_name?.trim() || null,
         notes:
@@ -666,6 +673,28 @@ export default function OrdensCompraPage() {
         )}
       </div>
 
+      <div className="bg-white rounded-xl border border-border shadow-sm p-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-black uppercase text-slate-400">Consulta</p>
+            <p className="text-sm font-bold text-primary">
+              Arquivadas: {archivedCount}
+            </p>
+            <p className="text-xs text-slate-500">
+              Use este atalho para consultar apenas lançamentos arquivados.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setStatusFilter('archived')}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg border border-slate-200 text-sm font-bold text-slate-700 hover:bg-slate-50"
+          >
+            <Archive size={16} />
+            Ver arquivadas
+          </button>
+        </div>
+      </div>
+
       <div className="bg-white rounded-xl border border-border shadow-sm overflow-hidden">
         {loading ? (
           <div className="p-12 flex justify-center text-slate-400">
@@ -682,6 +711,7 @@ export default function OrdensCompraPage() {
                 <tr className="bg-slate-50 border-b border-slate-100 text-left text-[10px] font-black uppercase text-slate-500">
                   <th className="px-4 py-3">OC</th>
                   <th className="px-4 py-3">Fornecedor / título</th>
+                  <th className="px-4 py-3">Vendedor/contato</th>
                   <th className="px-4 py-3">Prazo</th>
                   <th className="px-4 py-3">Entrega</th>
                   <th className="px-4 py-3">Status</th>
@@ -711,6 +741,11 @@ export default function OrdensCompraPage() {
                         <div className="font-medium text-primary truncate max-w-[240px] sm:max-w-md">
                           {o.title || o.vendor_name || 'Sem título'}
                         </div>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600 min-w-[180px]">
+                        <span className="text-xs font-medium">
+                          {o.vendor_contact_name || '—'}
+                        </span>
                       </td>
                       <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
                         <div className="font-medium text-primary">{formatDateBR(o.delivery_deadline)}</div>
@@ -841,25 +876,14 @@ export default function OrdensCompraPage() {
                 <label className="block text-xs font-bold text-slate-600">
                   Título (nome do arquivo)
                   <input
-                    className={`mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 text-sm ${
-                      sourceFilename ? 'bg-slate-50 text-slate-700' : ''
-                    }`}
-                    readOnly={Boolean(sourceFilename)}
-                    value={
-                      sourceFilename
-                        ? titleFromSourceFilename(sourceFilename) || ''
-                        : draft.title || ''
-                    }
-                    onChange={
-                      sourceFilename
-                        ? undefined
-                        : (e) => setDraft((d) => ({ ...d, title: e.target.value || null }))
-                    }
+                    className="mt-1 w-full px-3 py-2 rounded-lg border border-slate-200 text-sm"
+                    value={draft.title || ''}
+                    onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value || null }))}
                   />
                 </label>
                 {sourceFilename ? (
                   <p className="md:col-span-2 text-[10px] text-slate-500 -mt-2">
-                    O título segue o arquivo importado e não pode ser alterado aqui.
+                    Título sugerido automaticamente pelo arquivo importado; você pode editar se quiser.
                   </p>
                 ) : null}
                 <label className="block text-xs font-bold text-slate-600">
