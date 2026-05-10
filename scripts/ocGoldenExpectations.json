@@ -1,0 +1,16 @@
+{
+  "defaults": {
+    "minItems": 1,
+    "requireVendor": true,
+    "requireDeliveryDate": true,
+    "maxMissingQtyRatio": 0.45,
+    "maxMissingUnitRatio": 0.45,
+    "disallowLowConfidence": true
+  },
+  "files": {
+    "OC 8471 - SOMATEX.pdf": { "minItems": 16, "vendorIncludes": "SOMATEX", "requireDeliveryDate": true },
+    "OC 10450 - ARTE E SABER - MACAU.pdf": { "minItems": 12, "vendorIncludes": "ARTE E SABER", "requireDeliveryDate": true },
+    "OC 9721_MADEIREIRA AMORIN.pdf": { "minItems": 3, "vendorIncludes": "MADEIREIRA AMORIM", "requireDeliveryDate": true },
+    "OC 8478 - ARTE E SABER - MACAU.pdf": { "disallowLowConfidence": false }
+  }
+}

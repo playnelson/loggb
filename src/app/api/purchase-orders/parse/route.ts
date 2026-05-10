@@ -4,7 +4,7 @@ import {
   parsePurchaseOrderWarnings,
   extractItemsFromPositionedItems,
   refineParsedItems,
-  scoreParsedItemsQuality,
+  selectBestParsedItems,
   type ParsedPurchaseOrder,
   type PositionedTextItem,
 } from '@/lib/purchaseOrderParse';
@@ -122,58 +122,33 @@ export async function POST(req: Request) {
       pdf2jsonItems = [];
     }
 
-    const baselineCandidates = [
+    const selected = selectBestParsedItems([
       { source: 'text', items: textItems },
       { source: 'pdfparse', items: positionedItems },
-    ].filter((c) => c.items.length > 0);
+      { source: 'pdf2json', items: pdf2jsonItems },
+    ]);
 
-    if (baselineCandidates.length > 0) {
-      let best = baselineCandidates[0];
-      let bestScore = scoreParsedItemsQuality(best.items);
-
-      for (const c of baselineCandidates.slice(1)) {
-        const score = scoreParsedItemsQuality(c.items);
-        const strictBetter = score < bestScore;
-        const tieWithMoreItems = score === bestScore && c.items.length > best.items.length;
-        if (strictBetter || tieWithMoreItems) {
-          best = c;
-          bestScore = score;
-        }
-      }
-
-      // pdf2json entra como "resgate": só assume quando melhora de fato
-      // sem explodir artificialmente a contagem de itens.
-      if (pdf2jsonItems.length > 0) {
-        const scorePdf2json = scoreParsedItemsQuality(pdf2jsonItems);
-        const maxAllowedByCoverage = Math.max(
-          best.items.length + 6,
-          Math.ceil(best.items.length * 2)
-        );
-        const moderateCoverage =
-          pdf2jsonItems.length >= Math.max(1, best.items.length - 1) &&
-          pdf2jsonItems.length <= maxAllowedByCoverage;
-        const betterQuality = scorePdf2json < bestScore;
-        const sameQualitySmallGain =
-          scorePdf2json === bestScore &&
-          pdf2jsonItems.length > best.items.length &&
-          pdf2jsonItems.length <= best.items.length + 3;
-        const highCoverageNearQuality =
-          scorePdf2json <= bestScore + 1 &&
-          pdf2jsonItems.length >= best.items.length + 3;
-        if (moderateCoverage && (betterQuality || sameQualitySmallGain || highCoverageNearQuality)) {
-          best = { source: 'pdf2json', items: pdf2jsonItems };
-        }
-      }
-
-      parsed.items = best.items;
+    if (selected) {
+      parsed.items = selected.items;
     }
 
     const warnings = parsePurchaseOrderWarnings(parsed);
+    if (selected?.confidence === 'low') {
+      warnings.unshift(
+        'Leitura parcial detectada: confira fornecedor, data e todos os itens antes de salvar.'
+      );
+    }
 
     return Response.json({
       parsed,
       warnings,
-      meta: { filename: name, textLength: rawText.length },
+      meta: {
+        filename: name,
+        textLength: rawText.length,
+        selected_source: selected?.source ?? 'none',
+        parse_confidence: selected?.confidence ?? 'low',
+        diagnostics: selected?.diagnostics ?? null,
+      },
       rawText,
     });
   } catch (e) {

@@ -193,6 +193,167 @@ export function scoreParsedItemsQuality(items: ParsedPurchaseOrderItem[]): numbe
   );
 }
 
+export interface ParsedItemsDiagnostics {
+  itemCount: number;
+  missingQty: number;
+  missingUnit: number;
+  longDesc: number;
+  groupedSuspicion: number;
+  duplicateLineNumbers: number;
+  nonMonotonicLineNumbers: number;
+  repeatedDescriptionPatterns: number;
+  largeLineJumps: number;
+  qualityScore: number;
+}
+
+export type ParsedItemsConfidence = 'high' | 'medium' | 'low';
+
+export function analyzeParsedItems(items: ParsedPurchaseOrderItem[]): ParsedItemsDiagnostics {
+  const sorted = [...items].sort((a, b) => a.line_number - b.line_number);
+  const missingQty = sorted.filter((i) => i.quantity == null).length;
+  const missingUnit = sorted.filter((i) => !(i.unit && String(i.unit).trim())).length;
+  const longDesc = sorted.filter((i) => i.description.length > 120).length;
+  const groupedSuspicion = sorted.filter((i) => isLikelyGroupedDescription(i.description)).length;
+
+  const seen = new Set<number>();
+  let duplicateLineNumbers = 0;
+  for (const i of sorted) {
+    if (seen.has(i.line_number)) duplicateLineNumbers += 1;
+    seen.add(i.line_number);
+  }
+
+  let nonMonotonicLineNumbers = 0;
+  let largeLineJumps = 0;
+  for (let i = 1; i < sorted.length; i++) {
+    const diff = sorted[i].line_number - sorted[i - 1].line_number;
+    if (diff < 0) nonMonotonicLineNumbers += 1;
+    if (diff > 3) largeLineJumps += 1;
+  }
+
+  const repeatedDescriptionPatterns = sorted.filter((i) =>
+    /\b((?:[A-Za-zÀ-ÿ0-9"/.-]+\s+){2,6}[A-Za-zÀ-ÿ0-9"/.-]+)\s+\1\b/i.test(
+      normalizeDescriptionText(i.description)
+    )
+  ).length;
+
+  const qualityScore = scoreParsedItemsQuality(sorted);
+  return {
+    itemCount: sorted.length,
+    missingQty,
+    missingUnit,
+    longDesc,
+    groupedSuspicion,
+    duplicateLineNumbers,
+    nonMonotonicLineNumbers,
+    repeatedDescriptionPatterns,
+    largeLineJumps,
+    qualityScore,
+  };
+}
+
+export function parsedItemsConfidence(
+  diagnostics: ParsedItemsDiagnostics
+): ParsedItemsConfidence {
+  if (
+    diagnostics.itemCount === 0 ||
+    diagnostics.duplicateLineNumbers > 0 ||
+    diagnostics.nonMonotonicLineNumbers > 0
+  ) {
+    return 'low';
+  }
+
+  const missingUnitRatio =
+    diagnostics.itemCount > 0 ? diagnostics.missingUnit / diagnostics.itemCount : 1;
+  if (
+    diagnostics.groupedSuspicion > 0 ||
+    diagnostics.repeatedDescriptionPatterns > 0 ||
+    missingUnitRatio > 0.3 ||
+    diagnostics.largeLineJumps > 2
+  ) {
+    return 'low';
+  }
+
+  if (
+    diagnostics.missingQty > 0 ||
+    diagnostics.missingUnit > 0 ||
+    diagnostics.longDesc > 0 ||
+    diagnostics.largeLineJumps > 0
+  ) {
+    return 'medium';
+  }
+
+  return 'high';
+}
+
+export interface ParsedItemsCandidate {
+  source: string;
+  items: ParsedPurchaseOrderItem[];
+}
+
+export interface SelectedParsedItems {
+  source: string;
+  items: ParsedPurchaseOrderItem[];
+  diagnostics: ParsedItemsDiagnostics;
+  confidence: ParsedItemsConfidence;
+}
+
+export function selectBestParsedItems(
+  candidates: ParsedItemsCandidate[]
+): SelectedParsedItems | null {
+  const nonEmpty = candidates.filter((c) => c.items.length > 0);
+  if (!nonEmpty.length) return null;
+
+  const counts = nonEmpty.map((c) => c.items.length).sort((a, b) => a - b);
+  const medianCount = counts[Math.floor(counts.length / 2)] || counts[0] || 1;
+  const maxCountByConsensus = Math.max(medianCount + 8, Math.ceil(medianCount * 2));
+
+  const withDiag = nonEmpty.map((c) => {
+    const diagnostics = analyzeParsedItems(c.items);
+    const confidence = parsedItemsConfidence(diagnostics);
+    const missingQtyRatio =
+      diagnostics.itemCount > 0 ? diagnostics.missingQty / diagnostics.itemCount : 1;
+    const missingUnitRatio =
+      diagnostics.itemCount > 0 ? diagnostics.missingUnit / diagnostics.itemCount : 1;
+    const coverageValid = diagnostics.itemCount <= maxCountByConsensus;
+    const contractValid =
+      diagnostics.itemCount > 0 &&
+      coverageValid &&
+      diagnostics.duplicateLineNumbers === 0 &&
+      diagnostics.nonMonotonicLineNumbers === 0 &&
+      missingQtyRatio <= 0.45 &&
+      missingUnitRatio <= 0.45;
+    return { ...c, diagnostics, confidence, contractValid };
+  });
+
+  const validPool = withDiag.some((c) => c.contractValid)
+    ? withDiag.filter((c) => c.contractValid)
+    : withDiag;
+
+  let best = validPool[0];
+  for (const c of validPool.slice(1)) {
+    const strictBetter = c.diagnostics.qualityScore < best.diagnostics.qualityScore;
+    const tieWithMoreItems =
+      c.diagnostics.qualityScore === best.diagnostics.qualityScore &&
+      c.items.length > best.items.length;
+    const highCoverageNearQuality =
+      c.items.length >= best.items.length + 3 &&
+      c.diagnostics.qualityScore <= best.diagnostics.qualityScore + 1;
+    const controlledCoverage =
+      c.items.length <= Math.max(best.items.length + 6, Math.ceil(best.items.length * 2));
+
+    if (strictBetter || tieWithMoreItems || (highCoverageNearQuality && controlledCoverage)) {
+      best = c;
+    }
+  }
+
+  return {
+    source: best.source,
+    items: best.items,
+    diagnostics: best.diagnostics,
+    confidence: best.confidence,
+  };
+}
+
 /**
  * Dado o conjunto de tokens de texto com suas posições X/Y,
  * reconstrói a tabela de itens da OC identificando as colunas
@@ -530,6 +691,22 @@ function extractBuyer(text: string): { code: string | null; name: string | null 
 
 /** Somente data de entrega no PDF (vários layouts de extração). */
 function extractDeliveryDeadline(text: string): string | null {
+  const direct = text.match(
+    /Data\s*Entrega\s*[:\s]*([\d]{2}\/[\d]{2}\/[\d]{4})/i
+  );
+  if (direct?.[1]) {
+    const parsed = parseBrDate(direct[1]);
+    if (parsed) return parsed;
+  }
+
+  const compact = text.match(
+    /DataEntrega\s*[:\s]*([\d]{2}\/[\d]{2}\/[\d]{4})/i
+  );
+  if (compact?.[1]) {
+    const parsed = parseBrDate(compact[1]);
+    if (parsed) return parsed;
+  }
+
   const patterns: RegExp[] = [
     /Data\s*Entrega\s*:\s*\n\s*(\d{2}\/\d{2}\/\d{4})/i,
     /Data\s*Entrega\s*:\s*(\d{2}\/\d{2}\/\d{4})/i,
@@ -905,6 +1082,38 @@ function parseVendorBlock(text: string): {
   vendor_phone: string | null;
   vendor_contact_name: string | null;
 } {
+  const fromFornecedorField = (() => {
+    const m = /Fornecedor\s*:/i.exec(text);
+    if (!m?.index && m?.index !== 0) return null;
+    const tail = text.slice(m.index + m[0].length, m.index + m[0].length + 260);
+    let line = normalizeWs(tail)
+      .replace(/^\s*\d+\s+/, '')
+      .trim();
+    if (!line) return null;
+
+    const stops = [
+      /\bCNPJ\b/i,
+      /\bIE\b/i,
+      /\bData\s*Emiss[aã]o\b/i,
+      /\bData\s*Entrega\b/i,
+      /\bData\s*Necessidade\b/i,
+      /\bEndere[cç]o\b/i,
+      /\bA\/C\b/i,
+      /\bTelefone\b/i,
+      /\bEmail\b/i,
+      /\bCond\.\s*Pagto\b/i,
+      /\bTipo\s*Pagto\b/i,
+    ];
+    let cut = line.length;
+    for (const re of stops) {
+      const sm = re.exec(line);
+      if (sm?.index != null && sm.index >= 0) cut = Math.min(cut, sm.index);
+    }
+    line = line.slice(0, cut).trim();
+    if (!line || line.length < 3) return null;
+    return line;
+  })();
+
   const norm = text.replace(/\t/g, ' ');
   const idx = findGridMarkerIndex(norm);
   if (idx < 0) {
@@ -937,6 +1146,11 @@ function parseVendorBlock(text: string): {
       if (m) contact = normalizeWs(m[1]);
       continue;
     }
+    if (/^A\/C\s*:/i.test(ln)) {
+      const name = normalizeWs(ln.replace(/^A\/C\s*:/i, ''));
+      if (name) contact = name;
+      continue;
+    }
     if (PHONE_LINE.test(ln) || GARBLED_PHONE.test(ln)) {
       phones.push(ln);
       continue;
@@ -957,6 +1171,7 @@ function parseVendorBlock(text: string): {
     (n) => /^[A-ZÀ-Ú0-9][A-ZÀ-Ú0-9 .'&-]{2,60}$/i.test(n) && !/\d{5,}/.test(n)
   );
   vendor_name =
+    fromFornecedorField ||
     withSuffix ||
     looksLikeShortCompany[0] ||
     (scored.length ? scored.find((n) => !/^\d+[\s-]/.test(n)) || scored[0] : null);

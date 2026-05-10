@@ -2,11 +2,15 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import {
+  analyzeParsedItems,
   extractItemsFromPositionedItems,
   parsePurchaseOrderFromText,
   parsePurchaseOrderWarnings,
   refineParsedItems,
+  selectBestParsedItems,
   scoreParsedItemsQuality,
+  type ParsedItemsConfidence,
+  type ParsedItemsDiagnostics,
   type ParsedPurchaseOrder,
   type PositionedTextItem,
 } from '../src/lib/purchaseOrderParse';
@@ -29,12 +33,12 @@ interface FileReport {
   issueExamples: string[];
   warnings: string[];
   mode: 'text' | 'pdfparse' | 'pdf2json';
+  confidence: ParsedItemsConfidence;
+  diagnostics: ParsedItemsDiagnostics;
   scoreText: number;
   scorePositioned: number;
   scorePdf2json: number;
 }
-
-type CandidateMode = 'text' | 'pdfparse' | 'pdf2json';
 
 function countDuplicateLineNumbers(parsed: ParsedPurchaseOrder): number {
   const seen = new Set<number>();
@@ -141,57 +145,32 @@ async function run() {
     const scorePositioned = scoreParsedItemsQuality(both.positionedPdfParse.items);
     const scorePdf2json = scoreParsedItemsQuality(both.positionedPdf2json.items);
 
-    const baselineCandidates: {
-      mode: 'text' | 'pdfparse';
-      parsed: ParsedPurchaseOrder;
-      score: number;
-    }[] = [
-      { mode: 'text', parsed: both.textBased, score: scoreText },
-      { mode: 'pdfparse', parsed: both.positionedPdfParse, score: scorePositioned },
-    ];
+    const selected = selectBestParsedItems([
+      { source: 'text', items: both.textBased.items },
+      { source: 'pdfparse', items: both.positionedPdfParse.items },
+      { source: 'pdf2json', items: both.positionedPdf2json.items },
+    ]);
+    if (!selected) continue;
 
-    let best: {
-      mode: CandidateMode;
-      parsed: ParsedPurchaseOrder;
-      score: number;
-    } = baselineCandidates[0];
-    for (const c of baselineCandidates.slice(1)) {
-      const strictBetter = c.score < best.score;
-      const tieWithMoreItems =
-        c.score === best.score && c.parsed.items.length > best.parsed.items.length;
-      if (strictBetter || tieWithMoreItems) best = c;
-    }
-
-    const maxAllowedByCoverage = Math.max(
-      best.parsed.items.length + 6,
-      Math.ceil(best.parsed.items.length * 2)
-    );
-    const moderateCoverage =
-      both.positionedPdf2json.items.length >= Math.max(1, best.parsed.items.length - 1) &&
-      both.positionedPdf2json.items.length <= maxAllowedByCoverage;
-    const betterQuality = scorePdf2json < best.score;
-    const sameQualitySmallGain =
-      scorePdf2json === best.score &&
-      both.positionedPdf2json.items.length > best.parsed.items.length &&
-      both.positionedPdf2json.items.length <= best.parsed.items.length + 3;
-    const highCoverageNearQuality =
-      scorePdf2json <= best.score + 1 &&
-      both.positionedPdf2json.items.length >= best.parsed.items.length + 3;
-    if (moderateCoverage && (betterQuality || sameQualitySmallGain || highCoverageNearQuality)) {
-      best = {
-        mode: 'pdf2json',
-        parsed: both.positionedPdf2json,
-        score: scorePdf2json,
-      };
-    }
-
-    const mode = best.mode;
-    const parsed = best.parsed;
+    const mode = selected.source as 'text' | 'pdfparse' | 'pdf2json';
+    const parsed: ParsedPurchaseOrder =
+      mode === 'text'
+        ? both.textBased
+        : mode === 'pdfparse'
+          ? both.positionedPdfParse
+          : both.positionedPdf2json;
+    parsed.items = selected.items;
     const warnings = parsePurchaseOrderWarnings(parsed);
+    if (selected.confidence === 'low') {
+      warnings.unshift(
+        'Leitura parcial detectada: confira fornecedor, data e todos os itens antes de salvar.'
+      );
+    }
     const missingQty = parsed.items.filter((i) => i.quantity == null).length;
     const missingUnit = parsed.items.filter((i) => !(i.unit && String(i.unit).trim())).length;
     const suspiciousLongDescriptions = parsed.items.filter((i) => i.description.length > 120).length;
     const duplicateLineNumbers = countDuplicateLineNumbers(parsed);
+    const diagnostics = analyzeParsedItems(parsed.items);
     const issueExamples = parsed.items
       .filter(
         (i) =>
@@ -218,6 +197,8 @@ async function run() {
       issueExamples,
       warnings,
       mode,
+      confidence: selected.confidence,
+      diagnostics,
       scoreText,
       scorePositioned,
       scorePdf2json,

@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "oc:scan": "tsx scripts/scanOcModels.ts"
+    "oc:scan": "tsx scripts/scanOcModels.ts",
+    "oc:verify": "tsx scripts/verifyOcGolden.ts"
   },
   "dependencies": {
     "@supabase/auth-helpers-nextjs": "^0.15.0",

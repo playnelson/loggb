@@ -117,6 +117,7 @@ export default function OrdensCompraPage() {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [draft, setDraft] = useState<ParsedPurchaseOrder>(() => emptyDraft());
   const [sourceFilename, setSourceFilename] = useState<string | null>(null);
+  const [parseConfidence, setParseConfidence] = useState<'high' | 'medium' | 'low'>('high');
   const [busyOrderId, setBusyOrderId] = useState<string | null>(null);
 
   const fetchOrders = useCallback(async () => {
@@ -322,6 +323,7 @@ export default function OrdensCompraPage() {
     setSourceFilename(null);
     setWarnings([]);
     setParseError(null);
+    setParseConfidence('high');
     setImportOpen(true);
   };
 
@@ -343,6 +345,8 @@ export default function OrdensCompraPage() {
       setDraft(json.parsed as ParsedPurchaseOrder);
       setWarnings((json.warnings as string[]) || []);
       setSourceFilename(file.name);
+      const conf = (json.meta?.parse_confidence || 'high') as 'high' | 'medium' | 'low';
+      setParseConfidence(conf);
       setImportOpen(true);
     } catch (e) {
       setParseError(e instanceof Error ? e.message : 'Erro de rede.');
@@ -382,6 +386,12 @@ export default function OrdensCompraPage() {
   };
 
   const saveDraft = async () => {
+    if (parseConfidence === 'low') {
+      const proceed = window.confirm(
+        'A leitura deste PDF está com confiança baixa. Confirme fornecedor, data de entrega e todos os itens antes de salvar. Deseja continuar mesmo assim?'
+      );
+      if (!proceed) return;
+    }
     setSaveLoading(true);
     setParseError(null);
     try {
