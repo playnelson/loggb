@@ -8,6 +8,7 @@ import {
   type ParsedPurchaseOrder,
   type PositionedTextItem,
 } from '@/lib/purchaseOrderParse';
+import { extractPositionedTextFromPdf2Json } from '@/lib/pdf2jsonPositioned';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
 
 export const runtime = 'nodejs';
@@ -109,15 +110,59 @@ export async function POST(req: Request) {
     const parsed: ParsedPurchaseOrder = parsePurchaseOrderFromText(rawText, name);
     const textItems = refineParsedItems(parsed.items);
 
-    // Substitui itens pela extração posicional (muito mais precisa para tabelas)
+    // Candidatos de itens:
+    // 1) textual, 2) posicional via pdf-parse, 3) posicional via pdf2json.
     const positionedItems = refineParsedItems(extractItemsFromPositionedItems(allPositioned));
-    if (positionedItems.length > 0 || textItems.length > 0) {
-      const scoreText = scoreParsedItemsQuality(textItems);
-      const scorePositioned =
-        positionedItems.length > 0
-          ? scoreParsedItemsQuality(positionedItems)
-          : Number.POSITIVE_INFINITY;
-      parsed.items = scorePositioned <= scoreText ? positionedItems : textItems;
+    let pdf2jsonItems: typeof positionedItems = [];
+    try {
+      const altPositioned = await extractPositionedTextFromPdf2Json(buf);
+      pdf2jsonItems = refineParsedItems(extractItemsFromPositionedItems(altPositioned));
+    } catch {
+      // Se pdf2json falhar em algum arquivo, segue com os demais candidatos.
+      pdf2jsonItems = [];
+    }
+
+    const baselineCandidates = [
+      { source: 'text', items: textItems },
+      { source: 'pdfparse', items: positionedItems },
+    ].filter((c) => c.items.length > 0);
+
+    if (baselineCandidates.length > 0) {
+      let best = baselineCandidates[0];
+      let bestScore = scoreParsedItemsQuality(best.items);
+
+      for (const c of baselineCandidates.slice(1)) {
+        const score = scoreParsedItemsQuality(c.items);
+        const strictBetter = score < bestScore;
+        const tieWithMoreItems = score === bestScore && c.items.length > best.items.length;
+        if (strictBetter || tieWithMoreItems) {
+          best = c;
+          bestScore = score;
+        }
+      }
+
+      // pdf2json entra como "resgate": só assume quando melhora de fato
+      // sem explodir artificialmente a contagem de itens.
+      if (pdf2jsonItems.length > 0) {
+        const scorePdf2json = scoreParsedItemsQuality(pdf2jsonItems);
+        const maxAllowedByCoverage = Math.max(
+          best.items.length + 3,
+          Math.ceil(best.items.length * 1.5)
+        );
+        const moderateCoverage =
+          pdf2jsonItems.length >= Math.max(1, best.items.length - 1) &&
+          pdf2jsonItems.length <= maxAllowedByCoverage;
+        const betterQuality = scorePdf2json < bestScore;
+        const sameQualitySmallGain =
+          scorePdf2json === bestScore &&
+          pdf2jsonItems.length > best.items.length &&
+          pdf2jsonItems.length <= best.items.length + 3;
+        if (moderateCoverage && (betterQuality || sameQualitySmallGain)) {
+          best = { source: 'pdf2json', items: pdf2jsonItems };
+        }
+      }
+
+      parsed.items = best.items;
     }
 
     const warnings = parsePurchaseOrderWarnings(parsed);

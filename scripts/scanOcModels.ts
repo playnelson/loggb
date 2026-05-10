@@ -10,6 +10,7 @@ import {
   type ParsedPurchaseOrder,
   type PositionedTextItem,
 } from '../src/lib/purchaseOrderParse';
+import { extractPositionedTextFromPdf2Json } from '../src/lib/pdf2jsonPositioned';
 
 const requirePdf = createRequire(import.meta.url);
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -27,10 +28,13 @@ interface FileReport {
   duplicateLineNumbers: number;
   issueExamples: string[];
   warnings: string[];
-  mode: 'text' | 'positioned';
+  mode: 'text' | 'pdfparse' | 'pdf2json';
   scoreText: number;
   scorePositioned: number;
+  scorePdf2json: number;
 }
+
+type CandidateMode = 'text' | 'pdfparse' | 'pdf2json';
 
 function countDuplicateLineNumbers(parsed: ParsedPurchaseOrder): number {
   const seen = new Set<number>();
@@ -44,7 +48,8 @@ function countDuplicateLineNumbers(parsed: ParsedPurchaseOrder): number {
 
 async function parsePdfWithPositions(filePath: string): Promise<{
   textBased: ParsedPurchaseOrder;
-  positioned: ParsedPurchaseOrder;
+  positionedPdfParse: ParsedPurchaseOrder;
+  positionedPdf2json: ParsedPurchaseOrder;
 }> {
   const allPositioned: PositionedTextItem[] = [];
   let cumulativeHeight = 0;
@@ -94,13 +99,26 @@ async function parsePdfWithPositions(filePath: string): Promise<{
   const buf = await fs.readFile(filePath);
   const pdfResult = await pdfParse(buf, { pagerender: renderPage });
   const parsed = parsePurchaseOrderFromText(pdfResult.text, path.basename(filePath));
-  const positioned = {
+  const positionedPdfParse = {
     ...parsed,
     items: refineParsedItems([...parsed.items]),
   };
   const positionedItems = extractItemsFromPositionedItems(allPositioned);
-  if (positionedItems.length > 0) positioned.items = refineParsedItems(positionedItems);
-  return { textBased: parsed, positioned };
+  if (positionedItems.length > 0) positionedPdfParse.items = refineParsedItems(positionedItems);
+
+  let pdf2jsonItems: ReturnType<typeof refineParsedItems> = [];
+  try {
+    const altPositioned = await extractPositionedTextFromPdf2Json(buf);
+    pdf2jsonItems = refineParsedItems(extractItemsFromPositionedItems(altPositioned));
+  } catch {
+    pdf2jsonItems = [];
+  }
+  const positionedPdf2json = {
+    ...parsed,
+    items: pdf2jsonItems.length > 0 ? pdf2jsonItems : refineParsedItems([...parsed.items]),
+  };
+
+  return { textBased: parsed, positionedPdfParse, positionedPdf2json };
 }
 
 async function run() {
@@ -120,9 +138,52 @@ async function run() {
   for (const filePath of files) {
     const both = await parsePdfWithPositions(filePath);
     const scoreText = scoreParsedItemsQuality(both.textBased.items);
-    const scorePositioned = scoreParsedItemsQuality(both.positioned.items);
-    const mode = scorePositioned <= scoreText ? 'positioned' : 'text';
-    const parsed = mode === 'positioned' ? both.positioned : both.textBased;
+    const scorePositioned = scoreParsedItemsQuality(both.positionedPdfParse.items);
+    const scorePdf2json = scoreParsedItemsQuality(both.positionedPdf2json.items);
+
+    const baselineCandidates: {
+      mode: 'text' | 'pdfparse';
+      parsed: ParsedPurchaseOrder;
+      score: number;
+    }[] = [
+      { mode: 'text', parsed: both.textBased, score: scoreText },
+      { mode: 'pdfparse', parsed: both.positionedPdfParse, score: scorePositioned },
+    ];
+
+    let best: {
+      mode: CandidateMode;
+      parsed: ParsedPurchaseOrder;
+      score: number;
+    } = baselineCandidates[0];
+    for (const c of baselineCandidates.slice(1)) {
+      const strictBetter = c.score < best.score;
+      const tieWithMoreItems =
+        c.score === best.score && c.parsed.items.length > best.parsed.items.length;
+      if (strictBetter || tieWithMoreItems) best = c;
+    }
+
+    const maxAllowedByCoverage = Math.max(
+      best.parsed.items.length + 3,
+      Math.ceil(best.parsed.items.length * 1.5)
+    );
+    const moderateCoverage =
+      both.positionedPdf2json.items.length >= Math.max(1, best.parsed.items.length - 1) &&
+      both.positionedPdf2json.items.length <= maxAllowedByCoverage;
+    const betterQuality = scorePdf2json < best.score;
+    const sameQualitySmallGain =
+      scorePdf2json === best.score &&
+      both.positionedPdf2json.items.length > best.parsed.items.length &&
+      both.positionedPdf2json.items.length <= best.parsed.items.length + 3;
+    if (moderateCoverage && (betterQuality || sameQualitySmallGain)) {
+      best = {
+        mode: 'pdf2json',
+        parsed: both.positionedPdf2json,
+        score: scorePdf2json,
+      };
+    }
+
+    const mode = best.mode;
+    const parsed = best.parsed;
     const warnings = parsePurchaseOrderWarnings(parsed);
     const missingQty = parsed.items.filter((i) => i.quantity == null).length;
     const missingUnit = parsed.items.filter((i) => !(i.unit && String(i.unit).trim())).length;
@@ -156,6 +217,7 @@ async function run() {
       mode,
       scoreText,
       scorePositioned,
+      scorePdf2json,
     });
   }
 
