@@ -46,6 +46,140 @@ function brNumberToFloat(raw: string): number | null {
   return isFinite(n) ? n : null;
 }
 
+function normalizeForHeuristic(s: string): string {
+  return s
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase();
+}
+
+const GROUP_SPLIT_ANCHORS = [
+  'CHAVE',
+  'FITA',
+  'TESOURA',
+  'ESTILETE',
+  'LENTE',
+  'PERNEIRA',
+  'AVENTAL',
+  'BROCA',
+  'DISCO',
+  'PARAFUSO',
+  'PORCA',
+  'ARRUELA',
+  'ALICATE',
+  'MARTELO',
+  'OXIGENIO',
+  'MASCARA',
+  'LUVA',
+  'REGUA',
+  'MARCA TEXTO',
+];
+
+function isLikelyGroupedDescription(desc: string): boolean {
+  const t = normalizeForHeuristic(desc);
+  if (t.length < 95) return false;
+  let anchorHits = 0;
+  for (const a of GROUP_SPLIT_ANCHORS) {
+    if (new RegExp(`\\b${a}\\b`, 'i').test(t)) anchorHits += 1;
+  }
+  const repeatedCa = t.match(/\bC\.?\s*A[-:\s]?\d{3,6}\b/gi)?.length || 0;
+  const manyEnumerations = t.match(/\b\d+\s*(?:CAIXA|CX|UN|UND|FITA|LENTE|AVENTAL|PERNEIRA)\b/gi)?.length || 0;
+  return anchorHits >= 3 || repeatedCa >= 4 || manyEnumerations >= 2;
+}
+
+function splitGroupedDescription(desc: string): string[] {
+  const normalized = normalizeForHeuristic(desc);
+  const starts = [0];
+  for (const a of GROUP_SPLIT_ANCHORS) {
+    const re = new RegExp(`\\b${a}\\b`, 'gi');
+    for (const m of normalized.matchAll(re)) {
+      const idx = m.index ?? -1;
+      if (idx > 18) starts.push(idx);
+    }
+  }
+  const uniqueStarts = [...new Set(starts)].sort((a, b) => a - b);
+  if (uniqueStarts.length <= 1) return [desc.trim()];
+
+  const parts: string[] = [];
+  for (let i = 0; i < uniqueStarts.length; i++) {
+    const start = uniqueStarts[i];
+    const end = uniqueStarts[i + 1] ?? desc.length;
+    const p = desc.slice(start, end).replace(/\s+/g, ' ').trim();
+    if (p.length >= 10) parts.push(p);
+  }
+  if (parts.length <= 1) return [desc.trim()];
+
+  // Junta fragmentos muito pequenos ao bloco anterior.
+  const merged: string[] = [];
+  for (const p of parts) {
+    if (p.length < 14 && merged.length) {
+      merged[merged.length - 1] = `${merged[merged.length - 1]} ${p}`.trim();
+      continue;
+    }
+    merged.push(p);
+  }
+  return merged.length > 1 ? merged : [desc.trim()];
+}
+
+export function refineParsedItems(
+  items: ParsedPurchaseOrderItem[]
+): ParsedPurchaseOrderItem[] {
+  const penalty = (arr: ParsedPurchaseOrderItem[]) => {
+    const missingQty = arr.filter((i) => i.quantity == null).length;
+    const missingUnit = arr.filter((i) => !(i.unit && String(i.unit).trim())).length;
+    const longDesc = arr.filter((i) => i.description.length > 120).length;
+    const groupedSuspicion = arr.filter((i) => isLikelyGroupedDescription(i.description)).length;
+    const seen = new Set<number>();
+    let duplicates = 0;
+    for (const i of arr) {
+      if (seen.has(i.line_number)) duplicates += 1;
+      seen.add(i.line_number);
+    }
+    return missingQty + missingUnit + longDesc * 2 + groupedSuspicion * 2 + duplicates;
+  };
+
+  if (items.length === 0) return [];
+  const sorted = [...items].sort((a, b) => a.line_number - b.line_number);
+  const last = sorted[sorted.length - 1];
+  if (!last || !isLikelyGroupedDescription(last.description) || sorted.length < 3) return sorted;
+
+  const segments = splitGroupedDescription(last.description);
+  if (segments.length <= 1) return sorted;
+
+  const baseLine = Number.isFinite(last.line_number) ? last.line_number : sorted.length;
+  const replaced = sorted.slice(0, -1);
+  segments.forEach((seg, idx) => {
+    replaced.push({
+      line_number: baseLine + idx,
+      description: seg,
+      quantity: idx === 0 ? last.quantity : null,
+      unit: idx === 0 ? last.unit : null,
+    });
+  });
+  return penalty(replaced) < penalty(sorted) ? replaced : sorted;
+}
+
+export function scoreParsedItemsQuality(items: ParsedPurchaseOrderItem[]): number {
+  const missingQty = items.filter((i) => i.quantity == null).length;
+  const missingUnit = items.filter((i) => !(i.unit && String(i.unit).trim())).length;
+  const longDesc = items.filter((i) => i.description.length > 120).length;
+  const groupedSuspicion = items.filter((i) => isLikelyGroupedDescription(i.description)).length;
+  const seen = new Set<number>();
+  let duplicates = 0;
+  for (const i of items) {
+    if (seen.has(i.line_number)) duplicates += 1;
+    seen.add(i.line_number);
+  }
+  return (
+    missingQty +
+    missingUnit +
+    longDesc +
+    groupedSuspicion * 2 +
+    duplicates +
+    (items.length === 0 ? 10 : 0)
+  );
+}
+
 /**
  * Dado o conjunto de tokens de texto com suas posições X/Y,
  * reconstrói a tabela de itens da OC identificando as colunas
@@ -56,7 +190,7 @@ export function extractItemsFromPositionedItems(
 ): ParsedPurchaseOrderItem[] {
   if (items.length === 0) return [];
 
-  const Y_TOL = 4;
+  const Y_TOL = 3;
   const X_TOL = 30;
 
   const normalizeKey = (s: string) =>
@@ -94,6 +228,21 @@ export function extractItemsFromPositionedItems(
   const parseItemNumber = (s: string) => parseInt(s.trim().replace(/[.)-]+$/, ''), 10);
 
   const isQtyToken = (s: string) => brNumberToFloat(s) != null;
+  const looksLikeSpillover = (s: string) => {
+    if (!s) return false;
+    const t = s.trim();
+    if (!t) return false;
+    if (/\b\d+\s*-\s*(CAIXA|CX|UN|UND|FITA|LENTE|AVENTAL|PERNEIRA)\b/i.test(t)) return true;
+    const caHits = t.match(/\bC\.?\s*A[-:\s]?\d{3,6}\b/gi)?.length || 0;
+    if (caHits >= 3) return true;
+    if (
+      t.length > 90 &&
+      /\b(MODELO|INDUSTRIA|DEWALT|ESAB|HANDYGAS|OXIGENIO|OXIGÊNIO)\b/i.test(t)
+    ) {
+      return true;
+    }
+    return false;
+  };
 
   // Agrupa por linhas (Y).
   const rowMap = new Map<number, { x: number; text: string }[]>();
@@ -185,7 +334,20 @@ export function extractItemsFromPositionedItems(
           .filter((c) => c.x < unitX - X_TOL && isItemNumber(c.text))
           .sort((a, b) => a.x - b.x)[0]
       : undefined;
-    const effectiveLineCell = lineCell || fallbackItemCell;
+    let effectiveLineCell = lineCell || fallbackItemCell;
+
+    // Heurística extra: se a linha não bateu coluna ITEM, mas contém um número
+    // plausível de sequência à esquerda, trata como novo item (evita colar muitos
+    // produtos no último item quando o PDF desloca a coluna ITEM).
+    if (!effectiveLineCell && current) {
+      const currentLine = current.line_number;
+      const seqCandidate = row.cells
+        .filter((c) => c.x < unitX - X_TOL && isItemNumber(c.text))
+        .map((c) => ({ cell: c, n: parseItemNumber(c.text) }))
+        .filter((v) => v.n > currentLine && v.n <= currentLine + 3)
+        .sort((a, b) => a.n - b.n)[0];
+      if (seqCandidate) effectiveLineCell = seqCandidate.cell;
+    }
 
     if (!effectiveLineCell) {
       // Continuação de descrição em linha seguinte.
@@ -196,6 +358,8 @@ export function extractItemsFromPositionedItems(
           .join(' ')
           .trim();
         if (continuation) {
+          if (current.description.length > 110) continue;
+          if (looksLikeSpillover(continuation)) continue;
           current.description = `${current.description} ${continuation}`.trim();
         }
       }
@@ -252,12 +416,12 @@ export function extractItemsFromPositionedItems(
       line_number: lineNumber,
       description: desc,
       quantity,
-      unit,
+      unit: unit || (quantity != null ? 'un' : null),
     };
   }
   flush();
 
-  return result.sort((a, b) => a.line_number - b.line_number);
+  return refineParsedItems(result.sort((a, b) => a.line_number - b.line_number));
 }
 
 // ---------------------------------------------------------------------------
@@ -712,7 +876,7 @@ function extractItems(text: string): ParsedPurchaseOrderItem[] {
   flush();
 
   items.sort((a, b) => a.line_number - b.line_number);
-  return items;
+  return refineParsedItems(items);
 }
 
 function parseVendorBlock(text: string): {
@@ -792,7 +956,7 @@ export function parsePurchaseOrderFromText(text: string, sourceFilename: string)
 
   let oc_number = extractOcNumber(normalized) || ocNumberFromFilename(sourceFilename);
 
-  const items = extractItems(normalized);
+  const items = refineParsedItems(extractItems(normalized));
   const title = sourceFilename.trim() ? titleFromSourceFilename(sourceFilename) : null;
 
   const vendorContactMerged =

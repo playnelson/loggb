@@ -3,6 +3,8 @@ import {
   parsePurchaseOrderFromText,
   parsePurchaseOrderWarnings,
   extractItemsFromPositionedItems,
+  refineParsedItems,
+  scoreParsedItemsQuality,
   type ParsedPurchaseOrder,
   type PositionedTextItem,
 } from '@/lib/purchaseOrderParse';
@@ -105,11 +107,17 @@ export async function POST(req: Request) {
 
     // Extrai campos de cabeçalho (comprador, fornecedor, data, nº OC) do texto
     const parsed: ParsedPurchaseOrder = parsePurchaseOrderFromText(rawText, name);
+    const textItems = refineParsedItems(parsed.items);
 
     // Substitui itens pela extração posicional (muito mais precisa para tabelas)
-    const positionedItems = extractItemsFromPositionedItems(allPositioned);
-    if (positionedItems.length > 0) {
-      parsed.items = positionedItems;
+    const positionedItems = refineParsedItems(extractItemsFromPositionedItems(allPositioned));
+    if (positionedItems.length > 0 || textItems.length > 0) {
+      const scoreText = scoreParsedItemsQuality(textItems);
+      const scorePositioned =
+        positionedItems.length > 0
+          ? scoreParsedItemsQuality(positionedItems)
+          : Number.POSITIVE_INFINITY;
+      parsed.items = scorePositioned <= scoreText ? positionedItems : textItems;
     }
 
     const warnings = parsePurchaseOrderWarnings(parsed);
