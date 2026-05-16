@@ -87,7 +87,7 @@ function findHeaderRowAndColumns(worksheet: ExcelJS.Worksheet): {
     const cols: Record<string, number> = {};
     row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
       const normalized = normalizeHeader(getCellText(cell.value));
-      if (!normalized) continue;
+      if (!normalized) return;
       for (const expected of requiredByAlias) {
         if (cols[expected.key] != null) continue;
         if (expected.aliases.some((alias) => normalized.includes(alias))) {
