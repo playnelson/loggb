@@ -1,4 +1,4 @@
-import * as XLSX from 'xlsx-js-style';
+import ExcelJS from 'exceljs';
 
 interface PossessionDetail {
   quantity: number;
@@ -46,55 +46,65 @@ function buildPossessionDetail(possession: PossessionDetail[] | undefined): stri
   return lines.length ? lines.join(' | ') : '—';
 }
 
-function findHeaderRowAndColumns(ws: XLSX.WorkSheet): { headerRow: number; columns: Record<string, number> } {
-  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1:A1');
+function getCellText(value: ExcelJS.CellValue): string {
+  if (value == null) return '';
+  if (typeof value === 'object') {
+    if ('richText' in value && Array.isArray(value.richText)) {
+      return value.richText.map((r) => r.text ?? '').join('');
+    }
+    if ('text' in value && typeof value.text === 'string') {
+      return value.text;
+    }
+    if ('result' in value && value.result != null) {
+      return String(value.result);
+    }
+  }
+  return String(value);
+}
+
+function findHeaderRowAndColumns(worksheet: ExcelJS.Worksheet): {
+  headerRow: number;
+  columns: Record<string, number>;
+} {
   const requiredByAlias: Array<{ key: string; aliases: string[] }> = [
     { key: 'descricao', aliases: ['descricao', 'descricao do item', 'material', 'item'] },
     { key: 'codigo', aliases: ['codigo', 'cod', 'sku'] },
     { key: 'categoria', aliases: ['categoria'] },
     { key: 'local', aliases: ['local', 'localizacao'] },
-    { key: 'unidade', aliases: ['unidade', 'und'] },
+    { key: 'unidade', aliases: ['unidade', 'und', 'unid'] },
     { key: 'consumivel', aliases: ['consumivel'] },
     { key: 'itemUnico', aliases: ['item unico', 'unico'] },
     { key: 'tagCadastro', aliases: ['tag cadastro', 'tag'] },
-    { key: 'estoqueAlmox', aliases: ['estoque almox', 'estoque almoxarifado', 'estoque'] },
+    { key: 'estoqueAlmox', aliases: ['estoq', 'estoque almox', 'estoque almoxarifado', 'estoque'] },
     { key: 'posseDetalhe', aliases: ['em posse detalhe', 'posse detalhe'] },
-    { key: 'posseSoma', aliases: ['em posse soma', 'posse soma', 'em posse'] },
+    { key: 'posseSoma', aliases: ['em pos', 'em posse soma', 'posse soma', 'em posse'] },
     { key: 'minimo', aliases: ['minimo', 'qtd minimo', 'quantidade minima'] },
     { key: 'totalFisico', aliases: ['total fisico', 'total'] },
   ];
 
-  for (let r = range.s.r; r <= range.e.r; r++) {
+  for (let r = 1; r <= worksheet.rowCount; r++) {
+    const row = worksheet.getRow(r);
     const cols: Record<string, number> = {};
-    for (let c = range.s.c; c <= range.e.c; c++) {
-      const addr = XLSX.utils.encode_cell({ r, c });
-      const cell = ws[addr];
-      if (!cell || cell.v == null) continue;
-      const normalized = normalizeHeader(String(cell.v));
+    row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
+      const normalized = normalizeHeader(getCellText(cell.value));
       if (!normalized) continue;
       for (const expected of requiredByAlias) {
         if (cols[expected.key] != null) continue;
         if (expected.aliases.some((alias) => normalized.includes(alias))) {
-          cols[expected.key] = c;
+          cols[expected.key] = colNumber;
         }
       }
-    }
+    });
     if (cols.descricao != null && cols.estoqueAlmox != null) {
       return { headerRow: r, columns: cols };
     }
   }
 
-  throw new Error('Cabecalho do modelo de inventario nao encontrado.');
+  throw new Error('Cabecalho do modelo nao encontrado. Verifique os nomes das colunas no template.');
 }
 
-function setCell(ws: XLSX.WorkSheet, r: number, c: number, value: string | number): void {
-  const addr = XLSX.utils.encode_cell({ r, c });
-  const prev = ws[addr] as XLSX.CellObject | undefined;
-  ws[addr] = {
-    ...(prev?.s ? { s: prev.s } : {}),
-    t: typeof value === 'number' ? 'n' : 's',
-    v: value,
-  };
+function cloneCellStyle(style: Partial<ExcelJS.Style>): Partial<ExcelJS.Style> {
+  return JSON.parse(JSON.stringify(style || {})) as Partial<ExcelJS.Style>;
 }
 
 export async function downloadInventoryWorkbookFromTemplate(items: InventoryExportItem[]): Promise<void> {
@@ -104,13 +114,13 @@ export async function downloadInventoryWorkbookFromTemplate(items: InventoryExpo
   }
 
   const bytes = await response.arrayBuffer();
-  const wb = XLSX.read(bytes, { type: 'array' });
-  const firstSheetName = wb.SheetNames[0];
-  if (!firstSheetName) {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(bytes);
+  const worksheet = workbook.worksheets[0];
+  if (!worksheet) {
     throw new Error('O modelo de inventario nao possui abas.');
   }
-  const ws = wb.Sheets[firstSheetName];
-  const { headerRow, columns } = findHeaderRowAndColumns(ws);
+  const { headerRow, columns } = findHeaderRowAndColumns(worksheet);
 
   const rows = items.map((p) => {
     const posTotal = p.possession?.reduce((acc, curr) => acc + Number(curr.quantity || 0), 0) || 0;
@@ -132,32 +142,55 @@ export async function downloadInventoryWorkbookFromTemplate(items: InventoryExpo
   });
 
   const startDataRow = headerRow + 1;
-  const existingRange = XLSX.utils.decode_range(ws['!ref'] || 'A1:A1');
-  for (let r = startDataRow; r <= existingRange.e.r; r++) {
-    (Object.keys(columns) as Array<keyof typeof rows[number]>).forEach((key) => {
+  const styleSourceRow = worksheet.getRow(startDataRow);
+
+  const existingLastRow = Math.max(worksheet.actualRowCount, startDataRow);
+  for (let r = startDataRow; r <= existingLastRow; r++) {
+    const targetRow = worksheet.getRow(r);
+    (Object.keys(columns) as Array<keyof (typeof rows)[number]>).forEach((key) => {
       const col = columns[key];
       if (col == null) return;
-      setCell(ws, r, col, '');
+      const sourceCell = styleSourceRow.getCell(col);
+      const targetCell = targetRow.getCell(col);
+      targetCell.value = '';
+      targetCell.style = cloneCellStyle(sourceCell.style);
     });
+    if (styleSourceRow.height != null) targetRow.height = styleSourceRow.height;
+    targetRow.commit();
   }
 
   rows.forEach((row, idx) => {
     const r = startDataRow + idx;
+    const targetRow = worksheet.getRow(r);
     (Object.keys(columns) as Array<keyof typeof row>).forEach((key) => {
       const col = columns[key];
       if (col == null) return;
-      setCell(ws, r, col, row[key]);
+      const sourceCell = styleSourceRow.getCell(col);
+      const targetCell = targetRow.getCell(col);
+      targetCell.value = row[key] as string | number;
+      targetCell.style = cloneCellStyle(sourceCell.style);
     });
+    if (styleSourceRow.height != null) targetRow.height = styleSourceRow.height;
+    targetRow.commit();
   });
 
-  const maxColumn = Math.max(existingRange.e.c, ...Object.values(columns));
+  const maxColumn = Math.max(...Object.values(columns));
+  const minColumn = Math.min(...Object.values(columns));
   const lastRow = Math.max(headerRow, startDataRow + rows.length - 1);
-  ws['!ref'] = XLSX.utils.encode_range({
-    s: { r: existingRange.s.r, c: existingRange.s.c },
-    e: { r: lastRow, c: maxColumn },
-  });
-  ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: headerRow, c: 0 }, e: { r: lastRow, c: maxColumn } }) };
+  worksheet.autoFilter = {
+    from: { row: headerRow, column: minColumn },
+    to: { row: lastRow, column: maxColumn },
+  };
 
   const stamp = new Date().toISOString().slice(0, 10);
-  XLSX.writeFile(wb, `inventario_almoxarifado_${stamp}.xlsx`);
+  const out = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([out], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `inventario_almoxarifado_${stamp}.xlsx`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
