@@ -13,6 +13,7 @@ import { itemCodeFromDescription } from '@/lib/itemCode';
 import { recordMovement, updatePossessionQuantity, updateSitePossessionQuantity, updateStock } from '@/lib/movements';
 import { fetchTenantItems, isLikelyMissingColumn } from '@/lib/tenantItems';
 import { downloadInventoryImportTemplate } from '@/lib/inventoryImportTemplate';
+import { downloadInventoryWorkbookFromTemplate } from '@/lib/inventoryExportTemplate';
 import { CatalogProductAutocomplete } from '@/components/CatalogProductAutocomplete';
 
 function possessionEmployeeName(
@@ -84,12 +85,6 @@ interface CartLine {
 }
 
 const FALLBACK_CATEGORIES = ['Ferramenta', 'EPI', 'Tubulação', 'Consumível'] as const;
-
-function escapeCsvCell(value: string): string {
-  const s = String(value ?? '');
-  if (/[;\n\r"]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-  return s;
-}
 
 const emptyItemForm = () => ({
   description: '',
@@ -628,64 +623,17 @@ function InventoryContent() {
   const selectFilterClass =
     'w-full min-w-0 max-w-full text-[11px] font-bold text-primary bg-white border border-slate-200 rounded-md px-1.5 py-1.5 outline-none focus:ring-2 focus:ring-secondary/40';
 
-  const handleDownloadInventory = () => {
+  const handleDownloadInventory = async () => {
     if (products.length === 0) {
       alert('Não há itens para exportar.');
       return;
     }
-    const header = [
-      'Descrição',
-      'Código',
-      'Categoria',
-      'Local',
-      'Unidade',
-      'Consumível',
-      'Item único',
-      'TAG (cadastro)',
-      'Estoque almox.',
-      'Em posse (detalhe)',
-      'Em posse (soma)',
-      'Mínimo',
-      'Total físico',
-    ];
-    const lines = [header.map(escapeCsvCell).join(';')];
-    for (const p of products) {
-      const posTotal = p.possession?.reduce((acc, curr) => acc + curr.quantity, 0) || 0;
-      const posDetail =
-        (p.possession || [])
-          .filter((pos) => pos.quantity > 0)
-          .map((pos) => {
-            const name = possessionEmployeeName(pos.employees) || '—';
-            return `${name}: ${pos.quantity}`;
-          })
-          .join(' | ') || '—';
-      const row = [
-        p.description,
-        p.code ?? '',
-        p.category,
-        p.location ?? '',
-        p.unit,
-        p.consumable ? 'Sim' : 'Não',
-        p.unique_item ? 'Sim' : 'Não',
-        p.tag ?? '',
-        String(p.quantity_current),
-        posDetail,
-        String(posTotal),
-        String(p.quantity_min),
-        String(p.quantity_current + posTotal),
-      ];
-      lines.push(row.map(escapeCsvCell).join(';'));
+    try {
+      await downloadInventoryWorkbookFromTemplate(products);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Falha ao gerar planilha de inventário.';
+      alert(message);
     }
-    const bom = '\uFEFF';
-    const csv = bom + lines.join('\r\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    const stamp = new Date().toISOString().slice(0, 10);
-    a.download = `inventario_almoxarifado_${stamp}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
   };
 
   const cartPickedItem = products.find((p) => p.id === cartPickItemId) || null;
@@ -939,10 +887,10 @@ function InventoryContent() {
           </button>
           <button
             type="button"
-            onClick={handleDownloadInventory}
+            onClick={() => void handleDownloadInventory()}
             disabled={loading || products.length === 0}
             className="flex w-full md:w-auto items-center justify-center gap-2 bg-white text-primary border border-slate-200 px-3 py-3 md:px-4 md:py-2 rounded-lg hover:bg-slate-50 transition-all font-medium text-sm disabled:opacity-50 min-h-[48px]"
-            title="CSV: todos os itens, saldo no almoxarifado e materiais sob cautela (em posse), por colaborador"
+            title="Baixa em XLSX usando o modelo do inventário com os dados atuais da sua conta"
           >
             <Download size={18} className="text-secondary shrink-0" />
             <span className="truncate">
