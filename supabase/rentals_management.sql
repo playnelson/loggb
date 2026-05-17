@@ -77,40 +77,10 @@ create index if not exists equipment_rentals_item_idx on public.equipment_rental
 create index if not exists equipment_rentals_status_idx on public.equipment_rentals (status);
 create index if not exists equipment_rentals_supplier_idx on public.equipment_rentals (supplier_id);
 
-create or replace function public.enforce_rental_employee_possession()
-returns trigger
-language plpgsql
-as $$
-declare
-  has_possession boolean;
-begin
-  if new.status = 'ativo' then
-    if new.responsibility_type <> 'employee' then
-      raise exception 'Aluguel ativo deve ter responsibility_type = employee.';
-    end if;
-    if new.employee_id is null then
-      raise exception 'Aluguel ativo exige employee_id.';
-    end if;
-    select exists (
-      select 1
-      from public.possession p
-      where p.user_id = new.user_id
-        and p.item_id = new.item_id
-        and p.employee_id = new.employee_id
-        and p.quantity > 0
-    ) into has_possession;
-    if not has_possession then
-      raise exception 'Responsável deve ser colaborador que está com o item na carteira.';
-    end if;
-  end if;
-  return new;
-end;
-$$;
-
 drop trigger if exists trg_enforce_rental_employee_possession on public.equipment_rentals;
-create trigger trg_enforce_rental_employee_possession
-before insert or update on public.equipment_rentals
-for each row execute function public.enforce_rental_employee_possession();
+drop function if exists public.enforce_rental_employee_possession();
+
+-- Observação: vínculo com carteira é informativo no app e não bloqueia o cadastro do aluguel.
 
 alter table public.rental_suppliers enable row level security;
 alter table public.equipment_rentals enable row level security;

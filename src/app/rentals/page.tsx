@@ -21,6 +21,7 @@ type ItemOption = {
 type EmployeeOption = {
   id: string;
   full_name: string;
+  quantity: number;
 };
 
 type SupplierOption = {
@@ -198,14 +199,22 @@ export default function RentalsPage() {
       const grouped = new Map<string, Map<string, EmployeeOption>>();
       for (const employee of tenantEmployees) {
         for (const pos of employee.possession || []) {
-          if (Number(pos.quantity || 0) <= 0) continue;
+          const qty = Number(pos.quantity || 0);
+          if (qty <= 0) continue;
           if (!grouped.has(pos.item_id)) grouped.set(pos.item_id, new Map<string, EmployeeOption>());
-          grouped.get(pos.item_id)?.set(employee.id, { id: employee.id, full_name: employee.full_name });
+          const current = grouped.get(pos.item_id)?.get(employee.id);
+          grouped.get(pos.item_id)?.set(employee.id, {
+            id: employee.id,
+            full_name: employee.full_name,
+            quantity: qty + Number(current?.quantity || 0),
+          });
         }
       }
       const out: Record<string, EmployeeOption[]> = {};
       for (const [itemId, m] of grouped) {
-        out[itemId] = Array.from(m.values()).sort((a, b) => a.full_name.localeCompare(b.full_name, 'pt-BR'));
+        out[itemId] = Array.from(m.values()).sort(
+          (a, b) => b.quantity - a.quantity || a.full_name.localeCompare(b.full_name, 'pt-BR')
+        );
       }
       setEmployeesByItem(out);
     }
@@ -367,17 +376,8 @@ export default function RentalsPage() {
     }
 
     const itemEmployees = employeesByItem[form.item_id] || [];
-    if (itemEmployees.length === 0) {
-      alert('Este item alugado ainda não está na carteira de nenhum colaborador.');
-      return;
-    }
-    if (itemEmployees.length > 1) {
-      alert(
-        'Este item está na carteira de mais de um colaborador. Ajuste a carteira no módulo de colaboradores/almoxarifado para manter apenas um responsável antes de salvar o aluguel.'
-      );
-      return;
-    }
-    const responsibleEmployeeId = itemEmployees[0].id;
+    // Sem seleção manual: quando houver carteira, usa o portador principal.
+    const responsibleEmployeeId = itemEmployees[0]?.id || null;
 
     const supplier = suppliers.find((s) => s.id === form.supplier_id);
     if (!supplier) {
@@ -401,7 +401,7 @@ export default function RentalsPage() {
       supplier_id: form.supplier_id,
       contract_ref: form.contract_ref.trim() || null,
       status: form.status,
-      responsibility_type: 'employee',
+      responsibility_type: responsibleEmployeeId ? 'employee' : 'warehouse',
       employee_id: responsibleEmployeeId,
       work_site_id: null,
       quantity: Math.max(1, Number(form.quantity || 1)),
@@ -548,7 +548,7 @@ export default function RentalsPage() {
                     inferredHolders.length === 1
                       ? inferredHolders[0].full_name
                       : inferredHolders.length > 1
-                        ? `${inferredHolders.length} colaboradores`
+                        ? `${inferredHolders[0].full_name} (auto entre ${inferredHolders.length})`
                         : null;
                   return (
                     <tr key={r.id} className="hover:bg-slate-50/80">
@@ -572,7 +572,7 @@ export default function RentalsPage() {
                       <td className="px-4 py-3 text-sm text-slate-700">
                         {emp?.full_name ||
                           inferredLabel ||
-                          'Aguardando colaborador com item em carteira'}
+                          'Sem carteira vinculada'}
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-700">
                         {rowIsDraft(r) ? (
@@ -592,14 +592,13 @@ export default function RentalsPage() {
                           {rowIsDraft(r) ? (
                             <button
                               type="button"
-                              disabled={inferredHolders.length !== 1}
                               onClick={() => openFromDraft(r.item_id)}
-                              className="px-3 py-1.5 text-xs font-black text-amber-700 border border-amber-200 bg-amber-50 rounded-lg hover:bg-amber-100 disabled:opacity-45 disabled:cursor-not-allowed"
+                              className="px-3 py-1.5 text-xs font-black text-amber-700 border border-amber-200 bg-amber-50 rounded-lg hover:bg-amber-100"
                               title={
                                 inferredHolders.length === 0
-                                  ? 'Só configura quando o item estiver na carteira de um colaborador'
+                                  ? 'Configurar aluguel (sem carteira vinculada no momento)'
                                   : inferredHolders.length > 1
-                                    ? 'Item em mais de uma carteira: deixe apenas um responsável para configurar'
+                                    ? 'Vai configurar usando automaticamente o portador principal da carteira'
                                     : 'Configurar aluguel'
                               }
                             >
@@ -699,24 +698,24 @@ export default function RentalsPage() {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-xs font-bold uppercase text-slate-400">Responsável pela carteira</label>
+                  <label className="text-xs font-bold uppercase text-slate-400">Carteira (informativo)</label>
                   <div className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold text-primary min-h-[48px] flex items-center">
                     {!form.item_id
                       ? 'Escolha o item primeiro'
                       : eligibleEmployees.length === 1
                         ? eligibleEmployees[0].full_name
                         : eligibleEmployees.length > 1
-                          ? `Mais de um colaborador com este item (${eligibleEmployees.length})`
+                          ? `${eligibleEmployees[0].full_name} (auto pelo maior saldo entre ${eligibleEmployees.length})`
                           : 'Nenhum colaborador com este item na carteira'}
                   </div>
                   {form.item_id && eligibleEmployees.length === 0 ? (
-                    <p className="text-[11px] font-bold text-amber-700">
-                      Nenhum colaborador com este item na carteira. Faça a retirada no almoxarifado para habilitar.
+                    <p className="text-[11px] font-bold text-slate-500">
+                      Sem vínculo de carteira no momento. Você ainda pode configurar o aluguel.
                     </p>
                   ) : null}
                   {form.item_id && eligibleEmployees.length > 1 ? (
                     <p className="text-[11px] font-bold text-amber-700">
-                      O módulo define o responsável automaticamente pela carteira. Deixe o item em apenas uma carteira para salvar.
+                      Há mais de um portador em carteira; o módulo vai salvar com o colaborador de maior saldo.
                     </p>
                   ) : null}
                 </div>
