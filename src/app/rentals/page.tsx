@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { formatProductLabelDisplay } from '@/lib/productDisplayText';
 import { isLikelyMissingColumn } from '@/lib/tenantItems';
-import { ArrowLeft, Building2, Loader2, Plus, ReceiptText, ShieldCheck, X } from 'lucide-react';
+import { ArrowLeft, Building2, Loader2, ReceiptText, ShieldCheck, X } from 'lucide-react';
 
 type RentalStatus = 'ativo' | 'encerrado';
 
@@ -257,6 +257,15 @@ export default function RentalsPage() {
     void load();
   }, [load]);
 
+  const totalQtyByItem = useMemo<Record<string, number>>(() => {
+    const out: Record<string, number> = {};
+    for (const it of items) {
+      const inWallet = (employeesByItem[it.id] || []).reduce((sum, holder) => sum + Number(holder.quantity || 0), 0);
+      out[it.id] = Number(it.quantity_current || 0) + inWallet;
+    }
+    return out;
+  }, [items, employeesByItem]);
+
   const rentalsList = useMemo<RentalListRow[]>(() => {
     const list: RentalListRow[] = rentals.map((r) => ({ ...r, isDraft: false }));
     const existingItemIds = new Set(rentals.map((r) => r.item_id));
@@ -270,7 +279,7 @@ export default function RentalsPage() {
         contract_ref: null,
         status: 'ativo',
         employee_id: null,
-        quantity: Number(it.quantity_current || 0),
+        quantity: totalQtyByItem[it.id] ?? Number(it.quantity_current || 0),
         start_date: new Date().toISOString().slice(0, 10),
         expected_return_date: null,
         monthly_cost: null,
@@ -281,7 +290,7 @@ export default function RentalsPage() {
         isDraft: true,
       }));
     return [...drafts, ...list];
-  }, [items, rentals]);
+  }, [items, rentals, totalQtyByItem]);
 
   const activeCount = rentals.filter((r) => r.status === 'ativo').length;
   const monthlyTotal = rentals
@@ -294,13 +303,6 @@ export default function RentalsPage() {
     if (!form.item_id) return [];
     return employeesByItem[form.item_id] || [];
   }, [employeesByItem, form.item_id]);
-
-  const openNew = () => {
-    setEditing(null);
-    setDraftItemId(null);
-    setForm(emptyForm());
-    setModalOpen(true);
-  };
 
   const openFromDraft = (itemId: string) => {
     const item = items.find((it) => it.id === itemId);
@@ -486,14 +488,6 @@ export default function RentalsPage() {
             <Building2 size={16} />
             Locadoras
           </button>
-          <button
-            type="button"
-            onClick={openNew}
-            className="flex items-center gap-2 bg-secondary text-white px-4 py-2 rounded-lg font-bold text-sm hover:opacity-95"
-          >
-            <Plus size={16} />
-            Novo aluguel
-          </button>
         </div>
       </div>
 
@@ -545,6 +539,7 @@ export default function RentalsPage() {
                   const it = asSingle(r.items);
                   const emp = asSingle(r.employees);
                   const sup = asSingle(r.rental_suppliers);
+                  const shownQty = totalQtyByItem[r.item_id] ?? Number(r.quantity || 0);
                   const inferredHolders = employeesByItem[r.item_id] || [];
                   const holdersLabel = inferredHolders.length
                     ? inferredHolders.map((h) => `${h.full_name} (${h.quantity})`).join(', ')
@@ -560,7 +555,7 @@ export default function RentalsPage() {
                       <td className="px-4 py-3">
                         <div className="font-bold text-primary">{formatProductLabelDisplay(it?.description || '—')}</div>
                         <div className="text-xs text-slate-500">
-                          {r.quantity} {it?.unit || 'un'} ·{' '}
+                          {shownQty} {it?.unit || 'un'} ·{' '}
                           {rowIsDraft(r) ? (
                             <span className="text-amber-700 font-bold">Pendente de cadastro</span>
                           ) : r.status === 'ativo' ? (
