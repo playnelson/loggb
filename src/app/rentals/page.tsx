@@ -156,7 +156,7 @@ export default function RentalsPage() {
       getItems(),
       supabase
         .from('employees')
-        .select('id, full_name, status')
+        .select('id, full_name, status, possession(item_id, quantity)')
         .eq('user_id', user.id)
         .order('full_name', { ascending: true }),
       supabase
@@ -187,37 +187,22 @@ export default function RentalsPage() {
       );
     }
 
-    const activeEmployees = (employeesRes.data || []).filter(
-      (e: { status?: string }) => !e.status || e.status === 'Ativo'
-    ) as Array<{ id: string; full_name: string; status?: string }>;
-
-    const employeeById = new Map(activeEmployees.map((e) => [e.id, e.full_name]));
-    const employeeIds = activeEmployees.map((e) => e.id);
-
-    let possessionError: string | null = null;
-    let possessionData: Array<{ item_id: string; employee_id: string; quantity: number }> = [];
-    if (employeeIds.length > 0) {
-      const possessionRes = await supabase
-        .from('possession')
-        .select('item_id, employee_id, quantity')
-        .in('employee_id', employeeIds)
-        .gt('quantity', 0);
-      if (possessionRes.error) {
-        possessionError = possessionRes.error.message;
-      } else {
-        possessionData = (possessionRes.data || []) as Array<{ item_id: string; employee_id: string; quantity: number }>;
-      }
-    }
-
-    if (possessionError) {
+    if (employeesRes.error) {
       setEmployeesByItem({});
     } else {
+      const tenantEmployees = (employeesRes.data || []) as Array<{
+        id: string;
+        full_name: string;
+        status?: string;
+        possession?: { item_id: string; quantity: number }[] | null;
+      }>;
       const grouped = new Map<string, Map<string, EmployeeOption>>();
-      for (const row of possessionData) {
-        const fullName = employeeById.get(row.employee_id);
-        if (!fullName) continue;
-        if (!grouped.has(row.item_id)) grouped.set(row.item_id, new Map<string, EmployeeOption>());
-        grouped.get(row.item_id)?.set(row.employee_id, { id: row.employee_id, full_name: fullName });
+      for (const employee of tenantEmployees) {
+        for (const pos of employee.possession || []) {
+          if (Number(pos.quantity || 0) <= 0) continue;
+          if (!grouped.has(pos.item_id)) grouped.set(pos.item_id, new Map<string, EmployeeOption>());
+          grouped.get(pos.item_id)?.set(employee.id, { id: employee.id, full_name: employee.full_name });
+        }
       }
       const out: Record<string, EmployeeOption[]> = {};
       for (const [itemId, m] of grouped) {
