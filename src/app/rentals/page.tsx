@@ -16,6 +16,7 @@ type ItemOption = {
   description: string;
   unit: string;
   is_rented: boolean;
+  quantity_current: number;
 };
 
 type EmployeeOption = {
@@ -132,13 +133,13 @@ export default function RentalsPage() {
     const getItems = async () => {
       let res = await supabase
         .from('items')
-        .select('id, description, unit, is_rented')
+        .select('id, description, unit, is_rented, quantity_current')
         .eq('user_id', user.id)
         .order('description', { ascending: true });
       if (res.error?.message && isLikelyMissingColumn(res.error.message, 'is_rented')) {
         const legacy = await supabase
           .from('items')
-          .select('id, description, unit')
+          .select('id, description, unit, quantity_current')
           .eq('user_id', user.id)
           .order('description', { ascending: true });
         if (!legacy.error && legacy.data) {
@@ -183,6 +184,7 @@ export default function RentalsPage() {
           description: String(i.description ?? ''),
           unit: String(i.unit ?? 'un'),
           is_rented: Boolean(i.is_rented),
+          quantity_current: Number(i.quantity_current ?? 0),
         }))
       );
     }
@@ -268,7 +270,7 @@ export default function RentalsPage() {
         contract_ref: null,
         status: 'ativo',
         employee_id: null,
-        quantity: 1,
+        quantity: Number(it.quantity_current || 0),
         start_date: new Date().toISOString().slice(0, 10),
         expected_return_date: null,
         monthly_cost: null,
@@ -544,6 +546,9 @@ export default function RentalsPage() {
                   const emp = asSingle(r.employees);
                   const sup = asSingle(r.rental_suppliers);
                   const inferredHolders = employeesByItem[r.item_id] || [];
+                  const holdersLabel = inferredHolders.length
+                    ? inferredHolders.map((h) => `${h.full_name} (${h.quantity})`).join(', ')
+                    : null;
                   const inferredLabel =
                     inferredHolders.length === 1
                       ? inferredHolders[0].full_name
@@ -570,9 +575,7 @@ export default function RentalsPage() {
                         {r.contract_ref ? <div className="text-xs text-slate-500">Contrato: {r.contract_ref}</div> : null}
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-700">
-                        {emp?.full_name ||
-                          inferredLabel ||
-                          'Sem carteira vinculada'}
+                        {holdersLabel || emp?.full_name || inferredLabel || 'Sem carteira vinculada'}
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-700">
                         {rowIsDraft(r) ? (
