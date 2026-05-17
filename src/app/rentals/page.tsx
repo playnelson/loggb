@@ -122,7 +122,7 @@ export default function RentalsPage() {
         if (!legacy.error && legacy.data) {
           return {
             ...legacy,
-            data: legacy.data.map((it) => ({ ...it, is_rented: false })),
+            data: legacy.data.map((it: Record<string, unknown>) => ({ ...it, is_rented: false })),
           };
         }
         return legacy;
