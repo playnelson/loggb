@@ -74,7 +74,6 @@ const emptyForm = () => ({
   supplier_id: '',
   contract_ref: '',
   status: 'ativo' as RentalStatus,
-  employee_id: '',
   quantity: 1,
   start_date: new Date().toISOString().slice(0, 10),
   expected_return_date: '',
@@ -285,17 +284,6 @@ export default function RentalsPage() {
     return employeesByItem[form.item_id] || [];
   }, [employeesByItem, form.item_id]);
 
-  useEffect(() => {
-    if (!form.item_id) return;
-    const isValid = eligibleEmployees.some((e) => e.id === form.employee_id);
-    if (!isValid) {
-      setForm((prev) => ({
-        ...prev,
-        employee_id: eligibleEmployees[0]?.id || '',
-      }));
-    }
-  }, [eligibleEmployees, form.item_id, form.employee_id]);
-
   const openNew = () => {
     setEditing(null);
     setDraftItemId(null);
@@ -310,7 +298,6 @@ export default function RentalsPage() {
     setForm({
       ...emptyForm(),
       item_id: itemId,
-      employee_id: employeesByItem[itemId]?.[0]?.id || '',
       quantity: 1,
       notes: item ? `Item marcado como alugado no almoxarifado: ${item.description}.` : '',
     });
@@ -325,7 +312,6 @@ export default function RentalsPage() {
       supplier_id: row.supplier_id || '',
       contract_ref: row.contract_ref || '',
       status: row.status,
-      employee_id: row.employee_id || '',
       quantity: Number(row.quantity || 1),
       start_date: row.start_date,
       expected_return_date: row.expected_return_date || '',
@@ -385,10 +371,13 @@ export default function RentalsPage() {
       alert('Este item alugado ainda não está na carteira de nenhum colaborador.');
       return;
     }
-    if (!form.employee_id || !itemEmployees.some((e) => e.id === form.employee_id)) {
-      alert('O responsável do aluguel precisa ser um colaborador que está com este item na carteira.');
+    if (itemEmployees.length > 1) {
+      alert(
+        'Este item está na carteira de mais de um colaborador. Ajuste a carteira no módulo de colaboradores/almoxarifado para manter apenas um responsável antes de salvar o aluguel.'
+      );
       return;
     }
+    const responsibleEmployeeId = itemEmployees[0].id;
 
     const supplier = suppliers.find((s) => s.id === form.supplier_id);
     if (!supplier) {
@@ -413,7 +402,7 @@ export default function RentalsPage() {
       contract_ref: form.contract_ref.trim() || null,
       status: form.status,
       responsibility_type: 'employee',
-      employee_id: form.employee_id,
+      employee_id: responsibleEmployeeId,
       work_site_id: null,
       quantity: Math.max(1, Number(form.quantity || 1)),
       start_date: form.start_date,
@@ -554,6 +543,13 @@ export default function RentalsPage() {
                   const it = asSingle(r.items);
                   const emp = asSingle(r.employees);
                   const sup = asSingle(r.rental_suppliers);
+                  const inferredHolders = employeesByItem[r.item_id] || [];
+                  const inferredLabel =
+                    inferredHolders.length === 1
+                      ? inferredHolders[0].full_name
+                      : inferredHolders.length > 1
+                        ? `${inferredHolders.length} colaboradores`
+                        : null;
                   return (
                     <tr key={r.id} className="hover:bg-slate-50/80">
                       <td className="px-4 py-3">
@@ -574,7 +570,9 @@ export default function RentalsPage() {
                         {r.contract_ref ? <div className="text-xs text-slate-500">Contrato: {r.contract_ref}</div> : null}
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-700">
-                        {emp?.full_name || 'Aguardando colaborador com item em carteira'}
+                        {emp?.full_name ||
+                          inferredLabel ||
+                          'Aguardando colaborador com item em carteira'}
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-700">
                         {rowIsDraft(r) ? (
@@ -594,8 +592,16 @@ export default function RentalsPage() {
                           {rowIsDraft(r) ? (
                             <button
                               type="button"
+                              disabled={inferredHolders.length !== 1}
                               onClick={() => openFromDraft(r.item_id)}
-                              className="px-3 py-1.5 text-xs font-black text-amber-700 border border-amber-200 bg-amber-50 rounded-lg hover:bg-amber-100"
+                              className="px-3 py-1.5 text-xs font-black text-amber-700 border border-amber-200 bg-amber-50 rounded-lg hover:bg-amber-100 disabled:opacity-45 disabled:cursor-not-allowed"
+                              title={
+                                inferredHolders.length === 0
+                                  ? 'Só configura quando o item estiver na carteira de um colaborador'
+                                  : inferredHolders.length > 1
+                                    ? 'Item em mais de uma carteira: deixe apenas um responsável para configurar'
+                                    : 'Configurar aluguel'
+                              }
                             >
                               Configurar
                             </button>
@@ -651,7 +657,6 @@ export default function RentalsPage() {
                       setForm((f) => ({
                         ...f,
                         item_id: e.target.value,
-                        employee_id: (employeesByItem[e.target.value] || [])[0]?.id || '',
                       }))
                     }
                   >
@@ -694,23 +699,24 @@ export default function RentalsPage() {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-xs font-bold uppercase text-slate-400">Colaborador responsável (carteira)</label>
-                  <select
-                    required
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none font-medium"
-                    value={form.employee_id}
-                    onChange={(e) => setForm((f) => ({ ...f, employee_id: e.target.value }))}
-                  >
-                    <option value="">{form.item_id ? 'Selecione...' : 'Escolha o item primeiro'}</option>
-                    {eligibleEmployees.map((emp) => (
-                      <option key={emp.id} value={emp.id}>
-                        {emp.full_name}
-                      </option>
-                    ))}
-                  </select>
+                  <label className="text-xs font-bold uppercase text-slate-400">Responsável pela carteira</label>
+                  <div className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold text-primary min-h-[48px] flex items-center">
+                    {!form.item_id
+                      ? 'Escolha o item primeiro'
+                      : eligibleEmployees.length === 1
+                        ? eligibleEmployees[0].full_name
+                        : eligibleEmployees.length > 1
+                          ? `Mais de um colaborador com este item (${eligibleEmployees.length})`
+                          : 'Nenhum colaborador com este item na carteira'}
+                  </div>
                   {form.item_id && eligibleEmployees.length === 0 ? (
                     <p className="text-[11px] font-bold text-amber-700">
                       Nenhum colaborador com este item na carteira. Faça a retirada no almoxarifado para habilitar.
+                    </p>
+                  ) : null}
+                  {form.item_id && eligibleEmployees.length > 1 ? (
+                    <p className="text-[11px] font-bold text-amber-700">
+                      O módulo define o responsável automaticamente pela carteira. Deixe o item em apenas uma carteira para salvar.
                     </p>
                   ) : null}
                 </div>
