@@ -53,6 +53,7 @@ interface Product {
   location: string;
   consumable: boolean;
   unique_item?: boolean;
+  is_rented?: boolean;
   /** TAG / identificador fixo no cadastro do item */
   tag?: string | null;
   quantity_current: number;
@@ -92,6 +93,7 @@ const emptyItemForm = () => ({
   location: '',
   consumable: false,
   unique_item: false,
+  is_rented: false,
   quantity_current: 0,
   quantity_min: 0,
   unit: 'un',
@@ -478,6 +480,7 @@ function InventoryContent() {
       location: formData.location,
       consumable: formData.consumable,
       unique_item: formData.unique_item,
+      is_rented: formData.is_rented,
       quantity_current: formData.quantity_current,
       quantity_min: formData.quantity_min,
       unit: formData.unit,
@@ -488,9 +491,15 @@ function InventoryContent() {
     let patch: Record<string, unknown> = { ...basePatch, tag: tagVal };
     let error = (await supabase.from('items').update(patch).eq('id', editingItem.id).eq('user_id', user.id)).error;
 
-    if (error?.message && isLikelyMissingColumn(error.message, 'tag')) {
-      const { tag: _t, ...noTag } = patch;
-      patch = noTag;
+    if (
+      error?.message &&
+      (isLikelyMissingColumn(error.message, 'tag') || isLikelyMissingColumn(error.message, 'is_rented'))
+    ) {
+      const { tag: _t, is_rented: _r, ...legacy } = patch as Record<string, unknown> & {
+        tag?: unknown;
+        is_rented?: unknown;
+      };
+      patch = legacy;
       error = (await supabase.from('items').update(patch).eq('id', editingItem.id).eq('user_id', user.id)).error;
     }
 
@@ -536,6 +545,7 @@ function InventoryContent() {
       location: formData.location,
       consumable: formData.consumable,
       unique_item: formData.unique_item,
+      is_rented: formData.is_rented,
       quantity_current: formData.quantity_current,
       quantity_min: formData.quantity_min,
       unit: formData.unit,
@@ -546,9 +556,15 @@ function InventoryContent() {
 
     let row: Record<string, unknown> = { ...finalData };
     let { error } = await supabase.from('items').insert([row]);
-    if (error?.message && isLikelyMissingColumn(error.message, 'tag')) {
-      const { tag: _t, ...noTag } = row;
-      row = noTag;
+    if (
+      error?.message &&
+      (isLikelyMissingColumn(error.message, 'tag') || isLikelyMissingColumn(error.message, 'is_rented'))
+    ) {
+      const { tag: _t, is_rented: _r, ...legacy } = row as Record<string, unknown> & {
+        tag?: unknown;
+        is_rented?: unknown;
+      };
+      row = legacy;
       ({ error } = await supabase.from('items').insert([row]));
     }
 
@@ -1303,6 +1319,11 @@ function InventoryContent() {
                             {p.tag}
                           </div>
                         ) : null}
+                        {p.is_rented ? (
+                          <div className="mt-1 inline-flex items-center rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-amber-800">
+                            Equipamento alugado
+                          </div>
+                        ) : null}
                       </td>
                       <td className="px-6 py-4 text-xs text-center border-x border-slate-50">
                         <span className={`px-2 py-1 rounded-md font-bold text-[10px] uppercase tracking-tighter ${p.consumable ? 'bg-green-50 text-green-600' : 'bg-slate-50 text-slate-400'}`}>
@@ -1420,6 +1441,7 @@ function InventoryContent() {
                                 location: p.location,
                                 consumable: p.consumable || false,
                                 unique_item: Boolean(p.unique_item),
+                                is_rented: Boolean(p.is_rented),
                                 quantity_current: p.quantity_current,
                                 quantity_min: p.quantity_min,
                                 unit: p.unit,
@@ -1499,6 +1521,11 @@ function InventoryContent() {
                       >
                         {p.category}
                       </span>
+                      {p.is_rented ? (
+                        <span className="inline-flex items-center px-2 py-1 rounded-lg text-[10px] font-black uppercase bg-amber-50 text-amber-700">
+                          Alugado
+                        </span>
+                      ) : null}
                     </div>
                   </div>
 
@@ -1595,6 +1622,7 @@ function InventoryContent() {
                           location: p.location,
                           consumable: p.consumable || false,
                           unique_item: Boolean(p.unique_item),
+                          is_rented: Boolean(p.is_rented),
                           quantity_current: p.quantity_current,
                           quantity_min: p.quantity_min,
                           unit: p.unit,
@@ -1748,6 +1776,23 @@ function InventoryContent() {
                       title="Quando marcado, a movimentação exige TAG e força quantidade 1."
                     >
                       Item único (exige TAG)
+                    </label>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      id="rented-item-toggle"
+                      className="w-5 h-5 accent-amber-500 rounded border-slate-300 cursor-pointer"
+                      checked={Boolean(formData.is_rented)}
+                      onChange={(e) => setFormData({ ...formData, is_rented: e.target.checked })}
+                    />
+                    <label
+                      htmlFor="rented-item-toggle"
+                      className="text-sm font-black cursor-pointer text-amber-700"
+                      title="Marca que este item foi alugado pela empresa."
+                    >
+                      Item alugado
                     </label>
                   </div>
                 </div>

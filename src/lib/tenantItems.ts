@@ -4,12 +4,14 @@ export type SupabaseBrowserClient = ReturnType<typeof createBrowserClient>;
 
 /** Select de itens para o almoxarifado (posse aninhada). */
 export const ITEMS_SELECT_WITHOUT_TAG =
-  'id, code, description, category, location, consumable, unique_item, quantity_current, quantity_min, unit, updated_at, user_id, possession (id, quantity, employee_id, employees (id, full_name))';
+  'id, code, description, category, location, consumable, unique_item, is_rented, quantity_current, quantity_min, unit, updated_at, user_id, possession (id, quantity, employee_id, employees (id, full_name))';
 
 export const ITEMS_SELECT_WITH_TAG = ITEMS_SELECT_WITHOUT_TAG.replace(
   'unique_item,',
   'unique_item, tag,'
 );
+
+export const ITEMS_SELECT_LEGACY = ITEMS_SELECT_WITHOUT_TAG.replace('is_rented, ', '');
 
 export function isLikelyMissingColumn(errMessage: string, column: string): boolean {
   const m = errMessage.toLowerCase();
@@ -29,6 +31,9 @@ export async function fetchTenantItems(supabase: SupabaseBrowserClient, userId: 
 
   if (res.error?.message && isLikelyMissingColumn(res.error.message, 'tag')) {
     res = await run(ITEMS_SELECT_WITHOUT_TAG);
+  }
+  if (res.error?.message && isLikelyMissingColumn(res.error.message, 'is_rented')) {
+    res = await run(ITEMS_SELECT_LEGACY);
   }
 
   return res;

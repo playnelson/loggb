@@ -15,6 +15,7 @@ import {
   X,
   MoreHorizontal,
   ClipboardList,
+  ReceiptText,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useRouter, usePathname } from 'next/navigation';
@@ -33,6 +34,7 @@ export function Sidebar({
   const menuItems = [
     { name: 'Início', icon: <LayoutDashboard size={20} />, href: '/' },
     { name: 'Almoxarifado', icon: <Package size={20} />, href: '/inventory' },
+    { name: 'Gestão de aluguéis', icon: <ReceiptText size={20} />, href: '/rentals' },
     { name: 'Ordens de compra', icon: <ClipboardList size={20} />, href: '/ordens-compra' },
     { name: 'Colaboradores', icon: <Users size={20} />, href: '/staff' },
     { name: 'Sedes e canteiros', icon: <MapPin size={20} />, href: '/sites' },

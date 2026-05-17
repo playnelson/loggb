@@ -41,6 +41,13 @@ export default function SettingsPage() {
       if (moveError) console.error('Erro ao deletar movimentos:', moveError);
 
       // 2. Deletar Funcionários
+      const { error: rentalsError } = await supabase
+        .from('equipment_rentals')
+        .delete()
+        .eq('user_id', user.id);
+      if (rentalsError) console.error('Erro ao deletar aluguéis:', rentalsError);
+
+      // 3. Deletar Funcionários
       const { error: empError } = await supabase
         .from('employees')
         .delete()
@@ -48,7 +55,7 @@ export default function SettingsPage() {
       
       if (empError) console.error('Erro ao deletar funcionários:', empError);
 
-      // 3. Deletar Itens
+      // 4. Deletar Itens
       const { error: itemError } = await supabase
         .from('items')
         .delete()
@@ -103,6 +110,16 @@ export default function SettingsPage() {
         const em = String(rSites.error.message || '').toLowerCase();
         if (!em.includes('does not exist') && rSites.error.code !== '42P01') {
           parts.push(`Sedes/canteiros: ${rSites.error.message}`);
+        }
+      }
+
+      const rRentals = await supabase.from('equipment_rentals').update({ user_id: uid }).is('user_id', null).select('id');
+      if (!rRentals.error) {
+        parts.push(`Aluguéis: ${rRentals.data?.length ?? 0}.`);
+      } else {
+        const em = String(rRentals.error.message || '').toLowerCase();
+        if (!em.includes('does not exist') && rRentals.error.code !== '42P01') {
+          parts.push(`Aluguéis: ${rRentals.error.message}`);
         }
       }
 
