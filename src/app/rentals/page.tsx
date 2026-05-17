@@ -152,13 +152,13 @@ export default function RentalsPage() {
       return res;
     };
 
-    const [itemsRes, possessionRes, suppliersRes, rentalsRes] = await Promise.all([
+    const [itemsRes, employeesRes, suppliersRes, rentalsRes] = await Promise.all([
       getItems(),
       supabase
-        .from('possession')
-        .select('item_id, employee_id, quantity, employees(id, full_name, status)')
+        .from('employees')
+        .select('id, full_name, status')
         .eq('user_id', user.id)
-        .gt('quantity', 0),
+        .order('full_name', { ascending: true }),
       supabase
         .from('rental_suppliers')
         .select('id, name, contact_name, phone')
@@ -187,20 +187,37 @@ export default function RentalsPage() {
       );
     }
 
-    if (possessionRes.error) {
+    const activeEmployees = (employeesRes.data || []).filter(
+      (e: { status?: string }) => !e.status || e.status === 'Ativo'
+    ) as Array<{ id: string; full_name: string; status?: string }>;
+
+    const employeeById = new Map(activeEmployees.map((e) => [e.id, e.full_name]));
+    const employeeIds = activeEmployees.map((e) => e.id);
+
+    let possessionError: string | null = null;
+    let possessionData: Array<{ item_id: string; employee_id: string; quantity: number }> = [];
+    if (employeeIds.length > 0) {
+      const possessionRes = await supabase
+        .from('possession')
+        .select('item_id, employee_id, quantity')
+        .in('employee_id', employeeIds)
+        .gt('quantity', 0);
+      if (possessionRes.error) {
+        possessionError = possessionRes.error.message;
+      } else {
+        possessionData = (possessionRes.data || []) as Array<{ item_id: string; employee_id: string; quantity: number }>;
+      }
+    }
+
+    if (possessionError) {
       setEmployeesByItem({});
     } else {
       const grouped = new Map<string, Map<string, EmployeeOption>>();
-      for (const row of (possessionRes.data || []) as Array<{
-        item_id: string;
-        employee_id: string;
-        quantity: number;
-        employees?: { id: string; full_name: string; status?: string } | { id: string; full_name: string; status?: string }[] | null;
-      }>) {
-        const emp = asSingle(row.employees);
-        if (!emp || (emp.status && emp.status !== 'Ativo')) continue;
+      for (const row of possessionData) {
+        const fullName = employeeById.get(row.employee_id);
+        if (!fullName) continue;
         if (!grouped.has(row.item_id)) grouped.set(row.item_id, new Map<string, EmployeeOption>());
-        grouped.get(row.item_id)?.set(emp.id, { id: emp.id, full_name: emp.full_name });
+        grouped.get(row.item_id)?.set(row.employee_id, { id: row.employee_id, full_name: fullName });
       }
       const out: Record<string, EmployeeOption[]> = {};
       for (const [itemId, m] of grouped) {
