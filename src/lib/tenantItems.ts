@@ -4,7 +4,7 @@ export type SupabaseBrowserClient = ReturnType<typeof createBrowserClient>;
 
 /** Select de itens para o almoxarifado (posse aninhada). */
 export const ITEMS_SELECT_WITHOUT_TAG =
-  'id, code, description, category, location, consumable, unique_item, is_rented, quantity_current, quantity_min, unit, updated_at, user_id, possession (id, quantity, employee_id, employees (id, full_name))';
+  'id, code, description, category, location, consumable, unique_item, is_rented, calibration_due_date, expiration_date, quantity_current, quantity_min, unit, updated_at, user_id, possession (id, quantity, employee_id, employees (id, full_name))';
 
 export const ITEMS_SELECT_WITH_TAG = ITEMS_SELECT_WITHOUT_TAG.replace(
   'unique_item,',
@@ -12,6 +12,14 @@ export const ITEMS_SELECT_WITH_TAG = ITEMS_SELECT_WITHOUT_TAG.replace(
 );
 
 export const ITEMS_SELECT_LEGACY = ITEMS_SELECT_WITHOUT_TAG.replace('is_rented, ', '');
+export const ITEMS_SELECT_WITHOUT_DATES = ITEMS_SELECT_WITHOUT_TAG.replace(
+  'calibration_due_date, expiration_date, ',
+  ''
+);
+export const ITEMS_SELECT_LEGACY_WITHOUT_DATES = ITEMS_SELECT_LEGACY.replace(
+  'calibration_due_date, expiration_date, ',
+  ''
+);
 
 export function isLikelyMissingColumn(errMessage: string, column: string): boolean {
   const m = errMessage.toLowerCase();
@@ -27,13 +35,25 @@ export async function fetchTenantItems(supabase: SupabaseBrowserClient, userId: 
   const run = (sel: string) =>
     supabase.from('items').select(sel).eq('user_id', userId).order('description', { ascending: true });
 
-  let res = await run(ITEMS_SELECT_WITH_TAG);
+  const candidates = [
+    ITEMS_SELECT_WITH_TAG,
+    ITEMS_SELECT_WITHOUT_TAG,
+    ITEMS_SELECT_WITHOUT_DATES,
+    ITEMS_SELECT_LEGACY,
+    ITEMS_SELECT_LEGACY_WITHOUT_DATES,
+  ];
 
-  if (res.error?.message && isLikelyMissingColumn(res.error.message, 'tag')) {
-    res = await run(ITEMS_SELECT_WITHOUT_TAG);
-  }
-  if (res.error?.message && isLikelyMissingColumn(res.error.message, 'is_rented')) {
-    res = await run(ITEMS_SELECT_LEGACY);
+  let res = await run(candidates[0]);
+  for (let i = 1; i < candidates.length; i++) {
+    if (!res.error?.message) break;
+    const msg = res.error.message;
+    const isOptionalColumnError =
+      isLikelyMissingColumn(msg, 'tag') ||
+      isLikelyMissingColumn(msg, 'is_rented') ||
+      isLikelyMissingColumn(msg, 'calibration_due_date') ||
+      isLikelyMissingColumn(msg, 'expiration_date');
+    if (!isOptionalColumnError) break;
+    res = await run(candidates[i]);
   }
 
   return res;

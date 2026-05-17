@@ -7,9 +7,8 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { formatProductLabelDisplay } from '@/lib/productDisplayText';
 import { isLikelyMissingColumn } from '@/lib/tenantItems';
-import { ArrowLeft, Loader2, Plus, ReceiptText, ShieldCheck, X } from 'lucide-react';
+import { ArrowLeft, Building2, Loader2, Plus, ReceiptText, ShieldCheck, X } from 'lucide-react';
 
-type ResponsibilityType = 'employee' | 'site' | 'warehouse';
 type RentalStatus = 'ativo' | 'encerrado';
 
 type ItemOption = {
@@ -17,7 +16,6 @@ type ItemOption = {
   description: string;
   unit: string;
   is_rented: boolean;
-  quantity_current: number;
 };
 
 type EmployeeOption = {
@@ -25,21 +23,21 @@ type EmployeeOption = {
   full_name: string;
 };
 
-type WorkSiteOption = {
+type SupplierOption = {
   id: string;
   name: string;
-  kind: string;
+  contact_name: string | null;
+  phone: string | null;
 };
 
 type RentalRow = {
   id: string;
   item_id: string;
   supplier: string;
+  supplier_id: string | null;
   contract_ref: string | null;
   status: RentalStatus;
-  responsibility_type: ResponsibilityType;
   employee_id: string | null;
-  work_site_id: string | null;
   quantity: number;
   start_date: string;
   expected_return_date: string | null;
@@ -47,21 +45,47 @@ type RentalRow = {
   notes: string | null;
   items?: { id: string; description: string; unit: string } | { id: string; description: string; unit: string }[] | null;
   employees?: { id: string; full_name: string } | { id: string; full_name: string }[] | null;
-  work_sites?: { id: string; name: string; kind: string } | { id: string; name: string; kind: string }[] | null;
+  rental_suppliers?: { id: string; name: string } | { id: string; name: string }[] | null;
 };
+
+type RentalDraftRow = {
+  id: string;
+  item_id: string;
+  supplier: string;
+  supplier_id: string | null;
+  contract_ref: string | null;
+  status: RentalStatus;
+  employee_id: string | null;
+  quantity: number;
+  start_date: string;
+  expected_return_date: string | null;
+  monthly_cost: number | null;
+  notes: string | null;
+  items: { id: string; description: string; unit: string };
+  employees: null;
+  rental_suppliers: null;
+  isDraft: true;
+};
+
+type RentalListRow = (RentalRow & { isDraft?: false }) | RentalDraftRow;
 
 const emptyForm = () => ({
   item_id: '',
-  supplier: '',
+  supplier_id: '',
   contract_ref: '',
   status: 'ativo' as RentalStatus,
-  responsibility_type: 'warehouse' as ResponsibilityType,
   employee_id: '',
-  work_site_id: '',
   quantity: 1,
   start_date: new Date().toISOString().slice(0, 10),
   expected_return_date: '',
   monthly_cost: '',
+  notes: '',
+});
+
+const emptySupplierForm = () => ({
+  name: '',
+  contact_name: '',
+  phone: '',
   notes: '',
 });
 
@@ -70,53 +94,51 @@ function asSingle<T>(v: T | T[] | null | undefined): T | null {
   return Array.isArray(v) ? (v[0] ?? null) : v;
 }
 
-function responsibilityLabel(r: RentalRow): string {
-  if (r.responsibility_type === 'employee') {
-    return asSingle(r.employees)?.full_name || 'Colaborador não encontrado';
-  }
-  if (r.responsibility_type === 'site') {
-    const s = asSingle(r.work_sites);
-    if (!s) return 'Local não encontrado';
-    return `${s.kind === 'sede' ? 'Sede' : 'Canteiro'}: ${s.name}`;
-  }
-  return 'Almoxarifado';
+function rowIsDraft(row: RentalListRow): row is RentalDraftRow {
+  return Boolean((row as { isDraft?: boolean }).isDraft);
 }
 
 export default function RentalsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [supplierSaving, setSupplierSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rentals, setRentals] = useState<RentalRow[]>([]);
   const [items, setItems] = useState<ItemOption[]>([]);
-  const [employees, setEmployees] = useState<EmployeeOption[]>([]);
-  const [workSites, setWorkSites] = useState<WorkSiteOption[]>([]);
+  const [suppliers, setSuppliers] = useState<SupplierOption[]>([]);
+  const [employeesByItem, setEmployeesByItem] = useState<Record<string, EmployeeOption[]>>({});
   const [modalOpen, setModalOpen] = useState(false);
+  const [supplierModalOpen, setSupplierModalOpen] = useState(false);
   const [editing, setEditing] = useState<RentalRow | null>(null);
+  const [draftItemId, setDraftItemId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm());
+  const [supplierForm, setSupplierForm] = useState(emptySupplierForm());
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
     if (!user) {
       setLoading(false);
       setRentals([]);
       setItems([]);
-      setEmployees([]);
-      setWorkSites([]);
+      setSuppliers([]);
+      setEmployeesByItem({});
       return;
     }
 
     const getItems = async () => {
       let res = await supabase
         .from('items')
-        .select('id, description, unit, is_rented, quantity_current')
+        .select('id, description, unit, is_rented')
         .eq('user_id', user.id)
         .order('description', { ascending: true });
       if (res.error?.message && isLikelyMissingColumn(res.error.message, 'is_rented')) {
         const legacy = await supabase
           .from('items')
-          .select('id, description, unit, quantity_current')
+          .select('id, description, unit')
           .eq('user_id', user.id)
           .order('description', { ascending: true });
         if (!legacy.error && legacy.data) {
@@ -130,22 +152,23 @@ export default function RentalsPage() {
       return res;
     };
 
-    const [itemsRes, employeesRes, sitesRes, rentalsRes] = await Promise.all([
+    const [itemsRes, possessionRes, suppliersRes, rentalsRes] = await Promise.all([
       getItems(),
       supabase
-        .from('employees')
-        .select('id, full_name, status')
+        .from('possession')
+        .select('item_id, employee_id, quantity, employees(id, full_name, status)')
         .eq('user_id', user.id)
-        .order('full_name', { ascending: true }),
+        .gt('quantity', 0),
       supabase
-        .from('work_sites')
-        .select('id, name, kind, active')
+        .from('rental_suppliers')
+        .select('id, name, contact_name, phone')
         .eq('user_id', user.id)
-        .eq('active', true)
         .order('name', { ascending: true }),
       supabase
         .from('equipment_rentals')
-        .select('id, item_id, supplier, contract_ref, status, responsibility_type, employee_id, work_site_id, quantity, start_date, expected_return_date, monthly_cost, notes, items(id, description, unit), employees(id, full_name), work_sites(id, name, kind)')
+        .select(
+          'id, item_id, supplier, supplier_id, contract_ref, status, employee_id, quantity, start_date, expected_return_date, monthly_cost, notes, items(id, description, unit), employees(id, full_name), rental_suppliers(id, name)'
+        )
         .eq('user_id', user.id)
         .order('created_at', { ascending: false }),
     ]);
@@ -160,28 +183,45 @@ export default function RentalsPage() {
           description: String(i.description ?? ''),
           unit: String(i.unit ?? 'un'),
           is_rented: Boolean(i.is_rented),
-          quantity_current: Number(i.quantity_current ?? 0),
         }))
       );
     }
 
-    if (employeesRes.error) {
-      setEmployees([]);
+    if (possessionRes.error) {
+      setEmployeesByItem({});
     } else {
-      const list = (employeesRes.data || [])
-        .filter((e: { status?: string }) => !e.status || e.status === 'Ativo')
-        .map((e: { id: string; full_name: string }) => ({ id: e.id, full_name: e.full_name }));
-      setEmployees(list);
+      const grouped = new Map<string, Map<string, EmployeeOption>>();
+      for (const row of (possessionRes.data || []) as Array<{
+        item_id: string;
+        employee_id: string;
+        quantity: number;
+        employees?: { id: string; full_name: string; status?: string } | { id: string; full_name: string; status?: string }[] | null;
+      }>) {
+        const emp = asSingle(row.employees);
+        if (!emp || (emp.status && emp.status !== 'Ativo')) continue;
+        if (!grouped.has(row.item_id)) grouped.set(row.item_id, new Map<string, EmployeeOption>());
+        grouped.get(row.item_id)?.set(emp.id, { id: emp.id, full_name: emp.full_name });
+      }
+      const out: Record<string, EmployeeOption[]> = {};
+      for (const [itemId, m] of grouped) {
+        out[itemId] = Array.from(m.values()).sort((a, b) => a.full_name.localeCompare(b.full_name, 'pt-BR'));
+      }
+      setEmployeesByItem(out);
     }
 
-    if (sitesRes.error) {
-      setWorkSites([]);
+    if (suppliersRes.error) {
+      const msg = String(suppliersRes.error.message || '').toLowerCase();
+      if (!msg.includes('does not exist') && suppliersRes.error.code !== '42P01') {
+        setError(suppliersRes.error.message);
+      }
+      setSuppliers([]);
     } else {
-      setWorkSites(
-        (sitesRes.data || []).map((s: Record<string, unknown>) => ({
+      setSuppliers(
+        (suppliersRes.data || []).map((s: Record<string, unknown>) => ({
           id: String(s.id),
           name: String(s.name ?? ''),
-          kind: String(s.kind ?? 'canteiro'),
+          contact_name: s.contact_name ? String(s.contact_name) : null,
+          phone: s.phone ? String(s.phone) : null,
         }))
       );
     }
@@ -189,7 +229,7 @@ export default function RentalsPage() {
     if (rentalsRes.error) {
       const msg = String(rentalsRes.error.message || '');
       if (msg.toLowerCase().includes('equipment_rentals') || rentalsRes.error.code === '42P01') {
-        setError('Tabela de aluguéis não encontrada. Execute o arquivo supabase/rentals_management.sql no Supabase.');
+        setError('Estrutura de aluguéis desatualizada. Execute novamente o arquivo supabase/rentals_management.sql no Supabase.');
       } else {
         setError(msg);
       }
@@ -205,22 +245,85 @@ export default function RentalsPage() {
     void load();
   }, [load]);
 
+  const rentalsList = useMemo<RentalListRow[]>(() => {
+    const list: RentalListRow[] = rentals.map((r) => ({ ...r, isDraft: false }));
+    const existingItemIds = new Set(rentals.map((r) => r.item_id));
+    const drafts = items
+      .filter((it) => it.is_rented && !existingItemIds.has(it.id))
+      .map<RentalDraftRow>((it) => ({
+        id: `draft:${it.id}`,
+        item_id: it.id,
+        supplier: 'Pendente de cadastro',
+        supplier_id: null,
+        contract_ref: null,
+        status: 'ativo',
+        employee_id: null,
+        quantity: 1,
+        start_date: new Date().toISOString().slice(0, 10),
+        expected_return_date: null,
+        monthly_cost: null,
+        notes: null,
+        items: { id: it.id, description: it.description, unit: it.unit },
+        employees: null,
+        rental_suppliers: null,
+        isDraft: true,
+      }));
+    return [...drafts, ...list];
+  }, [items, rentals]);
+
+  const activeCount = rentals.filter((r) => r.status === 'ativo').length;
+  const monthlyTotal = rentals
+    .filter((r) => r.status === 'ativo')
+    .reduce((sum, r) => sum + Number(r.monthly_cost || 0), 0);
+
+  const itemOptions = useMemo(() => items.filter((i) => i.is_rented), [items]);
+
+  const eligibleEmployees = useMemo(() => {
+    if (!form.item_id) return [];
+    return employeesByItem[form.item_id] || [];
+  }, [employeesByItem, form.item_id]);
+
+  useEffect(() => {
+    if (!form.item_id) return;
+    const isValid = eligibleEmployees.some((e) => e.id === form.employee_id);
+    if (!isValid) {
+      setForm((prev) => ({
+        ...prev,
+        employee_id: eligibleEmployees[0]?.id || '',
+      }));
+    }
+  }, [eligibleEmployees, form.item_id, form.employee_id]);
+
   const openNew = () => {
     setEditing(null);
+    setDraftItemId(null);
     setForm(emptyForm());
+    setModalOpen(true);
+  };
+
+  const openFromDraft = (itemId: string) => {
+    const item = items.find((it) => it.id === itemId);
+    setEditing(null);
+    setDraftItemId(itemId);
+    setForm({
+      ...emptyForm(),
+      item_id: itemId,
+      employee_id: employeesByItem[itemId]?.[0]?.id || '',
+      quantity: 1,
+      notes: item ? `Item marcado como alugado no almoxarifado: ${item.description}.` : '',
+    });
     setModalOpen(true);
   };
 
   const openEdit = (row: RentalRow) => {
     setEditing(row);
+    setDraftItemId(null);
     setForm({
       item_id: row.item_id,
-      supplier: row.supplier,
+      supplier_id: row.supplier_id || '',
       contract_ref: row.contract_ref || '',
       status: row.status,
-      responsibility_type: row.responsibility_type,
       employee_id: row.employee_id || '',
-      work_site_id: row.work_site_id || '',
       quantity: Number(row.quantity || 1),
       start_date: row.start_date,
       expected_return_date: row.expected_return_date || '',
@@ -230,27 +333,71 @@ export default function RentalsPage() {
     setModalOpen(true);
   };
 
+  const saveSupplier = async (ev: React.FormEvent) => {
+    ev.preventDefault();
+    if (!supplierForm.name.trim()) {
+      alert('Informe o nome da locadora.');
+      return;
+    }
+    setSupplierSaving(true);
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      setSupplierSaving(false);
+      return;
+    }
+    const { error: err } = await supabase.from('rental_suppliers').insert([
+      {
+        user_id: user.id,
+        name: supplierForm.name.trim(),
+        contact_name: supplierForm.contact_name.trim() || null,
+        phone: supplierForm.phone.trim() || null,
+        notes: supplierForm.notes.trim() || null,
+      },
+    ]);
+    if (err) {
+      alert(err.message || 'Falha ao cadastrar locadora.');
+      setSupplierSaving(false);
+      return;
+    }
+    setSupplierSaving(false);
+    setSupplierModalOpen(false);
+    setSupplierForm(emptySupplierForm());
+    await load();
+  };
+
   const save = async (ev: React.FormEvent) => {
     ev.preventDefault();
     if (!form.item_id) {
       alert('Selecione o equipamento do almoxarifado.');
       return;
     }
-    if (!form.supplier.trim()) {
-      alert('Informe o fornecedor.');
+    if (!form.supplier_id) {
+      alert('Selecione a locadora cadastrada.');
       return;
     }
-    if (form.responsibility_type === 'employee' && !form.employee_id) {
-      alert('Selecione o colaborador responsável.');
+
+    const itemEmployees = employeesByItem[form.item_id] || [];
+    if (itemEmployees.length === 0) {
+      alert('Este item alugado ainda não está na carteira de nenhum colaborador.');
       return;
     }
-    if (form.responsibility_type === 'site' && !form.work_site_id) {
-      alert('Selecione o canteiro/sede responsável.');
+    if (!form.employee_id || !itemEmployees.some((e) => e.id === form.employee_id)) {
+      alert('O responsável do aluguel precisa ser um colaborador que está com este item na carteira.');
+      return;
+    }
+
+    const supplier = suppliers.find((s) => s.id === form.supplier_id);
+    if (!supplier) {
+      alert('Locadora inválida.');
       return;
     }
 
     setSaving(true);
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
     if (!user) {
       setSaving(false);
       return;
@@ -259,12 +406,13 @@ export default function RentalsPage() {
     const payload = {
       user_id: user.id,
       item_id: form.item_id,
-      supplier: form.supplier.trim(),
+      supplier: supplier.name,
+      supplier_id: form.supplier_id,
       contract_ref: form.contract_ref.trim() || null,
       status: form.status,
-      responsibility_type: form.responsibility_type,
-      employee_id: form.responsibility_type === 'employee' ? form.employee_id : null,
-      work_site_id: form.responsibility_type === 'site' ? form.work_site_id : null,
+      responsibility_type: 'employee',
+      employee_id: form.employee_id,
+      work_site_id: null,
       quantity: Math.max(1, Number(form.quantity || 1)),
       start_date: form.start_date,
       expected_return_date: form.expected_return_date || null,
@@ -292,17 +440,19 @@ export default function RentalsPage() {
       return;
     }
 
-    // Mantém o item marcado como alugado no almoxarifado.
     await supabase.from('items').update({ is_rented: true }).eq('id', form.item_id).eq('user_id', user.id);
 
     setSaving(false);
     setModalOpen(false);
+    setDraftItemId(null);
     await load();
   };
 
   const closeRental = async (row: RentalRow) => {
     if (!confirm('Encerrar este aluguel?')) return;
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
     if (!user) return;
     const { error: err } = await supabase
       .from('equipment_rentals')
@@ -315,13 +465,6 @@ export default function RentalsPage() {
     }
     await load();
   };
-
-  const activeCount = rentals.filter((r) => r.status === 'ativo').length;
-  const monthlyTotal = rentals
-    .filter((r) => r.status === 'ativo')
-    .reduce((sum, r) => sum + Number(r.monthly_cost || 0), 0);
-
-  const itemOptions = useMemo(() => items.filter((i) => i.is_rented || i.quantity_current > 0), [items]);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -337,17 +480,19 @@ export default function RentalsPage() {
           <div>
             <h1 className="text-2xl font-bold text-primary">Gestão de Aluguéis</h1>
             <p className="text-slate-500 text-sm">
-              Controle de equipamentos alugados e responsabilidade por colaborador, local ou almoxarifado.
+              Itens marcados como aluguel aparecem aqui automaticamente. O responsável é o colaborador com o item em carteira.
             </p>
           </div>
         </div>
         <div className="flex gap-2">
-          <Link
-            href="/inventory"
-            className="px-4 py-2 border border-slate-200 rounded-lg font-bold text-slate-600 hover:bg-slate-50 text-sm"
+          <button
+            type="button"
+            onClick={() => setSupplierModalOpen(true)}
+            className="flex items-center gap-2 border border-slate-200 text-slate-700 bg-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-slate-50"
           >
-            Abrir almoxarifado
-          </Link>
+            <Building2 size={16} />
+            Locadoras
+          </button>
           <button
             type="button"
             onClick={openNew}
@@ -375,8 +520,8 @@ export default function RentalsPage() {
           </p>
         </div>
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-[10px] font-black uppercase tracking-wider text-slate-500">Itens marcados alugados</p>
-          <p className="text-2xl font-black text-primary mt-1 tabular-nums">{items.filter((i) => i.is_rented).length}</p>
+          <p className="text-[10px] font-black uppercase tracking-wider text-slate-500">Locadoras cadastradas</p>
+          <p className="text-2xl font-black text-primary mt-1 tabular-nums">{suppliers.length}</p>
         </div>
       </div>
 
@@ -386,30 +531,36 @@ export default function RentalsPage() {
             <Loader2 className="animate-spin inline mr-2" size={20} />
             Carregando aluguéis...
           </div>
-        ) : rentals.length === 0 ? (
-          <div className="p-12 text-center text-slate-400 text-sm">Nenhum aluguel cadastrado.</div>
+        ) : rentalsList.length === 0 ? (
+          <div className="p-12 text-center text-slate-400 text-sm">
+            Nenhum item alugado encontrado. Marque o equipamento como alugado no almoxarifado.
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead className="bg-slate-50 border-b border-border">
                 <tr>
                   <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Equipamento</th>
-                  <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Fornecedor</th>
+                  <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Locadora</th>
                   <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Responsável</th>
                   <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Período</th>
                   <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {rentals.map((r) => {
+                {rentalsList.map((r) => {
                   const it = asSingle(r.items);
+                  const emp = asSingle(r.employees);
+                  const sup = asSingle(r.rental_suppliers);
                   return (
                     <tr key={r.id} className="hover:bg-slate-50/80">
                       <td className="px-4 py-3">
                         <div className="font-bold text-primary">{formatProductLabelDisplay(it?.description || '—')}</div>
                         <div className="text-xs text-slate-500">
                           {r.quantity} {it?.unit || 'un'} ·{' '}
-                          {r.status === 'ativo' ? (
+                          {rowIsDraft(r) ? (
+                            <span className="text-amber-700 font-bold">Pendente de cadastro</span>
+                          ) : r.status === 'ativo' ? (
                             <span className="text-emerald-700 font-bold">Ativo</span>
                           ) : (
                             <span className="text-slate-500 font-bold">Encerrado</span>
@@ -417,35 +568,55 @@ export default function RentalsPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-700">
-                        <div className="font-bold">{r.supplier}</div>
+                        <div className="font-bold">{sup?.name || r.supplier}</div>
                         {r.contract_ref ? <div className="text-xs text-slate-500">Contrato: {r.contract_ref}</div> : null}
                       </td>
-                      <td className="px-4 py-3 text-sm text-slate-700">{responsibilityLabel(r)}</td>
                       <td className="px-4 py-3 text-sm text-slate-700">
-                        <div>{new Date(r.start_date).toLocaleDateString('pt-BR')}</div>
-                        <div className="text-xs text-slate-500">
-                          Prev. devolução:{' '}
-                          {r.expected_return_date ? new Date(r.expected_return_date).toLocaleDateString('pt-BR') : '—'}
-                        </div>
+                        {emp?.full_name || 'Aguardando colaborador com item em carteira'}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-slate-700">
+                        {rowIsDraft(r) ? (
+                          <span className="text-slate-500">Defina na configuração</span>
+                        ) : (
+                          <>
+                            <div>{new Date(r.start_date).toLocaleDateString('pt-BR')}</div>
+                            <div className="text-xs text-slate-500">
+                              Prev. devolução:{' '}
+                              {r.expected_return_date ? new Date(r.expected_return_date).toLocaleDateString('pt-BR') : '—'}
+                            </div>
+                          </>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex justify-end gap-2">
-                          <button
-                            type="button"
-                            onClick={() => openEdit(r)}
-                            className="px-3 py-1.5 text-xs font-black text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50"
-                          >
-                            Editar
-                          </button>
-                          {r.status === 'ativo' ? (
+                          {rowIsDraft(r) ? (
                             <button
                               type="button"
-                              onClick={() => void closeRental(r)}
-                              className="px-3 py-1.5 text-xs font-black text-emerald-700 border border-emerald-200 bg-emerald-50 rounded-lg hover:bg-emerald-100"
+                              onClick={() => openFromDraft(r.item_id)}
+                              className="px-3 py-1.5 text-xs font-black text-amber-700 border border-amber-200 bg-amber-50 rounded-lg hover:bg-amber-100"
                             >
-                              Encerrar
+                              Configurar
                             </button>
-                          ) : null}
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => openEdit(r)}
+                                className="px-3 py-1.5 text-xs font-black text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50"
+                              >
+                                Editar
+                              </button>
+                              {r.status === 'ativo' ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void closeRental(r)}
+                                  className="px-3 py-1.5 text-xs font-black text-emerald-700 border border-emerald-200 bg-emerald-50 rounded-lg hover:bg-emerald-100"
+                                >
+                                  Encerrar
+                                </button>
+                              ) : null}
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -461,7 +632,7 @@ export default function RentalsPage() {
         <div className="fixed inset-0 bg-primary/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in duration-300">
             <div className="p-6 border-b bg-slate-50 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-primary">{editing ? 'Editar aluguel' : 'Novo aluguel'}</h2>
+              <h2 className="text-xl font-bold text-primary">{editing || draftItemId ? 'Configurar aluguel' : 'Novo aluguel'}</h2>
               <button type="button" onClick={() => setModalOpen(false)} className="p-2 hover:bg-slate-200 rounded-full">
                 <X size={20} />
               </button>
@@ -469,12 +640,18 @@ export default function RentalsPage() {
             <form onSubmit={save} className="p-6 space-y-4 overflow-y-auto">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1 md:col-span-2">
-                  <label className="text-xs font-bold uppercase text-slate-400">Equipamento (almoxarifado)</label>
+                  <label className="text-xs font-bold uppercase text-slate-400">Equipamento alugado</label>
                   <select
                     required
                     className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none font-medium"
                     value={form.item_id}
-                    onChange={(e) => setForm((f) => ({ ...f, item_id: e.target.value }))}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        item_id: e.target.value,
+                        employee_id: (employeesByItem[e.target.value] || [])[0]?.id || '',
+                      }))
+                    }
                   >
                     <option value="">Selecione...</option>
                     {itemOptions.map((it) => (
@@ -484,20 +661,58 @@ export default function RentalsPage() {
                     ))}
                   </select>
                   <p className="text-[11px] text-slate-500 font-medium">
-                    O item selecionado será marcado como alugado no cadastro do almoxarifado.
+                    Aqui entram apenas itens já marcados como alugados no almoxarifado.
                   </p>
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-xs font-bold uppercase text-slate-400">Fornecedor</label>
-                  <input
-                    required
-                    type="text"
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none"
-                    value={form.supplier}
-                    onChange={(e) => setForm((f) => ({ ...f, supplier: e.target.value }))}
-                  />
+                  <label className="text-xs font-bold uppercase text-slate-400">Empresa locadora</label>
+                  <div className="flex gap-2">
+                    <select
+                      required
+                      className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none font-medium"
+                      value={form.supplier_id}
+                      onChange={(e) => setForm((f) => ({ ...f, supplier_id: e.target.value }))}
+                    >
+                      <option value="">Selecione...</option>
+                      {suppliers.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => setSupplierModalOpen(true)}
+                      className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-700 font-black text-xs hover:bg-slate-50"
+                    >
+                      + Locadora
+                    </button>
+                  </div>
                 </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold uppercase text-slate-400">Colaborador responsável (carteira)</label>
+                  <select
+                    required
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none font-medium"
+                    value={form.employee_id}
+                    onChange={(e) => setForm((f) => ({ ...f, employee_id: e.target.value }))}
+                  >
+                    <option value="">{form.item_id ? 'Selecione...' : 'Escolha o item primeiro'}</option>
+                    {eligibleEmployees.map((emp) => (
+                      <option key={emp.id} value={emp.id}>
+                        {emp.full_name}
+                      </option>
+                    ))}
+                  </select>
+                  {form.item_id && eligibleEmployees.length === 0 ? (
+                    <p className="text-[11px] font-bold text-amber-700">
+                      Nenhum colaborador com este item na carteira. Faça a retirada no almoxarifado para habilitar.
+                    </p>
+                  ) : null}
+                </div>
+
                 <div className="space-y-1">
                   <label className="text-xs font-bold uppercase text-slate-400">Contrato / referência</label>
                   <input
@@ -518,6 +733,7 @@ export default function RentalsPage() {
                     onChange={(e) => setForm((f) => ({ ...f, start_date: e.target.value }))}
                   />
                 </div>
+
                 <div className="space-y-1">
                   <label className="text-xs font-bold uppercase text-slate-400">Previsão de devolução</label>
                   <input
@@ -539,6 +755,7 @@ export default function RentalsPage() {
                     onChange={(e) => setForm((f) => ({ ...f, quantity: Math.max(1, Number(e.target.value || 1)) }))}
                   />
                 </div>
+
                 <div className="space-y-1">
                   <label className="text-xs font-bold uppercase text-slate-400">Custo mensal (R$)</label>
                   <input
@@ -563,64 +780,6 @@ export default function RentalsPage() {
                   </select>
                 </div>
 
-                <div className="space-y-1">
-                  <label className="text-xs font-bold uppercase text-slate-400">Responsabilidade</label>
-                  <select
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none font-medium"
-                    value={form.responsibility_type}
-                    onChange={(e) =>
-                      setForm((f) => ({
-                        ...f,
-                        responsibility_type: e.target.value as ResponsibilityType,
-                        employee_id: e.target.value === 'employee' ? f.employee_id : '',
-                        work_site_id: e.target.value === 'site' ? f.work_site_id : '',
-                      }))
-                    }
-                  >
-                    <option value="warehouse">Almoxarifado</option>
-                    <option value="employee">Colaborador</option>
-                    <option value="site">Canteiro / sede</option>
-                  </select>
-                </div>
-
-                {form.responsibility_type === 'employee' && (
-                  <div className="space-y-1 md:col-span-2">
-                    <label className="text-xs font-bold uppercase text-slate-400">Colaborador responsável</label>
-                    <select
-                      required
-                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none font-medium"
-                      value={form.employee_id}
-                      onChange={(e) => setForm((f) => ({ ...f, employee_id: e.target.value }))}
-                    >
-                      <option value="">Selecione...</option>
-                      {employees.map((emp) => (
-                        <option key={emp.id} value={emp.id}>
-                          {emp.full_name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                {form.responsibility_type === 'site' && (
-                  <div className="space-y-1 md:col-span-2">
-                    <label className="text-xs font-bold uppercase text-slate-400">Local responsável</label>
-                    <select
-                      required
-                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none font-medium"
-                      value={form.work_site_id}
-                      onChange={(e) => setForm((f) => ({ ...f, work_site_id: e.target.value }))}
-                    >
-                      <option value="">Selecione...</option>
-                      {workSites.map((site) => (
-                        <option key={site.id} value={site.id}>
-                          {site.kind === 'sede' ? 'Sede' : 'Canteiro'}: {site.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
                 <div className="space-y-1 md:col-span-2">
                   <label className="text-xs font-bold uppercase text-slate-400">Observações</label>
                   <textarea
@@ -634,8 +793,7 @@ export default function RentalsPage() {
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 flex items-start gap-3 text-xs text-slate-600">
                 <ReceiptText size={16} className="mt-0.5 text-secondary shrink-0" />
                 <div>
-                  Este módulo fica interligado ao almoxarifado: o equipamento selecionado vem da base de itens e continua com
-                  rastreabilidade de posse/responsabilidade.
+                  Regra do módulo: o responsável do aluguel deve ser o colaborador que está com o material na carteira.
                 </div>
               </div>
 
@@ -653,10 +811,87 @@ export default function RentalsPage() {
                   className="flex-1 p-3 bg-primary text-white rounded-xl font-bold hover:bg-slate-800 disabled:opacity-50 inline-flex items-center justify-center gap-2"
                 >
                   {saving ? <Loader2 size={16} className="animate-spin" /> : <ShieldCheck size={16} />}
-                  {saving ? 'Salvando...' : editing ? 'Salvar edição' : 'Cadastrar aluguel'}
+                  {saving ? 'Salvando...' : editing ? 'Salvar edição' : 'Salvar aluguel'}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {supplierModalOpen && (
+        <div className="fixed inset-0 bg-primary/40 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in duration-300">
+            <div className="p-6 border-b bg-slate-50 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-primary">Empresas locadoras</h2>
+              <button type="button" onClick={() => setSupplierModalOpen(false)} className="p-2 hover:bg-slate-200 rounded-full">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-6 space-y-4 overflow-y-auto">
+              <form onSubmit={saveSupplier} className="space-y-3 border border-slate-200 rounded-xl p-4 bg-slate-50/70">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold uppercase text-slate-400">Nome da locadora</label>
+                  <input
+                    required
+                    type="text"
+                    className="w-full p-3 bg-white border border-slate-200 rounded-lg outline-none"
+                    value={supplierForm.name}
+                    onChange={(e) => setSupplierForm((f) => ({ ...f, name: e.target.value }))}
+                  />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold uppercase text-slate-400">Contato</label>
+                    <input
+                      type="text"
+                      className="w-full p-3 bg-white border border-slate-200 rounded-lg outline-none"
+                      value={supplierForm.contact_name}
+                      onChange={(e) => setSupplierForm((f) => ({ ...f, contact_name: e.target.value }))}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold uppercase text-slate-400">Telefone</label>
+                    <input
+                      type="text"
+                      className="w-full p-3 bg-white border border-slate-200 rounded-lg outline-none"
+                      value={supplierForm.phone}
+                      onChange={(e) => setSupplierForm((f) => ({ ...f, phone: e.target.value }))}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold uppercase text-slate-400">Observações</label>
+                  <textarea
+                    className="w-full p-3 bg-white border border-slate-200 rounded-lg outline-none text-sm min-h-[72px]"
+                    value={supplierForm.notes}
+                    onChange={(e) => setSupplierForm((f) => ({ ...f, notes: e.target.value }))}
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={supplierSaving}
+                  className="w-full p-3 bg-primary text-white rounded-xl font-bold hover:bg-slate-800 disabled:opacity-50"
+                >
+                  {supplierSaving ? 'Salvando...' : 'Cadastrar locadora'}
+                </button>
+              </form>
+
+              <div className="space-y-2">
+                {suppliers.length === 0 ? (
+                  <p className="text-sm text-slate-400 italic">Nenhuma locadora cadastrada.</p>
+                ) : (
+                  suppliers.map((s) => (
+                    <div key={s.id} className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                      <div className="font-bold text-primary">{s.name}</div>
+                      <div className="text-xs text-slate-500">
+                        {s.contact_name || 'Sem contato'} {s.phone ? `· ${s.phone}` : ''}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}

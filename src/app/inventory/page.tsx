@@ -56,6 +56,8 @@ interface Product {
   is_rented?: boolean;
   /** TAG / identificador fixo no cadastro do item */
   tag?: string | null;
+  calibration_due_date?: string | null;
+  expiration_date?: string | null;
   quantity_current: number;
   quantity_min: number;
   unit: string;
@@ -98,6 +100,8 @@ const emptyItemForm = () => ({
   quantity_min: 0,
   unit: 'un',
   tag: '',
+  calibration_due_date: '',
+  expiration_date: '',
 });
 
 function InventoryContent() {
@@ -481,6 +485,8 @@ function InventoryContent() {
       consumable: formData.consumable,
       unique_item: formData.unique_item,
       is_rented: formData.is_rented,
+      calibration_due_date: formData.calibration_due_date || null,
+      expiration_date: formData.expiration_date || null,
       quantity_current: formData.quantity_current,
       quantity_min: formData.quantity_min,
       unit: formData.unit,
@@ -493,11 +499,24 @@ function InventoryContent() {
 
     if (
       error?.message &&
-      (isLikelyMissingColumn(error.message, 'tag') || isLikelyMissingColumn(error.message, 'is_rented'))
+      (
+        isLikelyMissingColumn(error.message, 'tag') ||
+        isLikelyMissingColumn(error.message, 'is_rented') ||
+        isLikelyMissingColumn(error.message, 'calibration_due_date') ||
+        isLikelyMissingColumn(error.message, 'expiration_date')
+      )
     ) {
-      const { tag: _t, is_rented: _r, ...legacy } = patch as Record<string, unknown> & {
+      const {
+        tag: _t,
+        is_rented: _r,
+        calibration_due_date: _c,
+        expiration_date: _e,
+        ...legacy
+      } = patch as Record<string, unknown> & {
         tag?: unknown;
         is_rented?: unknown;
+        calibration_due_date?: unknown;
+        expiration_date?: unknown;
       };
       patch = legacy;
       error = (await supabase.from('items').update(patch).eq('id', editingItem.id).eq('user_id', user.id)).error;
@@ -546,6 +565,8 @@ function InventoryContent() {
       consumable: formData.consumable,
       unique_item: formData.unique_item,
       is_rented: formData.is_rented,
+      calibration_due_date: formData.calibration_due_date || null,
+      expiration_date: formData.expiration_date || null,
       quantity_current: formData.quantity_current,
       quantity_min: formData.quantity_min,
       unit: formData.unit,
@@ -558,11 +579,24 @@ function InventoryContent() {
     let { error } = await supabase.from('items').insert([row]);
     if (
       error?.message &&
-      (isLikelyMissingColumn(error.message, 'tag') || isLikelyMissingColumn(error.message, 'is_rented'))
+      (
+        isLikelyMissingColumn(error.message, 'tag') ||
+        isLikelyMissingColumn(error.message, 'is_rented') ||
+        isLikelyMissingColumn(error.message, 'calibration_due_date') ||
+        isLikelyMissingColumn(error.message, 'expiration_date')
+      )
     ) {
-      const { tag: _t, is_rented: _r, ...legacy } = row as Record<string, unknown> & {
+      const {
+        tag: _t,
+        is_rented: _r,
+        calibration_due_date: _c,
+        expiration_date: _e,
+        ...legacy
+      } = row as Record<string, unknown> & {
         tag?: unknown;
         is_rented?: unknown;
+        calibration_due_date?: unknown;
+        expiration_date?: unknown;
       };
       row = legacy;
       ({ error } = await supabase.from('items').insert([row]));
@@ -1446,6 +1480,8 @@ function InventoryContent() {
                                 quantity_min: p.quantity_min,
                                 unit: p.unit,
                                 tag: p.tag ?? '',
+                                calibration_due_date: p.calibration_due_date?.slice(0, 10) ?? '',
+                                expiration_date: p.expiration_date?.slice(0, 10) ?? '',
                               });
                             }}
                             className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-blue-500"
@@ -1627,6 +1663,8 @@ function InventoryContent() {
                           quantity_min: p.quantity_min,
                           unit: p.unit,
                           tag: p.tag ?? '',
+                          calibration_due_date: p.calibration_due_date?.slice(0, 10) ?? '',
+                          expiration_date: p.expiration_date?.slice(0, 10) ?? '',
                         });
                       }}
                       className="min-h-[48px] flex items-center justify-center gap-2 rounded-xl bg-slate-50 text-blue-700 border border-slate-200 font-bold text-sm"
@@ -1839,6 +1877,27 @@ function InventoryContent() {
                   Identificador fixo deste material no cadastro. Na retirada de item único, a TAG da movimentação continua
                   sendo informada no carrinho ou na saída rápida.
                 </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold uppercase text-slate-400">Próxima aferição</label>
+                  <input
+                    type="date"
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none text-sm"
+                    value={formData.calibration_due_date}
+                    onChange={(e) => setFormData({ ...formData, calibration_due_date: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold uppercase text-slate-400">Validade</label>
+                  <input
+                    type="date"
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none text-sm"
+                    value={formData.expiration_date}
+                    onChange={(e) => setFormData({ ...formData, expiration_date: e.target.value })}
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4 pt-2">

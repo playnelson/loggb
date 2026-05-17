@@ -6,6 +6,7 @@ import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { BarChart3, StickyNote } from 'lucide-react';
 import { AlmoxHomeDashboard } from '@/components/AlmoxHomeDashboard';
+import { HomeAlertsFeed } from '@/components/HomeAlertsFeed';
 import { MuralPostIts } from '@/components/MuralPostIts';
 
 type HomeSection = 'resumo' | 'mural';
@@ -49,7 +50,12 @@ export default function Home() {
         </div>
       </div>
 
-      {homeSection === 'resumo' && <AlmoxHomeDashboard />}
+      {homeSection === 'resumo' && (
+        <>
+          <HomeAlertsFeed />
+          <AlmoxHomeDashboard />
+        </>
+      )}
       {homeSection === 'mural' && <MuralPostIts />}
     </div>
   );

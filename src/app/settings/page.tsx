@@ -47,6 +47,12 @@ export default function SettingsPage() {
         .eq('user_id', user.id);
       if (rentalsError) console.error('Erro ao deletar aluguéis:', rentalsError);
 
+      const { error: suppliersError } = await supabase
+        .from('rental_suppliers')
+        .delete()
+        .eq('user_id', user.id);
+      if (suppliersError) console.error('Erro ao deletar locadoras:', suppliersError);
+
       // 3. Deletar Funcionários
       const { error: empError } = await supabase
         .from('employees')
@@ -120,6 +126,16 @@ export default function SettingsPage() {
         const em = String(rRentals.error.message || '').toLowerCase();
         if (!em.includes('does not exist') && rRentals.error.code !== '42P01') {
           parts.push(`Aluguéis: ${rRentals.error.message}`);
+        }
+      }
+
+      const rSuppliers = await supabase.from('rental_suppliers').update({ user_id: uid }).is('user_id', null).select('id');
+      if (!rSuppliers.error) {
+        parts.push(`Locadoras: ${rSuppliers.data?.length ?? 0}.`);
+      } else {
+        const em = String(rSuppliers.error.message || '').toLowerCase();
+        if (!em.includes('does not exist') && rSuppliers.error.code !== '42P01') {
+          parts.push(`Locadoras: ${rSuppliers.error.message}`);
         }
       }
 
