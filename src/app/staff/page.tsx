@@ -6,6 +6,7 @@ import { useCallback, useMemo, useRef, useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { formatProductLabelDisplay } from '@/lib/productDisplayText';
 import { recordMovement, updatePossessionQuantity, updateStock } from '@/lib/movements';
+import { formatEmployeeName, normalizeEmployeeNameForSave, normalizeSearchText } from '@/lib/employeeName';
 import { Search, UserPlus, Mail, Phone, ExternalLink, X, FileUp, Filter, Package, AlertCircle, History, RotateCcw, Download, Loader2, ArrowLeft, FileText, Trash2 } from 'lucide-react';
 import ImportSpreadsheet from '@/components/ImportSpreadsheet';
 import {
@@ -263,7 +264,10 @@ export default function StaffPage() {
       setEmployees([]);
       setEpiConsumableByEmployee({});
     } else {
-      const list = data || [];
+      const list = (data || []).map((employee: Employee) => ({
+        ...employee,
+        full_name: formatEmployeeName(employee.full_name),
+      }));
       setEmployees(list);
       try {
         const ids = list.map((e: Employee) => e.id);
@@ -363,7 +367,8 @@ export default function StaffPage() {
 
     if (!data) return;
 
-    const content = `HISTÓRICO DE MOVIMENTAÇÕES - ${employee.full_name}\n` +
+    const employeeName = formatEmployeeName(employee.full_name);
+    const content = `HISTÓRICO DE MOVIMENTAÇÕES - ${employeeName}\n` +
       `Gerado em: ${new Date().toLocaleString()}\n` +
       `--------------------------------------------------\n\n` +
       data.map((m: any) => {
@@ -382,7 +387,7 @@ export default function StaffPage() {
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `historico_${employee.full_name.toLowerCase().replace(/ /g, '_')}.txt`;
+    a.download = `historico_${normalizeSearchText(employeeName).replace(/ /g, '_')}.txt`;
     a.click();
   };
 
@@ -460,7 +465,7 @@ export default function StaffPage() {
 
     downloadEpiFichaTxt(
       {
-        full_name: epiFichaEmployee.full_name,
+        full_name: formatEmployeeName(epiFichaEmployee.full_name),
         role: epiFichaEmployee.role,
         cpf: epiFichaEmployee.cpf,
         department: epiFichaEmployee.department,
@@ -498,7 +503,7 @@ export default function StaffPage() {
 
     downloadFerramentasFichaTxt(
       {
-        full_name: epiFichaEmployee.full_name,
+        full_name: formatEmployeeName(epiFichaEmployee.full_name),
         role: epiFichaEmployee.role,
         cpf: epiFichaEmployee.cpf,
         department: epiFichaEmployee.department,
@@ -710,7 +715,8 @@ export default function StaffPage() {
       return;
     }
 
-    const { error } = await supabase.from('employees').insert([{ ...formData, user_id: user.id }]);
+    const fullName = normalizeEmployeeNameForSave(formData.full_name);
+    const { error } = await supabase.from('employees').insert([{ ...formData, full_name: fullName, user_id: user.id }]);
 
     if (error) {
       console.error('Error adding employee:', error);
@@ -730,13 +736,13 @@ export default function StaffPage() {
   };
 
   const filteredEmployees = employees.filter((e) => {
-    const q = searchTerm.toLowerCase();
+    const q = normalizeSearchText(searchTerm);
     const epiExtra = epiConsumableByEmployee[e.id] || [];
     const matchesSearch =
-      e.full_name.toLowerCase().includes(q) ||
-      (e.role && e.role.toLowerCase().includes(q)) ||
-      e.possession?.some((p) => p.items?.description.toLowerCase().includes(q)) ||
-      epiExtra.some((c) => c.description.toLowerCase().includes(q));
+      normalizeSearchText(e.full_name).includes(q) ||
+      (e.role && normalizeSearchText(e.role).includes(q)) ||
+      e.possession?.some((p) => normalizeSearchText(p.items?.description || '').includes(q)) ||
+      epiExtra.some((c) => normalizeSearchText(c.description).includes(q));
 
     const matchesStatus = statusFilter === 'Todos' || e.status === statusFilter;
 
@@ -1555,6 +1561,9 @@ export default function StaffPage() {
                           <th scope="col" className="text-right py-2.5 px-3 text-[10px] font-black uppercase tracking-wide text-blue-900 w-[72px]">
                             Qtd
                           </th>
+                          <th scope="col" className="text-right py-2.5 px-3 text-[10px] font-black uppercase tracking-wide text-blue-900 w-[88px]">
+                            Ação
+                          </th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1577,11 +1586,31 @@ export default function StaffPage() {
                             <td className="py-2.5 px-3 align-middle text-right font-black text-primary tabular-nums">
                               {p.quantity}
                             </td>
+                            <td className="py-2.5 px-3 align-middle text-right">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (!walletEmployeeId) return;
+                                  setWalletReturn({
+                                    employeeId: walletEmployeeId,
+                                    item_id: p.item_id,
+                                    description: p.items.description,
+                                    unit: p.items.unit,
+                                    maxQty: Number(p.quantity || 1),
+                                  });
+                                  setReturnQty(Math.max(1, Number(p.quantity || 1)));
+                                }}
+                                className="px-3 py-1.5 bg-white border border-blue-200 rounded-lg text-xs font-black text-blue-800 hover:bg-blue-50"
+                                title="Devolver ao estoque"
+                              >
+                                Devolver
+                              </button>
+                            </td>
                           </tr>
                         ))}
                         {walletDemaisMateriaisLines.length === 0 && (
                           <tr>
-                            <td colSpan={4} className="py-8 px-3 text-center text-sm text-slate-400 italic">
+                            <td colSpan={5} className="py-8 px-3 text-center text-sm text-slate-400 italic">
                               Sem outros materiais em posse.
                             </td>
                           </tr>
@@ -1936,7 +1965,12 @@ export default function StaffPage() {
                   placeholder="Nome do colaborador..."
                   className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-secondary/20 font-bold"
                   value={formData.full_name}
-                  onChange={(e) => setFormData({...formData, full_name: e.target.value})}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      full_name: normalizeEmployeeNameForSave(e.target.value),
+                    })
+                  }
                 />
               </div>
 

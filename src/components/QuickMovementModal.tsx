@@ -3,6 +3,7 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { formatProductLabelDisplay } from '@/lib/productDisplayText';
+import { formatEmployeeName } from '@/lib/employeeName';
 import { recordMovement, updateStock, updatePossessionQuantity, updateSitePossessionQuantity } from '@/lib/movements';
 import { 
   X, 
@@ -43,7 +44,7 @@ function nestedEmployeeId(employees: PossessionRow['employees']): string | null 
 function nestedEmployeeName(employees: PossessionRow['employees']): string {
   if (!employees) return 'Colaborador';
   const one = Array.isArray(employees) ? employees[0] : employees;
-  return String(one?.full_name || 'Colaborador');
+  return formatEmployeeName(String(one?.full_name || 'Colaborador'));
 }
 
 /** Colaboradores com quantidade > 0 na carteira para este item. */
@@ -109,7 +110,7 @@ export default function QuickMovementModal({
       .eq('user_id', user.id)
       .eq('status', 'Ativo')
       .order('full_name');
-    setEmployees(data || []);
+    setEmployees((data || []).map((employee: Employee) => ({ ...employee, full_name: formatEmployeeName(employee.full_name) })));
   }, []);
 
   const fetchWorkSites = useCallback(async () => {

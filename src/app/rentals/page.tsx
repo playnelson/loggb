@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { formatProductLabelDisplay } from '@/lib/productDisplayText';
+import { formatEmployeeName } from '@/lib/employeeName';
 import { isLikelyMissingColumn } from '@/lib/tenantItems';
 import { ArrowLeft, Building2, Loader2, ReceiptText, ShieldCheck, X } from 'lucide-react';
 
@@ -207,7 +208,7 @@ export default function RentalsPage() {
           const current = grouped.get(pos.item_id)?.get(employee.id);
           grouped.get(pos.item_id)?.set(employee.id, {
             id: employee.id,
-            full_name: employee.full_name,
+            full_name: formatEmployeeName(employee.full_name),
             quantity: qty + Number(current?.quantity || 0),
           });
         }
@@ -570,7 +571,7 @@ export default function RentalsPage() {
                         {r.contract_ref ? <div className="text-xs text-slate-500">Contrato: {r.contract_ref}</div> : null}
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-700">
-                        {holdersLabel || emp?.full_name || inferredLabel || 'Sem carteira vinculada'}
+                        {holdersLabel || formatEmployeeName(emp?.full_name) || inferredLabel || 'Sem carteira vinculada'}
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-700">
                         {rowIsDraft(r) ? (

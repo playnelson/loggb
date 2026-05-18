@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import type { WorkSiteKind, WorkSiteRow } from '@/lib/workSites';
 import { isWorkSiteKind } from '@/lib/workSites';
+import { formatEmployeeName } from '@/lib/employeeName';
 import { ArrowLeft, Building2, HardHat, Loader2, MapPin, Pencil, Plus, X } from 'lucide-react';
 
 type EmployeeOpt = { id: string; full_name: string };
@@ -85,7 +86,7 @@ export default function SitesPage() {
       setEmployees(
         (empData || [])
           .filter((e: { status?: string }) => !e.status || e.status === 'Ativo')
-          .map((e: { id: string; full_name: string }) => ({ id: e.id, full_name: e.full_name }))
+          .map((e: { id: string; full_name: string }) => ({ id: e.id, full_name: formatEmployeeName(e.full_name) }))
       );
     }
     setLoading(false);

@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs';
+import { formatEmployeeName } from '@/lib/employeeName';
 
 interface PossessionDetail {
   quantity: number;
@@ -34,7 +35,7 @@ function employeeNameFromPossession(
   employees: { full_name: string } | { full_name: string }[] | null | undefined
 ): string {
   if (!employees) return '—';
-  return Array.isArray(employees) ? employees[0]?.full_name || '—' : employees.full_name || '—';
+  return formatEmployeeName(Array.isArray(employees) ? employees[0]?.full_name || '—' : employees.full_name || '—');
 }
 
 function buildPossessionDetail(possession: PossessionDetail[] | undefined): string {

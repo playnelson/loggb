@@ -5,6 +5,7 @@ import * as XLSX from 'xlsx';
 import { supabase } from '@/lib/supabase';
 import { itemCodeFromDescription } from '@/lib/itemCode';
 import { normalizeProductLabelForSave } from '@/lib/productDisplayText';
+import { normalizeEmployeeNameForSave, normalizeSearchText } from '@/lib/employeeName';
 import { recordMovement, updatePossessionQuantity, updateStock } from '@/lib/movements';
 import { FileUp, Loader2, CheckCircle2, AlertCircle, X, Info, Users, Package, Download } from 'lucide-react';
 import { downloadInventoryImportTemplate } from '@/lib/inventoryImportTemplate';
@@ -190,6 +191,7 @@ export default function ImportSpreadsheet({
           rows.forEach(row => {
             const nameLine = row[mapping.nameIdx]?.toString().trim();
             if (!nameLine || nameLine.length < 2) return;
+            const normalizedName = normalizeEmployeeNameForSave(nameLine);
 
             let cpf = mapping.cpfIdx !== -1 ? row[mapping.cpfIdx]?.toString().trim() : null;
             const originalCpf = cpf;
@@ -202,11 +204,12 @@ export default function ImportSpreadsheet({
             const dept = mapping.deptIdx !== -1 ? row[mapping.deptIdx]?.toString().trim() : null;
             const status = mapping.statusIdx !== -1 ? row[mapping.statusIdx]?.toString().trim() : 'Ativo';
 
-            const key = (!isMaskedCpf && cleanedCpf.length === 11) ? cleanedCpf : nameLine.toLowerCase();
+            const key = (!isMaskedCpf && cleanedCpf.length === 11) ? cleanedCpf : normalizeSearchText(normalizedName);
             
             if (!uniquePeople.has(key)) {
               uniquePeople.set(key, { 
                 name: nameLine, 
+                normalizedName,
                 cpf: (cleanedCpf.length === 11 && !isMaskedCpf) ? cleanedCpf : null,
                 role,
                 dept,
@@ -237,14 +240,14 @@ export default function ImportSpreadsheet({
             const { data } = await supabase
               .from('employees')
               .select('id')
-              .ilike('full_name', person.name)
+              .ilike('full_name', person.normalizedName)
               .eq('user_id', user.id)
               .maybeSingle();
             if (data) empId = data.id;
           }
 
           const empData = {
-            full_name: person.name,
+            full_name: person.normalizedName,
             cpf: person.cpf || null,
             role: person.role,
             department: person.dept,
@@ -355,7 +358,10 @@ export default function ImportSpreadsheet({
             const cleanedCpf = cpf ? cpf.replace(/\D/g, '') : '';
             const isMaskedCpf = cpf && (cpf.includes('*') || cpf.toUpperCase().includes('X'));
             
-            const empKey = (!isMaskedCpf && cleanedCpf.length === 11) ? cleanedCpf : nameValue.toLowerCase();
+            const empKey =
+              (!isMaskedCpf && cleanedCpf.length === 11)
+                ? cleanedCpf
+                : normalizeSearchText(normalizeEmployeeNameForSave(nameValue));
             const empId = employeeMap.get(empKey);
             
             const code = row[mapping.codeIdx]?.toString().trim();

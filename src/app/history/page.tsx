@@ -5,6 +5,7 @@ export const dynamic = 'force-dynamic';
 import { useMemo, useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { formatProductLabelDisplay } from '@/lib/productDisplayText';
+import { formatEmployeeName, normalizeSearchText } from '@/lib/employeeName';
 import { 
   History, 
   Search, 
@@ -40,7 +41,7 @@ interface Movement {
 
 function movementCounterpartyLabel(m: Movement): string {
   const emp = m.employees?.full_name;
-  if (emp) return emp;
+  if (emp) return formatEmployeeName(emp);
   const ws = m.work_sites;
   if (ws?.name) {
     const k = ws.kind === 'sede' ? 'Sede' : 'Canteiro';
@@ -56,7 +57,7 @@ export default function HistoryPage() {
   const [typeFilter, setTypeFilter] = useState('ALL');
   const [dateFilter, setDateFilter] = useState('');
 
-  const searchLower = useMemo(() => searchTerm.trim().toLowerCase(), [searchTerm]);
+  const searchLower = useMemo(() => normalizeSearchText(searchTerm), [searchTerm]);
 
   const fetchMovements = async () => {
     setLoading(true);
@@ -124,9 +125,13 @@ export default function HistoryPage() {
     if (!searchLower) return movements;
     return movements.filter((m) => {
       const item = (m.items?.description || '').toLowerCase();
-      const emp = (m.employees?.full_name || '').toLowerCase();
-      const site = (m.work_sites?.name || '').toLowerCase();
-      return item.includes(searchLower) || emp.includes(searchLower) || site.includes(searchLower);
+      const emp = normalizeSearchText(m.employees?.full_name || '');
+      const site = normalizeSearchText(m.work_sites?.name || '');
+      return (
+        normalizeSearchText(item).includes(searchLower) ||
+        emp.includes(searchLower) ||
+        site.includes(searchLower)
+      );
     });
   }, [movements, searchLower]);
 

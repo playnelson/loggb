@@ -15,12 +15,14 @@ import { fetchTenantItems, isLikelyMissingColumn } from '@/lib/tenantItems';
 import { downloadInventoryImportTemplate } from '@/lib/inventoryImportTemplate';
 import { downloadInventoryWorkbookFromTemplate } from '@/lib/inventoryExportTemplate';
 import { CatalogProductAutocomplete } from '@/components/CatalogProductAutocomplete';
+import { formatEmployeeName, normalizeSearchText } from '@/lib/employeeName';
 
 function possessionEmployeeName(
   employees: { full_name: string } | { full_name: string }[] | null | undefined
 ): string | undefined {
   if (!employees) return undefined;
-  return Array.isArray(employees) ? employees[0]?.full_name : employees.full_name;
+  const fullName = Array.isArray(employees) ? employees[0]?.full_name : employees.full_name;
+  return formatEmployeeName(fullName);
 }
 
 function movementCounterpartyLabel(move: {
@@ -28,7 +30,7 @@ function movementCounterpartyLabel(move: {
   work_sites?: { name: string; kind: string } | { name: string; kind: string }[] | null;
 }): string {
   const emp = move.employees && !Array.isArray(move.employees) ? move.employees.full_name : undefined;
-  if (emp) return emp;
+  if (emp) return formatEmployeeName(emp);
   const ws = move.work_sites;
   const site = Array.isArray(ws) ? ws[0] : ws;
   if (site?.name) {
@@ -245,7 +247,7 @@ function InventoryContent() {
     }
     const actives = (data || [])
       .filter((e: { id: string; full_name: string; status?: string }) => !e.status || e.status === 'Ativo')
-      .map((e: { id: string; full_name: string }) => ({ id: e.id, full_name: e.full_name }));
+      .map((e: { id: string; full_name: string }) => ({ id: e.id, full_name: formatEmployeeName(e.full_name) }));
     setEmployees(actives);
   };
 
@@ -626,9 +628,9 @@ function InventoryContent() {
   };
 
   const filteredProducts = useMemo(() => {
-    const q = filterDescription.toLowerCase().trim();
+    const q = normalizeSearchText(filterDescription);
     return products.filter((p) => {
-      if (q && !p.description.toLowerCase().includes(q)) return false;
+      if (q && !normalizeSearchText(p.description).includes(q)) return false;
       if (filterConsumable === 'sim' && !p.consumable) return false;
       if (filterConsumable === 'nao' && p.consumable) return false;
 

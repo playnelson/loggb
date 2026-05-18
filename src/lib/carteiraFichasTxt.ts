@@ -1,6 +1,7 @@
 /**
  * Fichas de carteira em texto (.txt), organizadas para impressão ou arquivo.
  */
+import { formatEmployeeName } from '@/lib/employeeName';
 
 export type FichaTxtMeta = {
   companyName: string;
@@ -149,7 +150,7 @@ export function buildEpiFichaTxtContent(
   parts.push(kv('Setor / estabelecimento', meta.branchOrDept.trim() || '—'));
 
   parts.push(sectionHeader('DADOS DO COLABORADOR'));
-  parts.push(kv('Nome completo', employee.full_name));
+  parts.push(kv('Nome completo', formatEmployeeName(employee.full_name)));
   parts.push(kv('CPF', formatCpfDisplay(employee.cpf)));
   parts.push(kv('Função / cargo', employee.role?.trim() || '—'));
   parts.push(kv('Departamento', employee.department?.trim() || '—'));
@@ -211,7 +212,7 @@ export function buildFerramentasFichaTxtContent(
   parts.push(kv('Setor / estabelecimento', meta.branchOrDept.trim() || '—'));
 
   parts.push(sectionHeader('DADOS DO COLABORADOR'));
-  parts.push(kv('Nome completo', employee.full_name));
+  parts.push(kv('Nome completo', formatEmployeeName(employee.full_name)));
   parts.push(kv('CPF', formatCpfDisplay(employee.cpf)));
   parts.push(kv('Função / cargo', employee.role?.trim() || '—'));
   parts.push(kv('Departamento', employee.department?.trim() || '—'));
@@ -270,7 +271,7 @@ function triggerTxtDownload(filename: string, content: string) {
 export function downloadEpiFichaTxt(employee: FichaTxtEmployee, rows: FichaPossessionRow[], meta: FichaTxtMeta) {
   const generatedAt = new Date().toLocaleString('pt-BR');
   const content = buildEpiFichaTxtContent(employee, rows, meta, generatedAt);
-  triggerTxtDownload(filenameSlug(employee.full_name, 'ficha_epi'), content);
+  triggerTxtDownload(filenameSlug(formatEmployeeName(employee.full_name), 'ficha_epi'), content);
 }
 
 export function downloadFerramentasFichaTxt(
@@ -280,5 +281,5 @@ export function downloadFerramentasFichaTxt(
 ) {
   const generatedAt = new Date().toLocaleString('pt-BR');
   const content = buildFerramentasFichaTxtContent(employee, rows, meta, generatedAt);
-  triggerTxtDownload(filenameSlug(employee.full_name, 'ficha_ferramentas'), content);
+  triggerTxtDownload(filenameSlug(formatEmployeeName(employee.full_name), 'ficha_ferramentas'), content);
 }

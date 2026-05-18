@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { formatProductLabelDisplay } from '@/lib/productDisplayText';
+import { formatEmployeeName } from '@/lib/employeeName';
 import { AlertTriangle, BellRing, CalendarClock } from 'lucide-react';
 import { isLikelyMissingColumn } from '@/lib/tenantItems';
 
@@ -136,7 +137,7 @@ export function HomeAlertsFeed() {
           id: `rent-${row.id}`,
           kind: 'rental_contract',
           title: `Contrato aluguel: ${row.contract_ref || formatProductLabelDisplay(item?.description || 'Equipamento')}`,
-          subtitle: `${row.supplier || 'Locadora'}${emp?.full_name ? ` · Resp.: ${emp.full_name}` : ''}`,
+          subtitle: `${row.supplier || 'Locadora'}${emp?.full_name ? ` · Resp.: ${formatEmployeeName(emp.full_name)}` : ''}`,
           dueDate: row.expected_return_date,
           sourceHref: '/rentals',
           sourceLabel: 'Gestão de aluguéis',
