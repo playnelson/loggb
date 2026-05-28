@@ -241,7 +241,11 @@ export default function SettingsPage() {
         throw new Error(String(payload?.error || 'Falha ao restaurar backup.'));
       }
 
-      const importedCount = Object.values(payload?.importedCounts ?? {}).reduce((acc, n) => {
+      const importedCounts =
+        payload?.importedCounts && typeof payload.importedCounts === 'object'
+          ? (payload.importedCounts as Record<string, unknown>)
+          : {};
+      const importedCount = Object.values(importedCounts).reduce<number>((acc, n) => {
         const value = typeof n === 'number' ? n : 0;
         return acc + value;
       }, 0);
