@@ -158,7 +158,8 @@ function buildWalletSheet(
         bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
         right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
       };
-      if (cell.col <= 4) {
+      const col = Number(cell.col);
+      if (Number.isFinite(col) && col <= 4) {
         cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
       }
     });
