@@ -2,7 +2,7 @@
 
 export const dynamic = 'force-dynamic';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import {
@@ -31,6 +31,8 @@ import {
   AlertCircle,
   CheckCircle2,
   Circle,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 
 interface OrderRow {
@@ -43,7 +45,18 @@ interface OrderRow {
   delivery_deadline: string | null;
   stage?: string | null;
   created_at: string;
-  purchase_order_items: { id: string; delivered: boolean; description?: string | null }[] | null;
+  purchase_order_items:
+    | {
+        id: string;
+        line_number?: number | null;
+        delivered: boolean;
+        delivered_at?: string | null;
+        description?: string | null;
+        quantity?: number | null;
+        unit?: string | null;
+        received_quantity?: number | null;
+      }[]
+    | null;
 }
 
 const emptyDraft = (): ParsedPurchaseOrder => ({
@@ -141,6 +154,8 @@ export default function OrdensCompraPage() {
   const [sourceFilename, setSourceFilename] = useState<string | null>(null);
   const [parseConfidence, setParseConfidence] = useState<'high' | 'medium' | 'low'>('high');
   const [busyOrderId, setBusyOrderId] = useState<string | null>(null);
+  const [busyItemId, setBusyItemId] = useState<string | null>(null);
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
 
   const fetchOrders = useCallback(async () => {
     setLoading(true);
@@ -159,8 +174,13 @@ export default function OrdensCompraPage() {
           created_at: o.created_at,
           purchase_order_items: o.items.map((i) => ({
             id: i.id,
+            line_number: i.line_number,
             delivered: i.delivered,
+            delivered_at: i.delivered_at,
             description: i.description,
+            quantity: i.quantity,
+            unit: i.unit,
+            received_quantity: (i as { received_quantity?: number | null }).received_quantity ?? 0,
           })),
         }))
       );
@@ -178,7 +198,7 @@ export default function OrdensCompraPage() {
     const withStage = await supabase
       .from('purchase_orders')
       .select(
-        'id, oc_number, title, vendor_name, notes, delivery_deadline, stage, created_at, purchase_order_items!purchase_order_items_purchase_order_id_fkey(id, delivered, description)'
+        'id, oc_number, title, vendor_name, notes, delivery_deadline, stage, created_at, purchase_order_items!purchase_order_items_purchase_order_id_fkey(id, line_number, delivered, delivered_at, description, quantity, unit)'
       )
       .eq('user_id', user.id)
       .order('created_at', { ascending: false });
@@ -196,7 +216,7 @@ export default function OrdensCompraPage() {
       const noStage = await supabase
         .from('purchase_orders')
         .select(
-          'id, oc_number, title, vendor_name, notes, delivery_deadline, created_at, purchase_order_items!purchase_order_items_purchase_order_id_fkey(id, delivered, description)'
+          'id, oc_number, title, vendor_name, notes, delivery_deadline, created_at, purchase_order_items!purchase_order_items_purchase_order_id_fkey(id, line_number, delivered, delivered_at, description, quantity, unit)'
         )
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
@@ -356,6 +376,168 @@ export default function OrdensCompraPage() {
     setParseError(null);
     setParseConfidence('high');
     setImportOpen(true);
+  };
+
+  const updateOrderItemInState = useCallback(
+    (
+      orderId: string,
+      itemId: string,
+      patch: Partial<{
+        delivered: boolean;
+        delivered_at: string | null;
+        received_quantity: number | null;
+      }>
+    ) => {
+      setOrders((prev) =>
+        prev.map((order) => {
+          if (order.id !== orderId || !order.purchase_order_items) return order;
+          return {
+            ...order,
+            purchase_order_items: order.purchase_order_items.map((item) =>
+              item.id === itemId ? { ...item, ...patch } : item
+            ),
+          };
+        })
+      );
+    },
+    []
+  );
+
+  const quickToggleDelivered = async (
+    orderId: string,
+    item: NonNullable<OrderRow['purchase_order_items']>[number]
+  ) => {
+    if (busyItemId || busyOrderId) return;
+    const next = !item.delivered;
+    const nowIso = new Date().toISOString();
+    const fullQty = item.quantity ?? 0;
+    setBusyItemId(item.id);
+    try {
+      if (ORDENS_COMPRA_DEV_LOCAL && typeof window !== 'undefined') {
+        const list = devLocalOrdersRead();
+        const po = list.find((o) => o.id === orderId);
+        const line = po?.items.find((i) => i.id === item.id);
+        if (line) {
+          line.delivered = next;
+          line.delivered_at = next ? nowIso : null;
+          (line as { received_quantity?: number | null }).received_quantity = next ? fullQty : 0;
+          devLocalOrdersWrite(list);
+        }
+        updateOrderItemInState(orderId, item.id, {
+          delivered: next,
+          delivered_at: next ? nowIso : null,
+          received_quantity: next ? fullQty : 0,
+        });
+        return;
+      }
+
+      const withReceived = await supabase
+        .from('purchase_order_items')
+        .update({
+          delivered: next,
+          delivered_at: next ? nowIso : null,
+          received_quantity: next ? fullQty : 0,
+        })
+        .eq('id', item.id);
+
+      let e = withReceived.error;
+      const receivedMissing =
+        !!e && /received_quantity/i.test(`${e.message || ''} ${e.details || ''} ${e.hint || ''}`);
+
+      if (receivedMissing) {
+        const fallback = await supabase
+          .from('purchase_order_items')
+          .update({
+            delivered: next,
+            delivered_at: next ? nowIso : null,
+          })
+          .eq('id', item.id);
+        e = fallback.error;
+      }
+
+      if (e) throw e;
+
+      updateOrderItemInState(orderId, item.id, {
+        delivered: next,
+        delivered_at: next ? nowIso : null,
+        received_quantity: next ? fullQty : 0,
+      });
+    } catch (e) {
+      alert(`Erro ao atualizar item: ${e instanceof Error ? e.message : 'falha desconhecida'}`);
+    } finally {
+      setBusyItemId(null);
+    }
+  };
+
+  const quickPartialReceipt = async (
+    orderId: string,
+    item: NonNullable<OrderRow['purchase_order_items']>[number]
+  ) => {
+    if (busyItemId || busyOrderId) return;
+    const current = item.received_quantity ?? 0;
+    const raw = window.prompt(`Quantidade recebida para o item:`, String(current));
+    if (raw == null) return;
+    const parsed = Number(raw.replace(',', '.'));
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      alert('Informe uma quantidade válida.');
+      return;
+    }
+
+    const requested = item.quantity ?? parsed;
+    const received = Math.max(0, Math.min(parsed, requested));
+    const full = item.quantity != null ? received >= item.quantity : received > 0;
+    const nowIso = new Date().toISOString();
+    setBusyItemId(item.id);
+
+    try {
+      if (ORDENS_COMPRA_DEV_LOCAL && typeof window !== 'undefined') {
+        const list = devLocalOrdersRead();
+        const po = list.find((o) => o.id === orderId);
+        const line = po?.items.find((i) => i.id === item.id);
+        if (line) {
+          (line as { received_quantity?: number | null }).received_quantity = received;
+          line.delivered = full;
+          line.delivered_at = full ? nowIso : null;
+          devLocalOrdersWrite(list);
+        }
+        updateOrderItemInState(orderId, item.id, {
+          received_quantity: received,
+          delivered: full,
+          delivered_at: full ? nowIso : null,
+        });
+        return;
+      }
+
+      const withReceived = await supabase
+        .from('purchase_order_items')
+        .update({
+          received_quantity: received,
+          delivered: full,
+          delivered_at: full ? nowIso : null,
+        })
+        .eq('id', item.id);
+
+      if (withReceived.error) {
+        const rawErr = `${withReceived.error.message || ''} ${withReceived.error.details || ''} ${withReceived.error.hint || ''}`;
+        if (/received_quantity/i.test(rawErr)) {
+          alert(
+            'Seu banco ainda não tem a coluna received_quantity para recebimento parcial. Posso te passar o SQL para habilitar.'
+          );
+          return;
+        }
+        throw withReceived.error;
+      }
+
+      updateOrderItemInState(orderId, item.id, {
+        received_quantity: received,
+        delivered: full,
+        delivered_at: full ? nowIso : null,
+      });
+    } catch (e) {
+      alert(`Erro ao salvar recebimento parcial: ${e instanceof Error ? e.message : 'falha desconhecida'}`);
+    } finally {
+      setBusyItemId(null);
+    }
   };
 
   const onPickPdf = async (file: File | null) => {
@@ -726,6 +908,7 @@ export default function OrdensCompraPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-100 text-left text-[10px] font-black uppercase text-slate-500">
+                  <th className="px-2 py-3 w-10" />
                   <th className="px-4 py-3">OC</th>
                   <th className="px-4 py-3">Fornecedor / título</th>
                   <th className="px-4 py-3">Comprador</th>
@@ -746,95 +929,177 @@ export default function OrdensCompraPage() {
                   const lateDays = lateDaysCount(o.delivery_deadline);
                   const rowStatus: 'Em andamento' | 'Concluída' | 'Sem itens' | 'Arquivada' =
                     archived ? 'Arquivada' : total === 0 ? 'Sem itens' : done === total ? 'Concluída' : 'Em andamento';
+                  const expanded = expandedOrderId === o.id;
                   return (
-                    <tr
-                      key={o.id}
-                      className={`border-b border-slate-50 hover:bg-slate-50/80 ${archived ? 'bg-slate-50/80' : ''}`}
-                    >
-                      <td className="px-4 py-3 font-bold text-primary whitespace-nowrap">
-                        {o.oc_number || '—'}
-                      </td>
-                      <td className="px-4 py-3 min-w-[180px]">
-                        <div className="font-medium text-primary truncate max-w-[240px] sm:max-w-md">
-                          {o.title || o.vendor_name || 'Sem título'}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-slate-600 min-w-[180px]">
-                        <span className="text-xs font-medium">
-                          {o.buyer_name || buyerNameFromNotes(o.notes) || '—'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
-                        <div className="font-medium text-primary">{formatDateBR(o.delivery_deadline)}</div>
-                        {!archived && total > 0 && done < total && dKind === 'late' && (
-                          <div className="text-[11px] font-bold text-red-600">
-                            Atrasada {lateDays === 1 ? 'há 1 dia' : `há ${lateDays} dias`}
+                    <Fragment key={o.id}>
+                      <tr
+                        className={`border-b border-slate-50 hover:bg-slate-50/80 cursor-pointer ${archived ? 'bg-slate-50/80' : ''}`}
+                        onClick={() => setExpandedOrderId((prev) => (prev === o.id ? null : o.id))}
+                      >
+                        <td className="px-2 py-3 text-slate-500">
+                          {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                        </td>
+                        <td className="px-4 py-3 font-bold text-primary whitespace-nowrap">
+                          {o.oc_number || '—'}
+                        </td>
+                        <td className="px-4 py-3 min-w-[180px]">
+                          <div className="font-medium text-primary truncate max-w-[240px] sm:max-w-md">
+                            {o.title || o.vendor_name || 'Sem título'}
                           </div>
-                        )}
-                        {!archived && total > 0 && done < total && dKind === 'today' && (
-                          <div className="text-[11px] font-bold text-amber-700">Vence hoje</div>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        {total === 0 ? (
-                          <span className="text-slate-400 text-xs">Sem itens</span>
-                        ) : (
+                        </td>
+                        <td className="px-4 py-3 text-slate-600 min-w-[180px]">
+                          <span className="text-xs font-medium">
+                            {o.buyer_name || buyerNameFromNotes(o.notes) || '—'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
+                          <div className="font-medium text-primary">{formatDateBR(o.delivery_deadline)}</div>
+                          {!archived && total > 0 && done < total && dKind === 'late' && (
+                            <div className="text-[11px] font-bold text-red-600">
+                              Atrasada {lateDays === 1 ? 'há 1 dia' : `há ${lateDays} dias`}
+                            </div>
+                          )}
+                          {!archived && total > 0 && done < total && dKind === 'today' && (
+                            <div className="text-[11px] font-bold text-amber-700">Vence hoje</div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          {total === 0 ? (
+                            <span className="text-slate-400 text-xs">Sem itens</span>
+                          ) : (
+                            <span
+                              className={`inline-flex items-center gap-1 text-xs font-bold ${
+                                done === total ? 'text-emerald-600' : 'text-amber-700'
+                              }`}
+                            >
+                              {done === total ? <CheckCircle2 size={14} /> : <Circle size={14} />}
+                              {done}/{total}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
                           <span
-                            className={`inline-flex items-center gap-1 text-xs font-bold ${
-                              done === total ? 'text-emerald-600' : 'text-amber-700'
+                            className={`inline-flex items-center rounded-full px-2 py-1 text-[11px] font-bold ${
+                              rowStatus === 'Arquivada'
+                                ? 'bg-slate-200 text-slate-700'
+                                : rowStatus === 'Concluída'
+                                  ? 'bg-emerald-100 text-emerald-700'
+                                  : rowStatus === 'Sem itens'
+                                    ? 'bg-slate-100 text-slate-600'
+                                    : 'bg-amber-100 text-amber-700'
                             }`}
                           >
-                            {done === total ? <CheckCircle2 size={14} /> : <Circle size={14} />}
-                            {done}/{total}
+                            {rowStatus}
                           </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={`inline-flex items-center rounded-full px-2 py-1 text-[11px] font-bold ${
-                            rowStatus === 'Arquivada'
-                              ? 'bg-slate-200 text-slate-700'
-                              : rowStatus === 'Concluída'
-                                ? 'bg-emerald-100 text-emerald-700'
-                                : rowStatus === 'Sem itens'
-                                  ? 'bg-slate-100 text-slate-600'
-                                  : 'bg-amber-100 text-amber-700'
-                          }`}
-                        >
-                          {rowStatus}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="inline-flex items-center gap-3">
-                          <Link
-                            href={`/ordens-compra/${o.id}`}
-                            className="text-secondary font-bold hover:underline text-xs sm:text-sm"
-                          >
-                            Abrir
-                          </Link>
-                          <button
-                            type="button"
-                            disabled={rowBusy}
-                            onClick={() => void archiveOrder(o, !archived)}
-                            className="inline-flex items-center gap-1 text-xs font-bold text-slate-600 hover:underline disabled:opacity-50"
-                            title={archived ? 'Desarquivar ordem' : 'Arquivar ordem'}
-                          >
-                            {archived ? <ArchiveRestore size={13} /> : <Archive size={13} />}
-                            {archived ? 'Desarquivar' : 'Arquivar'}
-                          </button>
-                          <button
-                            type="button"
-                            disabled={rowBusy}
-                            onClick={() => void deleteOrder(o)}
-                            className="inline-flex items-center gap-1 text-xs font-bold text-red-600 hover:underline disabled:opacity-50"
-                            title="Apagar ordem"
-                          >
-                            <Trash2 size={13} />
-                            Apagar
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <div className="inline-flex items-center gap-3">
+                            <Link
+                              href={`/ordens-compra/${o.id}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-secondary font-bold hover:underline text-xs sm:text-sm"
+                            >
+                              Abrir
+                            </Link>
+                            <button
+                              type="button"
+                              disabled={rowBusy}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void archiveOrder(o, !archived);
+                              }}
+                              className="inline-flex items-center gap-1 text-xs font-bold text-slate-600 hover:underline disabled:opacity-50"
+                              title={archived ? 'Desarquivar ordem' : 'Arquivar ordem'}
+                            >
+                              {archived ? <ArchiveRestore size={13} /> : <Archive size={13} />}
+                              {archived ? 'Desarquivar' : 'Arquivar'}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={rowBusy}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void deleteOrder(o);
+                              }}
+                              className="inline-flex items-center gap-1 text-xs font-bold text-red-600 hover:underline disabled:opacity-50"
+                              title="Apagar ordem"
+                            >
+                              <Trash2 size={13} />
+                              Apagar
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+
+                      {expanded && (
+                        <tr className="border-b border-slate-100 bg-slate-50/50">
+                          <td colSpan={8} className="px-4 py-3">
+                            {items.length === 0 ? (
+                              <p className="text-xs text-slate-500">Esta OC não possui itens.</p>
+                            ) : (
+                              <div className="space-y-2">
+                                {items.map((item, idx) => {
+                                  const qty = item.quantity ?? null;
+                                  const received = item.received_quantity ?? (item.delivered ? qty ?? 0 : 0);
+                                  const lineNo = item.line_number || idx + 1;
+                                  const itemBusy = busyItemId === item.id;
+                                  return (
+                                    <div
+                                      key={item.id}
+                                      className={`rounded-lg border px-3 py-2 flex flex-col md:flex-row md:items-center md:justify-between gap-2 ${
+                                        item.delivered
+                                          ? 'border-emerald-200 bg-emerald-50/60'
+                                          : 'border-slate-200 bg-white'
+                                      }`}
+                                    >
+                                      <div className="min-w-0">
+                                        <p className="text-xs font-bold text-slate-700">
+                                          Item {lineNo}
+                                        </p>
+                                        <p
+                                          className={`text-sm ${
+                                            item.delivered ? 'text-slate-500 line-through' : 'text-primary'
+                                          }`}
+                                        >
+                                          {item.description || 'Sem descrição'}
+                                        </p>
+                                        <p className="text-[11px] text-slate-500">
+                                          {qty != null
+                                            ? `${qty} ${item.unit || 'un'} · Recebido: ${received}/${qty}`
+                                            : `Recebido: ${received} ${item.unit || 'un'}`}
+                                        </p>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <button
+                                          type="button"
+                                          disabled={itemBusy || !!busyOrderId}
+                                          onClick={() => void quickPartialReceipt(o.id, item)}
+                                          className="text-[11px] font-bold px-2.5 py-1.5 rounded border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                                        >
+                                          Parcial
+                                        </button>
+                                        <button
+                                          type="button"
+                                          disabled={itemBusy || !!busyOrderId}
+                                          onClick={() => void quickToggleDelivered(o.id, item)}
+                                          className={`text-[11px] font-bold px-2.5 py-1.5 rounded border disabled:opacity-50 ${
+                                            item.delivered
+                                              ? 'border-amber-200 text-amber-800 bg-amber-50 hover:bg-amber-100'
+                                              : 'border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
+                                          }`}
+                                        >
+                                          {itemBusy ? 'Salvando...' : item.delivered ? 'Desfazer' : 'Receber tudo'}
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   );
                 })}
               </tbody>

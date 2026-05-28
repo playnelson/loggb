@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" role="img" aria-label="LoggB app icon 192">
+  <rect width="192" height="192" rx="38" fill="#0f172a"/>
+  <path d="M52 56h38c19 0 32 13 32 31s-13 31-32 31H71v18H52V56zm36 46c9 0 15-6 15-15s-6-15-15-15H71v30h17z" fill="#38bdf8"/>
+  <path d="M121 56h19c17 0 28 10 28 25 0 12-7 20-18 24l20 31h-21l-17-28h-11v28h-19V56zm19 37c6 0 10-4 10-10s-4-10-10-10h-19v20h19z" fill="#f8fafc"/>
+</svg>

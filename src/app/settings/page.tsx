@@ -13,9 +13,12 @@ import {
   AlertCircle,
   Download,
   Upload,
-  FileArchive
+  FileArchive,
+  Smartphone,
+  CheckCircle2
 } from 'lucide-react';
 import Link from 'next/link';
+import { useInstallPrompt } from '@/hooks/useInstallPrompt';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -23,8 +26,6 @@ export default function SettingsPage() {
   const [confirmStage, setConfirmStage] = useState(1);
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [claimLoading, setClaimLoading] = useState(false);
-  const [claimMessage, setClaimMessage] = useState<string | null>(null);
   const [isExportingBackup, setIsExportingBackup] = useState(false);
   const [isImportingBackup, setIsImportingBackup] = useState(false);
   const [backupMessage, setBackupMessage] = useState<string | null>(null);
@@ -32,7 +33,29 @@ export default function SettingsPage() {
   const [backupFileName, setBackupFileName] = useState<string | null>(null);
   const [backupPayload, setBackupPayload] = useState<unknown | null>(null);
   const [replaceExistingData, setReplaceExistingData] = useState(true);
+  const [installMessage, setInstallMessage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const {
+    canInstall,
+    isInstalled,
+    needsManualInstall,
+    manualInstallHint,
+    triggerInstall,
+  } = useInstallPrompt();
+
+  const installApp = async () => {
+    setInstallMessage(null);
+    const result = await triggerInstall();
+    if (result === 'accepted') {
+      setInstallMessage('Instalação iniciada com sucesso. O navegador concluirá o processo.');
+      return;
+    }
+    if (result === 'dismissed') {
+      setInstallMessage('Instalação cancelada. Você pode tentar novamente quando quiser.');
+      return;
+    }
+    setInstallMessage('Este navegador não abriu o prompt automático de instalação.');
+  };
 
   const resetAccountData = async () => {
     setIsDeleting(true);
@@ -87,73 +110,9 @@ export default function SettingsPage() {
         router.refresh();
       }, 2000);
 
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Falha ao zerar dados da conta.');
       setIsDeleting(false);
-    }
-  };
-
-  const claimOrphanTenantData = async () => {
-    setClaimMessage(null);
-    if (
-      !confirm(
-        'Isso associa à SUA conta todos os registros que ainda não têm responsável (user_id vazio): materiais e colaboradores.\n\n' +
-          'Use somente se você é o dono desses dados ou se há um único uso do sistema. Se outra pessoa usa o mesmo banco com outra conta, ela pode deixar de ver esses registros até corrigir manualmente no Supabase.\n\n' +
-          'Continuar?'
-      )
-    ) {
-      return;
-    }
-    setClaimLoading(true);
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Usuário não autenticado.');
-      const uid = user.id;
-      const parts: string[] = [];
-
-      const rItems = await supabase.from('items').update({ user_id: uid }).is('user_id', null).select('id');
-      if (rItems.error) parts.push(`Itens: ${rItems.error.message}`);
-      else parts.push(`Itens atualizados: ${rItems.data?.length ?? 0} (máx. retorno do servidor).`);
-
-      const rEmp = await supabase.from('employees').update({ user_id: uid }).is('user_id', null).select('id');
-      if (rEmp.error) parts.push(`Colaboradores: ${rEmp.error.message}`);
-      else parts.push(`Colaboradores: ${rEmp.data?.length ?? 0}.`);
-
-      const rSites = await supabase.from('work_sites').update({ user_id: uid }).is('user_id', null).select('id');
-      if (!rSites.error) {
-        parts.push(`Sedes/canteiros: ${rSites.data?.length ?? 0}.`);
-      } else {
-        const em = String(rSites.error.message || '').toLowerCase();
-        if (!em.includes('does not exist') && rSites.error.code !== '42P01') {
-          parts.push(`Sedes/canteiros: ${rSites.error.message}`);
-        }
-      }
-
-      const rRentals = await supabase.from('equipment_rentals').update({ user_id: uid }).is('user_id', null).select('id');
-      if (!rRentals.error) {
-        parts.push(`Aluguéis: ${rRentals.data?.length ?? 0}.`);
-      } else {
-        const em = String(rRentals.error.message || '').toLowerCase();
-        if (!em.includes('does not exist') && rRentals.error.code !== '42P01') {
-          parts.push(`Aluguéis: ${rRentals.error.message}`);
-        }
-      }
-
-      const rSuppliers = await supabase.from('rental_suppliers').update({ user_id: uid }).is('user_id', null).select('id');
-      if (!rSuppliers.error) {
-        parts.push(`Locadoras: ${rSuppliers.data?.length ?? 0}.`);
-      } else {
-        const em = String(rSuppliers.error.message || '').toLowerCase();
-        if (!em.includes('does not exist') && rSuppliers.error.code !== '42P01') {
-          parts.push(`Locadoras: ${rSuppliers.error.message}`);
-        }
-      }
-
-      setClaimMessage(parts.join(' '));
-    } catch (e: unknown) {
-      setClaimMessage(e instanceof Error ? e.message : 'Falha ao vincular dados.');
-    } finally {
-      setClaimLoading(false);
     }
   };
 
@@ -279,65 +238,44 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-        {/* Info lateral */}
-        <div className="space-y-4">
-          <div className="p-6 bg-white rounded-2xl border border-border shadow-sm">
-            <h3 className="font-bold text-primary mb-2">Sua Conta</h3>
-            <p className="text-xs text-slate-500 leading-relaxed">
-              As alterações feitas aqui afetam apenas os seus dados sincronizados com o Supabase.
-            </p>
-          </div>
-        </div>
-
-        {/* Conteúdo Principal */}
-        <div className="md:col-span-2 space-y-6">
-          <section className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden">
-            <div className="p-6 border-b border-border bg-slate-50">
-              <h2 className="font-bold text-primary">Preferências Gerais</h2>
+      <div className="space-y-6">
+          <section className="bg-violet-50/40 rounded-2xl border border-violet-100 shadow-sm overflow-hidden">
+            <div className="p-6 border-b border-violet-100 bg-violet-50 flex items-center gap-2 text-violet-900 font-bold">
+              <Smartphone size={18} />
+              Instalar como app
             </div>
             <div className="p-6 space-y-4">
-              <div className="flex items-center justify-between opacity-50 cursor-not-allowed">
-                <div>
-                  <p className="font-bold text-sm text-primary">Modo Escuro</p>
-                  <p className="text-xs text-slate-500">Em breve...</p>
-                </div>
-                <div className="w-10 h-6 bg-slate-200 rounded-full"></div>
-              </div>
-              <div className="flex items-center justify-between opacity-50 cursor-not-allowed border-t border-slate-50 pt-4">
-                <div>
-                  <p className="font-bold text-sm text-primary">Notificações por E-mail</p>
-                  <p className="text-xs text-slate-500">Avisos de estoque baixo.</p>
-                </div>
-                <div className="w-10 h-6 bg-slate-200 rounded-full"></div>
-              </div>
-            </div>
-          </section>
-
-          <section className="bg-amber-50/40 rounded-2xl border border-amber-100 shadow-sm overflow-hidden">
-            <div className="p-6 border-b border-amber-100 bg-amber-50 flex items-center gap-2 text-amber-900 font-bold">
-              <AlertCircle size={18} />
-              Dados antigos sem conta
-            </div>
-            <div className="p-6 space-y-3">
-              <p className="text-xs text-amber-900/90 leading-relaxed">
-                Se o almoxarifado aparece vazio mas os materiais existem no Supabase, eles podem estar sem{' '}
-                <span className="font-mono">user_id</span>. Use o botão abaixo <strong>somente</strong> para trazer
-                esses registros para a conta em que você está logado agora.
+              <p className="text-xs text-violet-900/90 leading-relaxed">
+                Instale o LoggB neste dispositivo para abrir como aplicativo, com acesso mais rápido pela tela inicial.
               </p>
-              <button
-                type="button"
-                onClick={() => void claimOrphanTenantData()}
-                disabled={claimLoading}
-                className="px-4 py-2 bg-amber-700 text-white rounded-lg font-bold text-sm hover:bg-amber-800 disabled:opacity-50"
-              >
-                {claimLoading ? 'Processando…' : 'Vincular órfãos à minha conta'}
-              </button>
-              {claimMessage && (
-                <p className="text-xs font-bold text-amber-950 bg-white/80 border border-amber-100 rounded-lg p-3">
-                  {claimMessage}
+
+              {isInstalled ? (
+                <p className="text-xs font-bold text-emerald-900 bg-emerald-50 border border-emerald-100 rounded-lg p-3 inline-flex items-center gap-2">
+                  <CheckCircle2 size={14} />
+                  App já instalado neste dispositivo.
                 </p>
-              )}
+              ) : canInstall ? (
+                <button
+                  type="button"
+                  onClick={() => void installApp()}
+                  className="w-full md:w-auto min-h-[44px] px-4 py-3 bg-violet-700 text-white rounded-lg font-bold text-sm hover:bg-violet-800 inline-flex items-center justify-center gap-2"
+                >
+                  <Download size={16} />
+                  Instalar app
+                </button>
+              ) : null}
+
+              {!isInstalled && needsManualInstall && manualInstallHint ? (
+                <p className="text-xs text-violet-950 bg-white border border-violet-100 rounded-lg p-3">
+                  {manualInstallHint}
+                </p>
+              ) : null}
+
+              {installMessage ? (
+                <p className="text-xs font-bold text-violet-900 bg-violet-100 border border-violet-200 rounded-lg p-3">
+                  {installMessage}
+                </p>
+              ) : null}
             </div>
           </section>
 
@@ -449,7 +387,6 @@ export default function SettingsPage() {
               </div>
             </div>
           </section>
-        </div>
       </div>
 
       {/* Confirmation Modal */}

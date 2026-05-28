@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="LoggB app icon 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="108" fill="url(#bg)"/>
+  <path d="M132 146h102c52 0 86 34 86 81s-34 81-86 81h-52v58h-50V146zm98 124c23 0 39-16 39-39s-16-39-39-39h-48v78h48z" fill="#38bdf8"/>
+  <path d="M322 146h54c45 0 76 27 76 69 0 29-15 51-39 61l44 70h-56l-35-60h-24v60h-50V146zm54 98c17 0 28-11 28-28s-11-28-28-28h-34v56h34z" fill="#f8fafc"/>
+</svg>

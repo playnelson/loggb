@@ -78,6 +78,15 @@ interface EmployeeLite {
   full_name: string;
 }
 
+interface ItemMovement {
+  id: string;
+  type: 'IN' | 'OUT' | string;
+  quantity: number;
+  created_at: string;
+  employees?: { full_name: string } | null;
+  work_sites?: { name: string; kind: string } | { name: string; kind: string }[] | null;
+}
+
 interface CartLine {
   lineId: string;
   itemId: string;
@@ -135,7 +144,7 @@ function InventoryContent() {
   // Modals for actions
   const [editingItem, setEditingItem] = useState<Product | null>(null);
   const [historyItem, setHistoryItem] = useState<Product | null>(null);
-  const [itemMovements, setItemMovements] = useState<any[]>([]);
+  const [itemMovements, setItemMovements] = useState<ItemMovement[]>([]);
   const [activePopover, setActivePopover] = useState<string | null>(null);
   const [adjustItem, setAdjustItem] = useState<Product | null>(null);
   const [adjustQty, setAdjustQty] = useState<number>(0);
@@ -153,6 +162,7 @@ function InventoryContent() {
   const [cartPickItemId, setCartPickItemId] = useState('');
   const [cartPickQty, setCartPickQty] = useState(1);
   const [cartPickTag, setCartPickTag] = useState('');
+  const hasBootstrappedRef = useRef(false);
   const isFetchingProductsRef = useRef(false);
   const loadMoreAnchorRef = useRef<HTMLDivElement | null>(null);
 
@@ -308,15 +318,16 @@ function InventoryContent() {
   }, []);
 
   useEffect(() => {
-    // eslint-disable-next-line @typescript-eslint/no-floating-promises
-    fetchProducts();
-    // eslint-disable-next-line @typescript-eslint/no-floating-promises
-    fetchCategories();
-    // eslint-disable-next-line @typescript-eslint/no-floating-promises
-    fetchEmployees();
-    // eslint-disable-next-line @typescript-eslint/no-floating-promises
-    fetchWorkSites();
-  }, [fetchProducts, fetchWorkSites]);
+    if (hasBootstrappedRef.current) return;
+    hasBootstrappedRef.current = true;
+
+    queueMicrotask(() => {
+      void fetchProducts();
+      void fetchCategories();
+      void fetchEmployees();
+      void fetchWorkSites();
+    });
+  }, [fetchCategories, fetchEmployees, fetchProducts, fetchWorkSites]);
 
   useEffect(() => {
     const anchor = loadMoreAnchorRef.current;
@@ -334,31 +345,38 @@ function InventoryContent() {
     return () => observer.disconnect();
   }, [fetchProducts, hasMoreProducts]);
 
+  const syncCartWithProducts = useCallback((lines: CartLine[], currentProducts: Product[]) => {
+    if (lines.length === 0 || currentProducts.length === 0) return lines;
+
+    const productsById = new Map(currentProducts.map((p) => [p.id, p]));
+    let changed = false;
+    const next = lines.map((line) => {
+      const current = productsById.get(line.itemId);
+      if (!current) return line;
+      if (
+        line.description === current.description &&
+        line.unit === current.unit &&
+        line.consumable === Boolean(current.consumable)
+      ) {
+        return line;
+      }
+      changed = true;
+      return {
+        ...line,
+        description: current.description,
+        unit: current.unit,
+        consumable: Boolean(current.consumable),
+      };
+    });
+    return changed ? next : lines;
+  }, []);
+
   useEffect(() => {
     // Mantém o carrinho sincronizado com os dados mais atuais dos itens editados.
-    setCart((prev) => {
-      let changed = false;
-      const next = prev.map((line) => {
-        const current = products.find((p) => p.id === line.itemId);
-        if (!current) return line;
-        if (
-          line.description === current.description &&
-          line.unit === current.unit &&
-          line.consumable === Boolean(current.consumable)
-        ) {
-          return line;
-        }
-        changed = true;
-        return {
-          ...line,
-          description: current.description,
-          unit: current.unit,
-          consumable: Boolean(current.consumable),
-        };
-      });
-      return changed ? next : prev;
+    queueMicrotask(() => {
+      setCart((prev) => syncCartWithProducts(prev, products));
     });
-  }, [products]);
+  }, [products, syncCartWithProducts]);
 
   const categoryNames = categories?.map((c) => c.name) ?? [...FALLBACK_CATEGORIES];
   const categoryOptions = Array.from(
@@ -370,8 +388,7 @@ function InventoryContent() {
     setNewCategoryName('');
     setEditingCategory(null);
     setEditingCategoryName('');
-    // eslint-disable-next-line @typescript-eslint/no-floating-promises
-    fetchCategories();
+    void fetchCategories();
   };
 
   const createCategory = async () => {
@@ -461,7 +478,7 @@ function InventoryContent() {
       .eq('item_id', item.id)
       .order('created_at', { ascending: false })
       .limit(30);
-    setItemMovements(data || []);
+    setItemMovements((data || []) as ItemMovement[]);
   };
 
   const handleAdjustStock = async (e: React.FormEvent) => {
@@ -503,8 +520,7 @@ function InventoryContent() {
 
     setAdjustItem(null);
     setAdjustQty(0);
-    // eslint-disable-next-line @typescript-eslint/no-floating-promises
-    fetchProducts();
+    void fetchProducts();
     setIsSubmitting(false);
   };
 
@@ -560,18 +576,11 @@ function InventoryContent() {
         isLikelyMissingColumn(error.message, 'expiration_date')
       )
     ) {
-      const {
-        tag: _t,
-        is_rented: _r,
-        calibration_due_date: _c,
-        expiration_date: _e,
-        ...legacy
-      } = patch as Record<string, unknown> & {
-        tag?: unknown;
-        is_rented?: unknown;
-        calibration_due_date?: unknown;
-        expiration_date?: unknown;
-      };
+      const legacy = { ...patch } as Record<string, unknown>;
+      delete legacy.tag;
+      delete legacy.is_rented;
+      delete legacy.calibration_due_date;
+      delete legacy.expiration_date;
       patch = legacy;
       error = (await supabase.from('items').update(patch).eq('id', editingItem.id).eq('user_id', user.id)).error;
     }
@@ -640,18 +649,11 @@ function InventoryContent() {
         isLikelyMissingColumn(error.message, 'expiration_date')
       )
     ) {
-      const {
-        tag: _t,
-        is_rented: _r,
-        calibration_due_date: _c,
-        expiration_date: _e,
-        ...legacy
-      } = row as Record<string, unknown> & {
-        tag?: unknown;
-        is_rented?: unknown;
-        calibration_due_date?: unknown;
-        expiration_date?: unknown;
-      };
+      const legacy = { ...row } as Record<string, unknown>;
+      delete legacy.tag;
+      delete legacy.is_rented;
+      delete legacy.calibration_due_date;
+      delete legacy.expiration_date;
       row = legacy;
       ({ error } = await supabase.from('items').insert([row]));
     }
@@ -662,8 +664,7 @@ function InventoryContent() {
     } else {
       setIsModalOpen(false);
       setFormData(emptyItemForm());
-      // eslint-disable-next-line @typescript-eslint/no-floating-promises
-      fetchProducts();
+      void fetchProducts();
     }
     setIsSubmitting(false);
   };
