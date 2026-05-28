@@ -21,6 +21,11 @@ export const ITEMS_SELECT_LEGACY_WITHOUT_DATES = ITEMS_SELECT_LEGACY.replace(
   ''
 );
 
+type FetchTenantItemsOptions = {
+  offset?: number;
+  limit?: number;
+};
+
 export function isLikelyMissingColumn(errMessage: string, column: string): boolean {
   const m = errMessage.toLowerCase();
   const c = column.toLowerCase();
@@ -31,9 +36,21 @@ export function isLikelyMissingColumn(errMessage: string, column: string): boole
  * Lista itens do tenant (auth user). Sem `user_id` no banco, use o fluxo de “vincular órfãos” em Configurações.
  * Faz fallback se `tag` ainda não existir no schema.
  */
-export async function fetchTenantItems(supabase: SupabaseBrowserClient, userId: string) {
-  const run = (sel: string) =>
-    supabase.from('items').select(sel).eq('user_id', userId).order('description', { ascending: true });
+export async function fetchTenantItems(
+  supabase: SupabaseBrowserClient,
+  userId: string,
+  options: FetchTenantItemsOptions = {}
+) {
+  const { offset = 0, limit } = options;
+  const run = (sel: string) => {
+    let query = supabase.from('items').select(sel).eq('user_id', userId).order('description', { ascending: true });
+
+    if (typeof limit === 'number' && limit > 0) {
+      query = query.range(Math.max(0, offset), Math.max(0, offset) + limit - 1);
+    }
+
+    return query;
+  };
 
   const candidates = [
     ITEMS_SELECT_WITH_TAG,

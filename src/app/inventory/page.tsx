@@ -2,7 +2,7 @@
 
 export const dynamic = 'force-dynamic';
 
-import { useState, useEffect, Suspense, useCallback, useMemo } from 'react';
+import { useState, useEffect, Suspense, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { formatProductLabelDisplay, normalizeProductLabelForSave } from '@/lib/productDisplayText';
@@ -90,6 +90,7 @@ interface CartLine {
 }
 
 const FALLBACK_CATEGORIES = ['Ferramenta', 'EPI', 'Tubulação', 'Consumível'] as const;
+const ITEMS_PAGE_SIZE = 30;
 
 const emptyItemForm = () => ({
   description: '',
@@ -110,6 +111,9 @@ function InventoryContent() {
   const [products, setProducts] = useState<Product[]>([]);
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isLoadingMoreProducts, setIsLoadingMoreProducts] = useState(false);
+  const [nextProductsOffset, setNextProductsOffset] = useState(0);
+  const [hasMoreProducts, setHasMoreProducts] = useState(true);
   const [filterDescription, setFilterDescription] = useState('');
   const [filterConsumable, setFilterConsumable] = useState<'all' | 'sim' | 'nao'>('all');
   const [filterEstoque, setFilterEstoque] = useState<'all' | 'zero' | 'positive' | 'below_min'>('all');
@@ -149,6 +153,8 @@ function InventoryContent() {
   const [cartPickItemId, setCartPickItemId] = useState('');
   const [cartPickQty, setCartPickQty] = useState(1);
   const [cartPickTag, setCartPickTag] = useState('');
+  const isFetchingProductsRef = useRef(false);
+  const loadMoreAnchorRef = useRef<HTMLDivElement | null>(null);
 
   // Form states for NEW/EDIT
   const [formData, setFormData] = useState(emptyItemForm);
@@ -209,25 +215,55 @@ function InventoryContent() {
     setCategories(list);
   };
 
-  const fetchProducts = async () => {
-    setLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      setProducts([]);
+  const fetchProducts = useCallback(async (options: { reset?: boolean } = {}) => {
+    const { reset = true } = options;
+    if (isFetchingProductsRef.current) return;
+    if (!reset && (!hasMoreProducts || loading || isLoadingMoreProducts)) return;
+
+    isFetchingProductsRef.current = true;
+    try {
+      if (reset) {
+        setLoading(true);
+        setHasMoreProducts(true);
+        setNextProductsOffset(0);
+      } else {
+        setIsLoadingMoreProducts(true);
+      }
+
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setProducts([]);
+        setHasMoreProducts(false);
+        setNextProductsOffset(0);
+        return;
+      }
+
+      const offset = reset ? 0 : nextProductsOffset;
+      const { data, error } = await fetchTenantItems(supabase, user.id, {
+        offset,
+        limit: ITEMS_PAGE_SIZE,
+      });
+
+      if (error) {
+        console.error('Error fetching products:', error);
+        if (reset) {
+          setProducts([]);
+          setHasMoreProducts(false);
+          setNextProductsOffset(0);
+        }
+        return;
+      }
+
+      const incoming = (data as Product[]) || [];
+      setProducts((prev) => (reset ? incoming : [...prev, ...incoming]));
+      setHasMoreProducts(incoming.length === ITEMS_PAGE_SIZE);
+      setNextProductsOffset(offset + incoming.length);
+    } finally {
+      setIsLoadingMoreProducts(false);
       setLoading(false);
-      return;
+      isFetchingProductsRef.current = false;
     }
-
-    const { data, error } = await fetchTenantItems(supabase, user.id);
-
-    if (error) {
-      console.error('Error fetching products:', error);
-      setProducts([]);
-    } else {
-      setProducts((data as Product[]) || []);
-    }
-    setLoading(false);
-  };
+  }, [hasMoreProducts, isLoadingMoreProducts, loading, nextProductsOffset]);
 
   const fetchEmployees = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -280,7 +316,23 @@ function InventoryContent() {
     fetchEmployees();
     // eslint-disable-next-line @typescript-eslint/no-floating-promises
     fetchWorkSites();
-  }, [fetchWorkSites]);
+  }, [fetchProducts, fetchWorkSites]);
+
+  useEffect(() => {
+    const anchor = loadMoreAnchorRef.current;
+    if (!anchor || !hasMoreProducts) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0]?.isIntersecting) return;
+        void fetchProducts({ reset: false });
+      },
+      { root: null, rootMargin: '0px 0px 280px 0px', threshold: 0.05 }
+    );
+
+    observer.observe(anchor);
+    return () => observer.disconnect();
+  }, [fetchProducts, hasMoreProducts]);
 
   useEffect(() => {
     // Mantém o carrinho sincronizado com os dados mais atuais dos itens editados.
@@ -1115,7 +1167,7 @@ function InventoryContent() {
             {!loading && products.length > 0 ? (
               <span className="text-slate-400 font-medium">
                 {' '}
-                · Mostrando {filteredProducts.length} de {products.length}
+                · Mostrando {filteredProducts.length} de {products.length} itens carregados
               </span>
             ) : null}
           </p>
@@ -1128,7 +1180,7 @@ function InventoryContent() {
           </p>
           {!loading && products.length > 0 ? (
             <p className="text-[11px] font-bold text-slate-400">
-              Mostrando {filteredProducts.length} de {products.length}
+              Mostrando {filteredProducts.length} de {products.length} itens carregados
             </p>
           ) : null}
           <input
@@ -1688,6 +1740,27 @@ function InventoryContent() {
             })
           )}
         </div>
+        {!loading ? (
+          <div className="px-4 pb-5 border-t border-slate-100 bg-slate-50/40">
+            {isLoadingMoreProducts ? (
+              <div className="py-4 text-center text-xs font-bold text-slate-500">
+                <Loader2 className="animate-spin inline mr-2" size={14} />
+                Carregando mais 30 itens...
+              </div>
+            ) : hasMoreProducts ? (
+              <div
+                ref={loadMoreAnchorRef}
+                className="py-4 text-center text-xs font-bold text-slate-500"
+              >
+                Role at&eacute; o final para carregar mais itens.
+              </div>
+            ) : products.length > 0 ? (
+              <div className="py-4 text-center text-xs font-bold text-slate-400">
+                Todos os itens foram carregados.
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       {/* Modal Histórico do Item */}
