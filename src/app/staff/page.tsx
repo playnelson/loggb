@@ -10,10 +10,11 @@ import { formatEmployeeName, normalizeEmployeeNameForSave, normalizeSearchText }
 import { Search, UserPlus, Mail, Phone, ExternalLink, X, FileUp, Filter, Package, AlertCircle, History, RotateCcw, Download, Loader2, ArrowLeft, FileText, Trash2 } from 'lucide-react';
 import ImportSpreadsheet from '@/components/ImportSpreadsheet';
 import {
-  downloadEpiFichaTxt,
   downloadFerramentasFichaTxt,
   type FichaPossessionRow,
 } from '@/lib/carteiraFichasTxt';
+import { downloadEmployeeWalletWorkbook } from '@/lib/employeeWalletExcel';
+import { downloadEpiFichaExcel } from '@/lib/carteiraFichasExcel';
 
 interface Possession {
   item_id: string;
@@ -173,6 +174,32 @@ async function loadEpiConsumableBalancesMap(
     if (rows.length) result[empId] = rows;
   }
   return result;
+}
+
+function aggregateEpiConsumableBalancesFromMovements(movements: any[]): EpiConsumableBalanceRow[] {
+  const map = new Map<string, { description: string; unit: string; balance: number }>();
+  for (const movement of movements) {
+    const item = movement.items;
+    if (!isEpiConsumableItem(item)) continue;
+    const itemId = String(movement.item_id);
+    const qty = Number(movement.quantity) || 0;
+    const delta = movement.type === 'OUT' ? qty : -qty;
+    const current = map.get(itemId) || {
+      description: String(item.description || '—'),
+      unit: String(item.unit || 'un'),
+      balance: 0,
+    };
+    current.balance += delta;
+    map.set(itemId, current);
+  }
+  return Array.from(map.entries())
+    .filter(([, value]) => value.balance > 0)
+    .map(([item_id, value]) => ({
+      item_id,
+      description: value.description,
+      unit: value.unit,
+      balance: value.balance,
+    }));
 }
 
 export default function StaffPage() {
@@ -358,37 +385,41 @@ export default function StaffPage() {
     await reloadWallet(employee.id);
   };
 
-  const downloadFullHistory = async (employee: Employee) => {
-    const { data } = await supabase
-      .from('movements')
-      .select('*, items(description), tag')
-      .eq('employee_id', employee.id)
-      .order('created_at', { ascending: false });
+  const downloadWalletWorkbook = async (employee: Employee, sourceMovements?: any[]) => {
+    const allMovements = sourceMovements && sourceMovements.length > 0
+      ? sourceMovements
+      : await fetchAllEmployeeMovements(employee.id);
 
-    if (!data) return;
+    const epiConsumables = aggregateEpiConsumableBalancesFromMovements(allMovements);
+    const epiRows = mergeEpiWalletLines(employee.possession, epiConsumables).map((row) => ({
+      description: row.description,
+      unit: row.unit,
+      quantity: row.quantity,
+      consumable: row.consumable,
+      typeLabel: row.consumable ? 'Consumível (em uso)' : 'Em posse',
+      category: 'EPI',
+    }));
+    const otherRows = (employee.possession || [])
+      .filter((p) => p.quantity > 0 && !!p.items && !p.items.consumable && p.items.category !== 'EPI')
+      .map((p) => ({
+        description: p.items.description,
+        unit: p.items.unit,
+        quantity: p.quantity,
+        consumable: false,
+        typeLabel: 'Em posse',
+        category: p.items.category || '—',
+      }));
 
-    const employeeName = formatEmployeeName(employee.full_name);
-    const content = `HISTÓRICO DE MOVIMENTAÇÕES - ${employeeName}\n` +
-      `Gerado em: ${new Date().toLocaleString()}\n` +
-      `--------------------------------------------------\n\n` +
-      data.map((m: any) => {
-        const date = formatMovementDateBr(m.created_at);
-        const type =
-          m.type === 'IN'
-            ? movementIsEpiDiscard(m)
-              ? '[DESCARTE EPI]'
-              : '[DEVOLUÇÃO]'
-            : '[RETIRADA/RECEBIMENTO]';
-        const tag = m.tag ? ` | TAG: ${String(m.tag)}` : '';
-        return `${date} | ${type} | ${m.quantity}x ${m.items?.description}${tag}`;
-      }).join('\n');
-
-    const blob = new Blob([content], { type: 'text/plain' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `historico_${normalizeSearchText(employeeName).replace(/ /g, '_')}.txt`;
-    a.click();
+    await downloadEmployeeWalletWorkbook({
+      employee: {
+        full_name: employee.full_name,
+        role: employee.role,
+        status: employee.status,
+      },
+      walletEpiRows: epiRows,
+      walletOtherRows: otherRows,
+      movements: allMovements,
+    });
   };
 
   const openEpiFichaModal = (employee: Employee) => {
@@ -435,7 +466,7 @@ export default function StaffPage() {
     responsibleName: epiFichaForm.responsibleName,
   });
 
-  const handleDownloadEpiTxt = () => {
+  const handleDownloadEpiExcel = async () => {
     if (!epiFichaEmployee) return;
     if (!epiFichaForm.companyName.trim()) {
       alert('Informe o nome da empresa (razão social ou nome fantasia).');
@@ -463,7 +494,7 @@ export default function StaffPage() {
       return;
     }
 
-    downloadEpiFichaTxt(
+    await downloadEpiFichaExcel(
       {
         full_name: formatEmployeeName(epiFichaEmployee.full_name),
         role: epiFichaEmployee.role,
@@ -581,29 +612,7 @@ export default function StaffPage() {
   }, [walletMovements, walletHistorySearch]);
 
   const walletEpiConsumableFromMovements = useMemo((): EpiConsumableBalanceRow[] => {
-    const map = new Map<string, { description: string; unit: string; balance: number }>();
-    for (const m of walletMovements) {
-      const it = m.items;
-      if (!isEpiConsumableItem(it)) continue;
-      const id = String(m.item_id);
-      const qty = Number(m.quantity) || 0;
-      const d = m.type === 'OUT' ? qty : -qty;
-      const cur = map.get(id) || {
-        description: String(it.description || '—'),
-        unit: String(it.unit || 'un'),
-        balance: 0,
-      };
-      cur.balance += d;
-      map.set(id, cur);
-    }
-    return Array.from(map.entries())
-      .filter(([, v]) => v.balance > 0)
-      .map(([item_id, v]) => ({
-        item_id,
-        description: v.description,
-        unit: v.unit,
-        balance: v.balance,
-      }));
+    return aggregateEpiConsumableBalancesFromMovements(walletMovements);
   }, [walletMovements]);
 
   const walletMergedEpiLines = useMemo(
@@ -979,7 +988,7 @@ export default function StaffPage() {
                             type="button"
                             onClick={() => openEpiFichaModal(e)}
                             className="text-slate-400 hover:text-secondary p-2 bg-slate-50 border border-slate-200 rounded-lg transition-all"
-                            title="Fichas EPI e ferramentas (.txt)"
+                            title="Fichas EPI (.xlsx) e ferramentas (.txt)"
                           >
                             <FileText size={16} />
                           </button>
@@ -1194,13 +1203,13 @@ export default function StaffPage() {
         </div>
       </div>
 
-      {/* Modal Fichas EPI / Ferramentas (TXT) */}
+      {/* Modal Fichas EPI/Ferramentas */}
       {epiFichaEmployee && (
         <div className="fixed inset-0 bg-primary/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in duration-300">
             <div className="p-6 border-b bg-slate-50 flex items-center justify-between shrink-0">
               <div>
-                <h3 className="text-xl font-bold text-primary">Fichas em TXT</h3>
+                <h3 className="text-xl font-bold text-primary">Fichas de carteira</h3>
                 <p className="text-xs text-slate-500 mt-1 font-medium">{epiFichaEmployee.full_name}</p>
               </div>
               <button
@@ -1214,7 +1223,8 @@ export default function StaffPage() {
             </div>
             <div className="p-6 space-y-4 overflow-y-auto">
               <p className="text-xs text-slate-600 leading-relaxed">
-                Gere dois arquivos <span className="font-bold">.txt</span> bem formatados: um com a{' '}
+                Gere uma ficha <span className="font-bold">.xlsx</span> de EPI bem formatada e uma ficha{' '}
+                <span className="font-bold">.txt</span> de ferramentas: com a{' '}
                 <span className="font-bold">carteira de EPI</span> (não consumíveis em posse e consumíveis com saldo em
                 uso) e outro com <span className="font-bold">ferramentas e demais materiais</span> não consumíveis (tudo
                 que não é EPI). Nome, função e CPF vêm do cadastro. Descarte de EPI consumível registra-se no quadro;
@@ -1275,11 +1285,11 @@ export default function StaffPage() {
               <div className="flex flex-col gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => handleDownloadEpiTxt()}
+                  onClick={() => void handleDownloadEpiExcel()}
                   className="w-full p-3 bg-purple-700 text-white rounded-xl font-bold hover:bg-purple-800 flex items-center justify-center gap-2"
                 >
                   <Download size={16} />
-                  Baixar ficha de EPI (.txt)
+                  Baixar ficha de EPI (.xlsx)
                 </button>
                 <button
                   type="button"
@@ -1315,11 +1325,11 @@ export default function StaffPage() {
               </div>
               <div className="flex gap-2 shrink-0">
                 <button 
-                  onClick={() => downloadFullHistory(timelineEmployee)}
+                  onClick={() => void downloadWalletWorkbook(timelineEmployee, movements)}
                   className="flex items-center gap-2 text-primary bg-white border border-border px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-slate-100 transition-colors"
                 >
                   <Download size={14} />
-                  Baixar TXT
+                  Baixar Excel
                 </button>
                 <button
                   type="button"
@@ -1627,12 +1637,12 @@ export default function StaffPage() {
                   <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
-                      onClick={() => walletEmployee && void downloadFullHistory(walletEmployee)}
+                      onClick={() => walletEmployee && void downloadWalletWorkbook(walletEmployee, walletMovements)}
                       className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-black text-slate-600 hover:bg-slate-50 flex items-center gap-2"
-                      title="Baixar histórico completo em TXT"
+                      title="Baixar carteiras e histórico em Excel"
                     >
                       <Download size={14} />
-                      Baixar TXT
+                      Baixar Excel
                     </button>
                   </div>
                 </div>
@@ -1772,7 +1782,7 @@ export default function StaffPage() {
                       })}
                       {filteredWalletMovements.length > 400 && (
                         <div className="text-[11px] text-amber-700 font-bold bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-                          Mostrando 400 de {filteredWalletMovements.length} com o filtro atual. Afine a busca ou use “Baixar TXT”.
+                          Mostrando 400 de {filteredWalletMovements.length} com o filtro atual. Afine a busca ou use “Baixar Excel”.
                         </div>
                       )}
                       {!walletLoading && filteredWalletMovements.length === 0 && (

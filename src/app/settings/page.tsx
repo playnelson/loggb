@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { ChangeEvent, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import { 
@@ -8,10 +8,12 @@ import {
   Trash2, 
   AlertTriangle, 
   ShieldAlert, 
-  CheckCircle2, 
   Loader2, 
   ArrowLeft,
-  AlertCircle
+  AlertCircle,
+  Download,
+  Upload,
+  FileArchive
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -23,6 +25,14 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [claimLoading, setClaimLoading] = useState(false);
   const [claimMessage, setClaimMessage] = useState<string | null>(null);
+  const [isExportingBackup, setIsExportingBackup] = useState(false);
+  const [isImportingBackup, setIsImportingBackup] = useState(false);
+  const [backupMessage, setBackupMessage] = useState<string | null>(null);
+  const [backupError, setBackupError] = useState<string | null>(null);
+  const [backupFileName, setBackupFileName] = useState<string | null>(null);
+  const [backupPayload, setBackupPayload] = useState<unknown | null>(null);
+  const [replaceExistingData, setReplaceExistingData] = useState(true);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const resetAccountData = async () => {
     setIsDeleting(true);
@@ -147,6 +157,109 @@ export default function SettingsPage() {
     }
   };
 
+  const downloadBackup = async () => {
+    setBackupError(null);
+    setBackupMessage(null);
+    setIsExportingBackup(true);
+    try {
+      const res = await fetch('/api/account-backup', { method: 'GET', cache: 'no-store' });
+      const payload = await res.json();
+      if (!res.ok) {
+        throw new Error(String(payload?.error || 'Falha ao gerar backup.'));
+      }
+
+      const backupText = JSON.stringify(payload, null, 2);
+      const blob = new Blob([backupText], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const dt = new Date().toISOString().slice(0, 10);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `loggb-backup-${dt}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      setBackupMessage('Backup gerado e baixado com sucesso.');
+    } catch (e: unknown) {
+      setBackupError(e instanceof Error ? e.message : 'Não foi possível baixar o backup.');
+    } finally {
+      setIsExportingBackup(false);
+    }
+  };
+
+  const onPickBackupFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    setBackupError(null);
+    setBackupMessage(null);
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text) as { version?: unknown; data?: unknown };
+      if (parsed?.version !== 1 || !parsed?.data || typeof parsed.data !== 'object') {
+        throw new Error('Arquivo inválido. Use um backup exportado pelo LoggB.');
+      }
+      setBackupPayload(parsed);
+      setBackupFileName(file.name);
+      setBackupMessage('Arquivo carregado. Revise a opção de restauração e confirme.');
+    } catch (e: unknown) {
+      setBackupPayload(null);
+      setBackupFileName(null);
+      setBackupError(e instanceof Error ? e.message : 'Falha ao ler arquivo de backup.');
+    } finally {
+      event.target.value = '';
+    }
+  };
+
+  const restoreBackup = async () => {
+    if (!backupPayload) {
+      setBackupError('Selecione um arquivo de backup antes de restaurar.');
+      return;
+    }
+
+    const userConfirmed = confirm(
+      replaceExistingData
+        ? 'Isso vai substituir todos os seus dados atuais pelos dados do backup. Deseja continuar?'
+        : 'Isso vai mesclar os dados do backup com os seus dados atuais. Deseja continuar?'
+    );
+    if (!userConfirmed) return;
+
+    setBackupError(null);
+    setBackupMessage(null);
+    setIsImportingBackup(true);
+    try {
+      const res = await fetch('/api/account-backup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          backup: backupPayload,
+          replaceExisting: replaceExistingData,
+        }),
+      });
+      const payload = await res.json();
+      if (!res.ok) {
+        throw new Error(String(payload?.error || 'Falha ao restaurar backup.'));
+      }
+
+      const importedCount = Object.values(payload?.importedCounts ?? {}).reduce((acc, n) => {
+        const value = typeof n === 'number' ? n : 0;
+        return acc + value;
+      }, 0);
+      const warningCount = Array.isArray(payload?.warnings) ? payload.warnings.length : 0;
+
+      setBackupMessage(
+        warningCount > 0
+          ? `Restauração concluída. ${importedCount} registros processados com ${warningCount} aviso(s).`
+          : `Restauração concluída. ${importedCount} registros processados.`
+      );
+      router.refresh();
+    } catch (e: unknown) {
+      setBackupError(e instanceof Error ? e.message : 'Não foi possível restaurar o backup.');
+    } finally {
+      setIsImportingBackup(false);
+    }
+  };
+
   return (
     <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="flex items-center gap-4">
@@ -219,6 +332,88 @@ export default function SettingsPage() {
               {claimMessage && (
                 <p className="text-xs font-bold text-amber-950 bg-white/80 border border-amber-100 rounded-lg p-3">
                   {claimMessage}
+                </p>
+              )}
+            </div>
+          </section>
+
+          <section className="bg-blue-50/40 rounded-2xl border border-blue-100 shadow-sm overflow-hidden">
+            <div className="p-6 border-b border-blue-100 bg-blue-50 flex items-center gap-2 text-blue-900 font-bold">
+              <FileArchive size={18} />
+              Backup e recuperação de dados
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-xs text-blue-900/90 leading-relaxed">
+                Baixe um arquivo completo dos seus dados para manter backup e restaurar em outra conta. Na restauração,
+                você pode substituir os dados atuais ou mesclar com os já existentes.
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => void downloadBackup()}
+                  disabled={isExportingBackup || isImportingBackup}
+                  className="px-4 py-3 bg-blue-700 text-white rounded-lg font-bold text-sm hover:bg-blue-800 disabled:opacity-50 inline-flex items-center justify-center gap-2"
+                >
+                  {isExportingBackup ? <Loader2 className="animate-spin" size={16} /> : <Download size={16} />}
+                  {isExportingBackup ? 'Gerando backup…' : 'Baixar backup completo'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isExportingBackup || isImportingBackup}
+                  className="px-4 py-3 bg-white text-blue-900 border border-blue-200 rounded-lg font-bold text-sm hover:bg-blue-50 disabled:opacity-50 inline-flex items-center justify-center gap-2"
+                >
+                  <Upload size={16} />
+                  Selecionar arquivo de backup
+                </button>
+              </div>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/json,.json"
+                className="hidden"
+                onChange={(e) => void onPickBackupFile(e)}
+              />
+
+              {backupFileName && (
+                <p className="text-xs text-blue-950 bg-white border border-blue-100 rounded-lg p-3">
+                  Arquivo selecionado: <span className="font-bold">{backupFileName}</span>
+                </p>
+              )}
+
+              <label className="flex items-start gap-2 text-xs text-blue-900 bg-white border border-blue-100 rounded-lg p-3">
+                <input
+                  type="checkbox"
+                  checked={replaceExistingData}
+                  onChange={(e) => setReplaceExistingData(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>
+                  Substituir meus dados atuais durante a restauração (recomendado para migração para outra conta).
+                </span>
+              </label>
+
+              <button
+                type="button"
+                onClick={() => void restoreBackup()}
+                disabled={!backupPayload || isImportingBackup || isExportingBackup}
+                className="px-4 py-3 bg-emerald-700 text-white rounded-lg font-bold text-sm hover:bg-emerald-800 disabled:opacity-50 inline-flex items-center justify-center gap-2"
+              >
+                {isImportingBackup ? <Loader2 className="animate-spin" size={16} /> : <Upload size={16} />}
+                {isImportingBackup ? 'Restaurando backup…' : 'Restaurar backup selecionado'}
+              </button>
+
+              {backupMessage && (
+                <p className="text-xs font-bold text-emerald-900 bg-emerald-50 border border-emerald-100 rounded-lg p-3">
+                  {backupMessage}
+                </p>
+              )}
+              {backupError && (
+                <p className="text-xs font-bold text-red-700 bg-red-50 border border-red-100 rounded-lg p-3">
+                  {backupError}
                 </p>
               )}
             </div>

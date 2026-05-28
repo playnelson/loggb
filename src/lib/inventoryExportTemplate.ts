@@ -47,6 +47,16 @@ function buildPossessionDetail(possession: PossessionDetail[] | undefined): stri
   return lines.length ? lines.join(' | ') : '—';
 }
 
+function buildPossessionOwners(possession: PossessionDetail[] | undefined): string {
+  const names = new Set<string>();
+  for (const pos of possession || []) {
+    if (Number(pos.quantity) <= 0) continue;
+    const name = employeeNameFromPossession(pos.employees);
+    if (name && name !== '—') names.add(name);
+  }
+  return names.size ? Array.from(names).join(' | ') : '—';
+}
+
 function getCellText(value: ExcelJS.CellValue): string {
   if (value == null) return '';
   if (typeof value === 'object') {
@@ -77,6 +87,7 @@ function findHeaderRowAndColumns(worksheet: ExcelJS.Worksheet): {
     { key: 'itemUnico', aliases: ['item unico', 'unico'] },
     { key: 'tagCadastro', aliases: ['tag cadastro', 'tag'] },
     { key: 'estoqueAlmox', aliases: ['estoq', 'estoque almox', 'estoque almoxarifado', 'estoque'] },
+    { key: 'posseDe', aliases: ['em posse de', 'em posse de:'] },
     { key: 'posseDetalhe', aliases: ['em posse detalhe', 'posse detalhe'] },
     { key: 'posseSoma', aliases: ['em pos', 'em posse soma', 'posse soma', 'em posse'] },
     { key: 'minimo', aliases: ['minimo', 'qtd minimo', 'quantidade minima'] },
@@ -122,6 +133,29 @@ export async function downloadInventoryWorkbookFromTemplate(items: InventoryExpo
     throw new Error('O modelo de inventario nao possui abas.');
   }
   const { headerRow, columns } = findHeaderRowAndColumns(worksheet);
+  if (columns.posseDe == null) {
+    const insertAt =
+      columns.posseDetalhe != null
+        ? columns.posseDetalhe
+        : columns.posseSoma != null
+          ? columns.posseSoma
+          : columns.estoqueAlmox + 1;
+    const sourceCol = columns.posseDetalhe ?? columns.estoqueAlmox;
+
+    worksheet.spliceColumns(insertAt, 0, []);
+    for (const key of Object.keys(columns)) {
+      if (columns[key] >= insertAt) columns[key] += 1;
+    }
+    columns.posseDe = insertAt;
+
+    const headerCell = worksheet.getRow(headerRow).getCell(insertAt);
+    const sourceHeaderCell = worksheet.getRow(headerRow).getCell(sourceCol);
+    headerCell.value = 'Em posse de:';
+    headerCell.style = cloneCellStyle(sourceHeaderCell.style);
+
+    const sourceWidth = Number(worksheet.getColumn(sourceCol).width || 20);
+    worksheet.getColumn(insertAt).width = Math.max(24, sourceWidth);
+  }
 
   const rows = items.map((p) => {
     const posTotal = p.possession?.reduce((acc, curr) => acc + Number(curr.quantity || 0), 0) || 0;
@@ -135,6 +169,7 @@ export async function downloadInventoryWorkbookFromTemplate(items: InventoryExpo
       itemUnico: p.unique_item ? 'Sim' : 'Nao',
       tagCadastro: p.tag || '',
       estoqueAlmox: Number(p.quantity_current || 0),
+      posseDe: buildPossessionOwners(p.possession),
       posseDetalhe: buildPossessionDetail(p.possession),
       posseSoma: posTotal,
       minimo: Number(p.quantity_min || 0),
