@@ -3,21 +3,35 @@ import type { createBrowserClient } from '@supabase/ssr';
 export type SupabaseBrowserClient = ReturnType<typeof createBrowserClient>;
 
 /** Select de itens para o almoxarifado (posse aninhada). */
+const SITE_POSSESSION_SELECT =
+  'site_possession (quantity, site_id, work_sites (id, name, kind))';
+
 export const ITEMS_SELECT_WITHOUT_TAG =
-  'id, code, description, category, location, consumable, unique_item, is_rented, calibration_due_date, expiration_date, quantity_current, quantity_min, unit, updated_at, user_id, possession (id, quantity, employee_id, employees (id, full_name))';
+  `id, code, description, category, location, consumable, unique_item, is_rented, calibration_due_date, expiration_date, quantity_current, quantity_min, unit, updated_at, user_id, ${SITE_POSSESSION_SELECT}, possession (id, quantity, employee_id, employees (id, full_name))`;
 
 export const ITEMS_SELECT_WITH_TAG = ITEMS_SELECT_WITHOUT_TAG.replace(
   'unique_item,',
   'unique_item, tag,'
 );
 
-export const ITEMS_SELECT_LEGACY = ITEMS_SELECT_WITHOUT_TAG.replace('is_rented, ', '');
+export const ITEMS_SELECT_LEGACY = ITEMS_SELECT_WITHOUT_TAG.replace('is_rented, ', '').replace(
+  `${SITE_POSSESSION_SELECT}, `,
+  ''
+);
 export const ITEMS_SELECT_WITHOUT_DATES = ITEMS_SELECT_WITHOUT_TAG.replace(
   'calibration_due_date, expiration_date, ',
   ''
 );
 export const ITEMS_SELECT_LEGACY_WITHOUT_DATES = ITEMS_SELECT_LEGACY.replace(
   'calibration_due_date, expiration_date, ',
+  ''
+);
+export const ITEMS_SELECT_WITHOUT_SITE_POSSESSION = ITEMS_SELECT_WITHOUT_TAG.replace(
+  `${SITE_POSSESSION_SELECT}, `,
+  ''
+);
+export const ITEMS_SELECT_WITH_TAG_WITHOUT_SITE_POSSESSION = ITEMS_SELECT_WITH_TAG.replace(
+  `${SITE_POSSESSION_SELECT}, `,
   ''
 );
 
@@ -58,6 +72,8 @@ export async function fetchTenantItems(
     ITEMS_SELECT_WITHOUT_DATES,
     ITEMS_SELECT_LEGACY,
     ITEMS_SELECT_LEGACY_WITHOUT_DATES,
+    ITEMS_SELECT_WITH_TAG_WITHOUT_SITE_POSSESSION,
+    ITEMS_SELECT_WITHOUT_SITE_POSSESSION,
   ];
 
   let res = await run(candidates[0]);
@@ -68,7 +84,9 @@ export async function fetchTenantItems(
       isLikelyMissingColumn(msg, 'tag') ||
       isLikelyMissingColumn(msg, 'is_rented') ||
       isLikelyMissingColumn(msg, 'calibration_due_date') ||
-      isLikelyMissingColumn(msg, 'expiration_date');
+      isLikelyMissingColumn(msg, 'expiration_date') ||
+      isLikelyMissingColumn(msg, 'site_possession') ||
+      msg.toLowerCase().includes('site_possession');
     if (!isOptionalColumnError) break;
     res = await run(candidates[i]);
   }

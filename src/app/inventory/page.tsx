@@ -25,6 +25,27 @@ function possessionEmployeeName(
   return formatEmployeeName(fullName);
 }
 
+function possessionTotalForProduct(product: Product): number {
+  if (product.consumable) return 0;
+  return product.possession?.reduce((acc, curr) => acc + curr.quantity, 0) || 0;
+}
+
+function sitePossessionTotal(product: Product): number {
+  return (
+    product.site_possession?.reduce((acc, curr) => acc + Number(curr.quantity || 0), 0) || 0
+  );
+}
+
+function sitePossessionLabel(
+  workSites: SitePossessionDetail['work_sites']
+): string | undefined {
+  if (!workSites) return undefined;
+  const ws = Array.isArray(workSites) ? workSites[0] : workSites;
+  if (!ws?.name) return undefined;
+  const kind = ws.kind === 'sede' ? 'Sede' : 'Canteiro';
+  return `${kind}: ${ws.name}`;
+}
+
 function movementCounterpartyLabel(move: {
   employees?: { full_name: string } | null;
   work_sites?: { name: string; kind: string } | { name: string; kind: string }[] | null;
@@ -47,6 +68,12 @@ interface PossessionDetail {
   employees?: { id: string; full_name: string } | { id: string; full_name: string }[] | null;
 }
 
+interface SitePossessionDetail {
+  quantity: number;
+  site_id?: string;
+  work_sites?: { id: string; name: string; kind: string } | { id: string; name: string; kind: string }[] | null;
+}
+
 interface Product {
   id: string;
   code?: string | null;
@@ -65,6 +92,7 @@ interface Product {
   unit: string;
   updated_at?: string;
   possession?: PossessionDetail[];
+  site_possession?: SitePossessionDetail[];
 }
 
 interface ItemCategory {
@@ -264,7 +292,23 @@ function InventoryContent() {
         return;
       }
 
-      const incoming = (data as Product[]) || [];
+      let incoming = (data as Product[]) || [];
+
+      const consumableWithPossession = incoming.filter(
+        (p) => p.consumable && (p.possession?.some((pos) => Number(pos.quantity) > 0) ?? false)
+      );
+      if (consumableWithPossession.length > 0) {
+        await Promise.all(
+          consumableWithPossession.map((p) =>
+            Promise.all([
+              supabase.from('possession').delete().eq('item_id', p.id),
+              supabase.from('site_possession').delete().eq('item_id', p.id),
+            ])
+          )
+        );
+        incoming = incoming.map((p) => (p.consumable ? { ...p, possession: [] } : p));
+      }
+
       setProducts((prev) => (reset ? incoming : [...prev, ...incoming]));
       setHasMoreProducts(incoming.length === ITEMS_PAGE_SIZE);
       setNextProductsOffset(offset + incoming.length);
@@ -531,6 +575,22 @@ function InventoryContent() {
       alert('Usuário não autenticado.');
       return;
     }
+
+    const dependentDeletes = [
+      { table: 'equipment_rentals', filter: { item_id: id } },
+      { table: 'site_possession', filter: { item_id: id } },
+      { table: 'possession', filter: { item_id: id } },
+      { table: 'movements', filter: { item_id: id } },
+    ] as const;
+
+    for (const { table, filter } of dependentDeletes) {
+      const { error: depError } = await supabase.from(table).delete().match(filter);
+      if (depError && !depError.message.toLowerCase().includes('does not exist')) {
+        alert(`Erro ao limpar vínculos (${table}): ${depError.message}`);
+        return;
+      }
+    }
+
     const { error } = await supabase.from('items').delete().eq('id', id).eq('user_id', user.id);
     if (error) alert('Erro ao excluir: ' + error.message);
     else fetchProducts();
@@ -687,7 +747,7 @@ function InventoryContent() {
       if (filterConsumable === 'sim' && !p.consumable) return false;
       if (filterConsumable === 'nao' && p.consumable) return false;
 
-      const posTotal = p.possession?.reduce((acc, curr) => acc + curr.quantity, 0) || 0;
+      const posTotal = possessionTotalForProduct(p);
       const physTotal = p.quantity_current + posTotal;
       const belowMin = p.quantity_min > 0 && p.quantity_current < p.quantity_min;
 
@@ -747,7 +807,7 @@ function InventoryContent() {
   const appendProductToCart = useCallback((product: Product, quantity: number, tag: string): boolean => {
     const isUnique = Boolean(product.unique_item);
     const qty = isUnique ? 1 : Math.max(1, Math.floor(Number(quantity || 1)));
-    const t = tag.trim();
+    const t = (tag.trim() || product.tag?.trim() || '');
 
     if (isUnique && !t) {
       return false;
@@ -816,6 +876,11 @@ function InventoryContent() {
         return;
       }
       if (product.unique_item) {
+        const linkedTag = product.tag?.trim() || '';
+        if (linkedTag) {
+          appendProductToCart(product, 1, linkedTag);
+          return;
+        }
         setCartPickItemId(product.id);
         setCartPickQty(1);
         setCartPickTag('');
@@ -830,12 +895,13 @@ function InventoryContent() {
 
   const addLineToCart = () => {
     if (!cartPickedItem) return;
-    if (cartPickedItem.unique_item && !cartPickTag.trim()) {
+    const tag = cartPickTag.trim() || cartPickedItem.tag?.trim() || '';
+    if (cartPickedItem.unique_item && !tag) {
       alert('Informe a TAG para item único.');
       return;
     }
     const qty = cartPickedItem.unique_item ? 1 : Math.max(1, Math.floor(Number(cartPickQty || 1)));
-    const ok = appendProductToCart(cartPickedItem, qty, cartPickTag);
+    const ok = appendProductToCart(cartPickedItem, qty, tag);
     if (!ok) return;
     setCartPickQty(1);
     setCartPickTag('');
@@ -925,34 +991,36 @@ function InventoryContent() {
             setIsSubmitting(false);
             return;
           }
-        } else {
-          const { data: currentSp } = await supabase
-            .from('site_possession')
-            .select('quantity')
-            .eq('site_id', cartWorkSiteId)
-            .eq('item_id', line.itemId)
-            .maybeSingle();
-          const cur = Number(currentSp?.quantity ?? 0);
-          const spRes = await updateSitePossessionQuantity(
-            supabase,
-            cartWorkSiteId,
-            line.itemId,
-            cur + line.quantity,
-            user.id
-          );
-          if (!spRes.ok) {
-            alert(`Erro ao atualizar estoque no local (${line.description}): ${spRes.message}`);
-            setIsSubmitting(false);
-            return;
-          }
         }
       }
 
-      const stockRes = await updateStock(supabase, line.itemId, -line.quantity);
-      if (!stockRes.ok) {
-        alert(`Erro ao atualizar estoque (${line.description}): ${stockRes.message}`);
-        setIsSubmitting(false);
-        return;
+      if (cartDestination === 'site') {
+        const { data: currentSp } = await supabase
+          .from('site_possession')
+          .select('quantity')
+          .eq('site_id', cartWorkSiteId)
+          .eq('item_id', line.itemId)
+          .maybeSingle();
+        const cur = Number(currentSp?.quantity ?? 0);
+        const spRes = await updateSitePossessionQuantity(
+          supabase,
+          cartWorkSiteId,
+          line.itemId,
+          cur + line.quantity,
+          user.id
+        );
+        if (!spRes.ok) {
+          alert(`Erro ao atualizar estoque no local (${line.description}): ${spRes.message}`);
+          setIsSubmitting(false);
+          return;
+        }
+      } else {
+        const stockRes = await updateStock(supabase, line.itemId, -line.quantity);
+        if (!stockRes.ok) {
+          alert(`Erro ao atualizar estoque (${line.description}): ${stockRes.message}`);
+          setIsSubmitting(false);
+          return;
+        }
       }
     }
 
@@ -1394,8 +1462,11 @@ function InventoryContent() {
               ) : (
                 filteredProducts.map((p) => {
                   const isLowStock = p.quantity_current <= p.quantity_min;
-                  const totalInPossession = p.possession?.reduce((acc, curr) => acc + curr.quantity, 0) || 0;
+                  const totalInPossession = possessionTotalForProduct(p);
+                  const totalAtSites = sitePossessionTotal(p);
                   const totalQuantity = p.quantity_current + totalInPossession;
+                  const popoverPosseKey = `posse-${p.id}`;
+                  const popoverSitesKey = `sites-${p.id}`;
                   
                   return (
                     <tr key={p.id} className="hover:bg-slate-50 transition-colors group">
@@ -1420,24 +1491,61 @@ function InventoryContent() {
                         </span>
                       </td>
                       <td className="px-6 py-4 bg-slate-50/30">
-                        <div className="flex flex-col items-center">
+                        <div className="flex flex-col items-center gap-1">
                           <span className={`font-black text-sm ${isLowStock ? 'text-red-500' : 'text-primary'}`}>
                             {p.quantity_current}
                           </span>
+                          {totalAtSites > 0 ? (
+                            <div className="relative inline-block">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setActivePopover(activePopover === popoverSitesKey ? null : popoverSitesKey)
+                                }
+                                className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-tight text-amber-800 hover:bg-amber-100 transition-colors"
+                                title="Material enviado a canteiros ou sedes — saldo do almoxarifado mantido"
+                              >
+                                <MapPin size={10} />
+                                {totalAtSites} em locais
+                              </button>
+                              {activePopover === popoverSitesKey && (
+                                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-52 bg-white border border-border rounded-xl shadow-xl z-30 p-3 animate-in fade-in slide-in-from-bottom-2 duration-200">
+                                  <h4 className="text-[10px] font-bold uppercase text-amber-700 mb-2 border-b border-amber-100 pb-1">
+                                    Em canteiros / sedes
+                                  </h4>
+                                  <div className="space-y-2">
+                                    {p.site_possession
+                                      ?.filter((sp) => Number(sp.quantity) > 0)
+                                      .map((sp) => (
+                                        <div
+                                          key={`${sp.site_id}-${sp.quantity}`}
+                                          className="flex justify-between text-[10px]"
+                                        >
+                                          <span className="text-slate-600 truncate mr-2">
+                                            {sitePossessionLabel(sp.work_sites) || 'Local'}
+                                          </span>
+                                          <span className="font-bold text-primary">{sp.quantity}</span>
+                                        </div>
+                                      ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          ) : null}
                         </div>
                       </td>
                       <td className="px-6 py-4 text-center">
                         {totalInPossession > 0 ? (
                           <div className="relative inline-block">
                             <button 
-                              onClick={() => setActivePopover(activePopover === p.id ? null : p.id)}
+                              onClick={() => setActivePopover(activePopover === popoverPosseKey ? null : popoverPosseKey)}
                               className="flex items-center gap-1 mx-auto bg-slate-100 px-3 py-1 rounded-full text-primary font-bold hover:bg-slate-200 transition-colors text-xs"
                             >
                               <Users size={12} className="text-secondary" />
                               {totalInPossession}
                             </button>
                             
-                            {activePopover === p.id && (
+                            {activePopover === popoverPosseKey && (
                               <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 bg-white border border-border rounded-xl shadow-xl z-30 p-3 animate-in fade-in slide-in-from-bottom-2 duration-200">
                                 <h4 className="text-[10px] font-bold uppercase text-slate-400 mb-2 border-b pb-1">Em posse de:</h4>
                                 <div className="space-y-2">
@@ -1573,7 +1681,8 @@ function InventoryContent() {
           ) : (
             filteredProducts.map((p) => {
               const isLowStock = p.quantity_current <= p.quantity_min;
-              const totalInPossession = p.possession?.reduce((acc, curr) => acc + curr.quantity, 0) || 0;
+              const totalInPossession = possessionTotalForProduct(p);
+              const totalAtSites = sitePossessionTotal(p);
               const totalQuantity = p.quantity_current + totalInPossession;
               return (
                 <div
@@ -1643,6 +1752,30 @@ function InventoryContent() {
                       <AlertCircle size={14} />
                       Abaixo ou no mínimo ({p.quantity_min})
                     </p>
+                  ) : null}
+
+                  {totalAtSites > 0 ? (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-3">
+                      <p className="text-[10px] font-black uppercase text-amber-800 mb-2 flex items-center gap-1">
+                        <MapPin size={12} />
+                        {totalAtSites} em canteiros / sedes
+                      </p>
+                      <p className="text-[10px] text-amber-900/80 mb-2">
+                        O saldo do almoxarifado permanece; este aviso indica onde o material foi enviado.
+                      </p>
+                      <div className="space-y-1.5">
+                        {p.site_possession
+                          ?.filter((sp) => Number(sp.quantity) > 0)
+                          .map((sp) => (
+                            <div key={`${sp.site_id}-${sp.quantity}`} className="flex justify-between text-xs font-bold">
+                              <span className="text-amber-950 truncate pr-2">
+                                {sitePossessionLabel(sp.work_sites) || 'Local'}
+                              </span>
+                              <span className="text-amber-900 shrink-0">{sp.quantity}</span>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
                   ) : null}
 
                   {totalInPossession > 0 ? (
@@ -2079,6 +2212,12 @@ function InventoryContent() {
                     Canteiro / sede
                   </button>
                 </div>
+                {cartDestination === 'site' && (
+                  <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 leading-relaxed">
+                    Envio para canteiro ou sede <span className="font-bold">não reduz</span> o saldo do almoxarifado.
+                    O item continua no estoque com aviso indicando em quais locais foi distribuído.
+                  </p>
+                )}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {cartDestination === 'employee' ? (
                     <div>
@@ -2133,8 +2272,12 @@ function InventoryContent() {
                     className="md:col-span-6 p-3 bg-white border border-slate-200 rounded-lg outline-none font-medium"
                     value={cartPickItemId}
                     onChange={(e) => {
-                      setCartPickItemId(e.target.value);
-                      setCartPickTag('');
+                      const id = e.target.value;
+                      setCartPickItemId(id);
+                      const picked = products.find((p) => p.id === id);
+                      setCartPickTag(
+                        picked?.unique_item && picked.tag?.trim() ? picked.tag.trim() : ''
+                      );
                       setCartPickQty(1);
                     }}
                   >
@@ -2153,7 +2296,7 @@ function InventoryContent() {
                     value={cartPickedItem?.unique_item ? 1 : cartPickQty === 0 ? '' : cartPickQty}
                     onChange={(e) => setCartPickQty(Number(e.target.value))}
                   />
-                  {cartPickedItem?.unique_item && (
+                  {cartPickedItem?.unique_item && !cartPickedItem.tag?.trim() && (
                     <input
                       type="text"
                       placeholder="TAG obrigatoria"
@@ -2161,6 +2304,12 @@ function InventoryContent() {
                       value={cartPickTag}
                       onChange={(e) => setCartPickTag(e.target.value)}
                     />
+                  )}
+                  {cartPickedItem?.unique_item && cartPickedItem.tag?.trim() && (
+                    <div className="md:col-span-3 p-3 bg-white border border-slate-200 rounded-lg text-sm font-bold text-secondary flex items-center gap-2">
+                      <Tag size={14} />
+                      {cartPickedItem.tag.trim()}
+                    </div>
                   )}
                   <button
                     type="button"

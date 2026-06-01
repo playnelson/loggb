@@ -229,7 +229,9 @@ export default function QuickMovementModal({
       }
     }
     if (!Number.isFinite(effectiveQty) || effectiveQty <= 0) return 'Quantidade deve ser maior que zero.';
-    if (mode === 'OUT' && effectiveQty > item.quantity_current) return 'Quantidade maior do que o saldo atual.';
+    if (mode === 'OUT' && counterparty !== 'site' && effectiveQty > item.quantity_current) {
+      return 'Quantidade maior do que o saldo atual.';
+    }
     if (isUnique && !movementTag) return 'Este item único está sem TAG no cadastro. Edite o item e informe a TAG para continuar.';
     return null;
   }, [
@@ -280,6 +282,7 @@ export default function QuickMovementModal({
         : null;
     const siteForMove =
       counterparty === 'site' && (needsSite || (showSiteOptionalOnIn && selectedSiteId)) ? selectedSiteId : null;
+    const isSiteCounterparty = counterparty === 'site' && !!siteForMove;
 
     // 1. Record Movement
     const movePayload: Record<string, unknown> = {
@@ -316,8 +319,22 @@ export default function QuickMovementModal({
           return;
         }
       }
-      // Para sede/canteiro, não exigimos saldo registrado para devolver ao almoxarifado.
-      // O histórico da origem local já é registrado em movements (work_site_id).
+      // Para sede/canteiro na devolução, validamos saldo registrado no local.
+    }
+
+    if (isSiteCounterparty && selectedSiteId && mode === 'IN') {
+      const { data: currentSpPre } = await supabase
+        .from('site_possession')
+        .select('quantity')
+        .eq('site_id', selectedSiteId)
+        .eq('item_id', item.id)
+        .maybeSingle();
+      const preSiteQty = Number(currentSpPre?.quantity ?? 0);
+      if (preSiteQty < effectiveQty) {
+        setError('Esse local não tem essa quantidade registrada para devolver ao almoxarifado.');
+        setLoading(false);
+        return;
+      }
     }
 
     const moveError = await insertMovement(movePayload);
@@ -354,16 +371,29 @@ export default function QuickMovementModal({
       }
     }
 
-    if (!item.consumable && counterparty === 'site' && selectedSiteId && mode === 'OUT') {
+    if (isSiteCounterparty && selectedSiteId) {
       const { data: currentSp } = await supabase
         .from('site_possession')
         .select('quantity')
         .eq('site_id', selectedSiteId)
         .eq('item_id', item.id)
         .maybeSingle();
-      const cur = Number(currentSp?.quantity ?? 0);
-      const nextSite = cur + effectiveQty;
-      const spRes = await updateSitePossessionQuantity(supabase, selectedSiteId, item.id, nextSite, user.id);
+      const currentSiteQty = Number(currentSp?.quantity ?? 0);
+      const nextSiteQty = mode === 'OUT' ? currentSiteQty + effectiveQty : currentSiteQty - effectiveQty;
+
+      if (mode === 'IN' && nextSiteQty < 0) {
+        setError('Esse local não tem essa quantidade registrada para devolver ao almoxarifado.');
+        setLoading(false);
+        return;
+      }
+
+      const spRes = await updateSitePossessionQuantity(
+        supabase,
+        selectedSiteId,
+        item.id,
+        nextSiteQty,
+        user.id
+      );
       if (!spRes.ok) {
         setError(spRes.message);
         setLoading(false);
@@ -371,16 +401,18 @@ export default function QuickMovementModal({
       }
     }
 
-    // 3. Update stock quantity via RPC (com fallback em movements.ts)
-    const rpcQty = mode === 'IN' ? effectiveQty : -effectiveQty;
-    const stockRes = await updateStock(supabase, item.id, rpcQty);
-    if (!stockRes.ok) {
-      setError(
-        stockRes.message ||
-          'Movimentação registrada, mas o estoque não pôde ser atualizado. Revise o saldo e o histórico ou peça suporte.'
-      );
-      setLoading(false);
-      return;
+    // 3. Update stock quantity (saída/entrada por colaborador; canteiro/sede não altera saldo do almoxarifado)
+    if (!isSiteCounterparty) {
+      const rpcQty = mode === 'IN' ? effectiveQty : -effectiveQty;
+      const stockRes = await updateStock(supabase, item.id, rpcQty);
+      if (!stockRes.ok) {
+        setError(
+          stockRes.message ||
+            'Movimentação registrada, mas o estoque não pôde ser atualizado. Revise o saldo e o histórico ou peça suporte.'
+        );
+        setLoading(false);
+        return;
+      }
     }
 
     setSuccess(true);
@@ -558,6 +590,11 @@ export default function QuickMovementModal({
                   {showSiteOptionalOnIn && (
                     <div className="text-[10px] text-slate-400 font-bold">
                       Consumíveis podem entrar sem vínculo a local; itens de carteira no local exigem seleção.
+                    </div>
+                  )}
+                  {mode === 'OUT' && (
+                    <div className="text-[10px] text-amber-800 font-medium bg-amber-50 border border-amber-100 rounded-lg px-2 py-1.5 leading-relaxed">
+                      O saldo do almoxarifado permanece; o envio aparece como aviso no inventário.
                     </div>
                   )}
                 </div>

@@ -7,7 +7,7 @@ import { supabase } from '@/lib/supabase';
 import { formatProductLabelDisplay } from '@/lib/productDisplayText';
 import { recordMovement, updatePossessionQuantity, updateStock } from '@/lib/movements';
 import { formatEmployeeName, normalizeEmployeeNameForSave, normalizeSearchText } from '@/lib/employeeName';
-import { Search, UserPlus, Mail, Phone, ExternalLink, X, FileUp, Filter, Package, AlertCircle, History, RotateCcw, Download, Loader2, ArrowLeft, FileText, Trash2 } from 'lucide-react';
+import { Search, UserPlus, Mail, Phone, ExternalLink, X, FileUp, Filter, Package, AlertCircle, History, RotateCcw, Download, Loader2, ArrowLeft, FileText, Trash2, Pencil } from 'lucide-react';
 import ImportSpreadsheet from '@/components/ImportSpreadsheet';
 import {
   downloadFerramentasFichaTxt,
@@ -55,6 +55,14 @@ type EpiFichaFormState = {
 };
 
 const EPI_DISCARD_TAG = 'DESCARTE';
+
+const emptyEmployeeForm = () => ({
+  full_name: '',
+  role: '',
+  status: 'Ativo',
+  cpf: '',
+  department: '',
+});
 
 type EpiConsumableBalanceRow = { item_id: string; description: string; unit: string; balance: number };
 
@@ -209,6 +217,7 @@ export default function StaffPage() {
   const [statusFilter, setStatusFilter] = useState('Todos');
   const [hasItemsFilter, setHasItemsFilter] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -253,11 +262,25 @@ export default function StaffPage() {
   });
 
   // Form states
-  const [formData, setFormData] = useState({
-    full_name: '',
-    role: '',
-    status: 'Ativo'
-  });
+  const [formData, setFormData] = useState(emptyEmployeeForm);
+
+  const openNewEmployeeModal = () => {
+    setEditingEmployee(null);
+    setFormData(emptyEmployeeForm());
+    setIsModalOpen(true);
+  };
+
+  const openEditEmployeeModal = (employee: Employee) => {
+    setEditingEmployee(employee);
+    setFormData({
+      full_name: employee.full_name,
+      role: employee.role || '',
+      status: employee.status || 'Ativo',
+      cpf: employee.cpf || '',
+      department: employee.department || '',
+    });
+    setIsModalOpen(true);
+  };
 
   const fetchEmployees = async () => {
     setLoading(true);
@@ -725,19 +748,39 @@ export default function StaffPage() {
     }
 
     const fullName = normalizeEmployeeNameForSave(formData.full_name);
-    const { error } = await supabase.from('employees').insert([{ ...formData, full_name: fullName, user_id: user.id }]);
+    const cpfDigits = formData.cpf.replace(/\D/g, '');
+    const payload = {
+      full_name: fullName,
+      role: formData.role.trim(),
+      status: formData.status,
+      cpf: cpfDigits.length === 11 ? cpfDigits : formData.cpf.trim() || null,
+      department: formData.department.trim() || null,
+    };
+
+    const { error } = editingEmployee
+      ? await supabase
+          .from('employees')
+          .update(payload)
+          .eq('id', editingEmployee.id)
+          .eq('user_id', user.id)
+      : await supabase.from('employees').insert([{ ...payload, user_id: user.id }]);
 
     if (error) {
-      console.error('Error adding employee:', error);
+      console.error('Error saving employee:', error);
       const msg = String(error.message || '').toLowerCase();
-      if (msg.includes('limit') || msg.includes('limite') || msg.includes('exceeded') || msg.includes('excedido')) {
+      if (!editingEmployee && (msg.includes('limit') || msg.includes('limite') || msg.includes('exceeded') || msg.includes('excedido'))) {
         alert(`Limite de cadastro atingido para este usuário.\n\nDetalhe: ${error.message}`);
       } else {
-        alert(`Erro ao cadastrar colaborador: ${error.message}`);
+        alert(
+          editingEmployee
+            ? `Erro ao atualizar colaborador: ${error.message}`
+            : `Erro ao cadastrar colaborador: ${error.message}`
+        );
       }
     } else {
       setIsModalOpen(false);
-      setFormData({ full_name: '', role: '', status: 'Ativo' });
+      setEditingEmployee(null);
+      setFormData(emptyEmployeeForm());
       // eslint-disable-next-line @typescript-eslint/no-floating-promises
       fetchEmployees();
     }
@@ -779,7 +822,7 @@ export default function StaffPage() {
             Importar Histórico
           </button>
           <button 
-            onClick={() => setIsModalOpen(true)}
+            onClick={openNewEmployeeModal}
             className="flex w-full sm:w-auto items-center justify-center gap-2 bg-primary text-white px-4 py-3 md:py-2 rounded-lg hover:bg-slate-800 transition-all font-medium text-sm min-h-[48px]"
           >
             <UserPlus size={16} />
@@ -984,6 +1027,14 @@ export default function StaffPage() {
                       </td>
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => openEditEmployeeModal(e)}
+                            className="text-slate-400 hover:text-secondary p-2 bg-slate-50 border border-slate-200 rounded-lg transition-all"
+                            title="Editar perfil do colaborador"
+                          >
+                            <Pencil size={16} />
+                          </button>
                           <button 
                             type="button"
                             onClick={() => openEpiFichaModal(e)}
@@ -1171,6 +1222,14 @@ export default function StaffPage() {
                   </div>
 
                   <div className="flex flex-wrap gap-2 pt-1 border-t border-slate-100">
+                    <button
+                      type="button"
+                      onClick={() => openEditEmployeeModal(e)}
+                      className="flex-1 min-h-[48px] inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold text-primary"
+                    >
+                      <Pencil size={18} />
+                      Editar
+                    </button>
                     <button
                       type="button"
                       onClick={() => openEpiFichaModal(e)}
@@ -1952,21 +2011,27 @@ export default function StaffPage() {
         </div>
       )}
 
-      {/* Modal Cadastro Colaborador */}
+      {/* Modal Cadastro / Edição Colaborador */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-primary/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in duration-300">
-            <div className="p-6 border-b border-border flex items-center justify-between bg-slate-50">
-              <h2 className="text-xl font-bold text-primary">Novo Colaborador</h2>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in duration-300 max-h-[90vh] flex flex-col">
+            <div className="p-6 border-b border-border flex items-center justify-between bg-slate-50 shrink-0">
+              <h2 className="text-xl font-bold text-primary">
+                {editingEmployee ? 'Editar Colaborador' : 'Novo Colaborador'}
+              </h2>
               <button 
-                onClick={() => setIsModalOpen(false)}
+                type="button"
+                onClick={() => {
+                  setIsModalOpen(false);
+                  setEditingEmployee(null);
+                }}
                 className="p-1 hover:bg-slate-200 rounded-full transition-colors"
               >
                 <X size={20} />
               </button>
             </div>
             
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+            <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto">
               <div className="space-y-1">
                 <label className="text-xs font-bold uppercase text-slate-500">Nome Completo</label>
                 <input 
@@ -1997,7 +2062,32 @@ export default function StaffPage() {
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs font-bold uppercase text-slate-500">Status Inicial</label>
+                <label className="text-xs font-bold uppercase text-slate-500">CPF</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="000.000.000-00"
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none"
+                  value={formData.cpf}
+                  onChange={(e) => setFormData({ ...formData, cpf: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold uppercase text-slate-500">Setor / Departamento</label>
+                <input
+                  type="text"
+                  placeholder="Ex: Operações"
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none"
+                  value={formData.department}
+                  onChange={(e) => setFormData({ ...formData, department: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold uppercase text-slate-500">
+                  {editingEmployee ? 'Status' : 'Status Inicial'}
+                </label>
                 <select 
                   className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none font-medium"
                   value={formData.status}
@@ -2013,7 +2103,10 @@ export default function StaffPage() {
               <div className="pt-4 flex gap-3">
                 <button 
                   type="button"
-                  onClick={() => setIsModalOpen(false)}
+                  onClick={() => {
+                    setIsModalOpen(false);
+                    setEditingEmployee(null);
+                  }}
                   className="flex-1 p-3 border border-slate-200 rounded-xl font-bold text-slate-500 hover:bg-slate-50 transition-colors"
                 >
                   Cancelar
@@ -2023,7 +2116,7 @@ export default function StaffPage() {
                   disabled={isSubmitting}
                   className="flex-1 p-3 bg-primary text-white rounded-xl font-bold hover:bg-slate-800 transition-all shadow-lg shadow-primary/20 disabled:opacity-50"
                 >
-                  {isSubmitting ? 'Salvando...' : 'Cadastrar'}
+                  {isSubmitting ? 'Salvando...' : editingEmployee ? 'Salvar' : 'Cadastrar'}
                 </button>
               </div>
             </form>
