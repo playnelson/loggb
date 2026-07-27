@@ -93,3 +93,28 @@ export async function fetchTenantItems(
 
   return res;
 }
+
+/** Carrega todos os itens do tenant (paginação interna) — use em exportações completas. */
+export async function fetchAllTenantItems(supabase: SupabaseBrowserClient, userId: string) {
+  const pageSize = 500;
+  let offset = 0;
+  const all: NonNullable<Awaited<ReturnType<typeof fetchTenantItems>>['data']> = [];
+
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const { data, error } = await fetchTenantItems(supabase, userId, {
+      offset,
+      limit: pageSize,
+    });
+    if (error) throw error;
+
+    const chunk = data || [];
+    all.push(...chunk);
+    if (chunk.length < pageSize) break;
+
+    offset += pageSize;
+    if (offset > 100_000) break;
+  }
+
+  return all;
+}

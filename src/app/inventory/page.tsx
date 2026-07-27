@@ -11,7 +11,7 @@ import ImportSpreadsheet from '@/components/ImportSpreadsheet';
 import QuickMovementModal from '@/components/QuickMovementModal';
 import { itemCodeFromDescription } from '@/lib/itemCode';
 import { recordMovement, updatePossessionQuantity, updateSitePossessionQuantity, updateStock } from '@/lib/movements';
-import { fetchTenantItems, isLikelyMissingColumn } from '@/lib/tenantItems';
+import { fetchTenantItems, fetchAllTenantItems, isLikelyMissingColumn } from '@/lib/tenantItems';
 import { downloadInventoryImportTemplate } from '@/lib/inventoryImportTemplate';
 import { downloadInventoryWorkbookFromTemplate } from '@/lib/inventoryExportTemplate';
 import { CatalogProductAutocomplete } from '@/components/CatalogProductAutocomplete';
@@ -148,6 +148,7 @@ function InventoryContent() {
   const [products, setProducts] = useState<Product[]>([]);
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isExportingInventory, setIsExportingInventory] = useState(false);
   const [isLoadingMoreProducts, setIsLoadingMoreProducts] = useState(false);
   const [nextProductsOffset, setNextProductsOffset] = useState(0);
   const [hasMoreProducts, setHasMoreProducts] = useState(true);
@@ -789,15 +790,29 @@ function InventoryContent() {
     'w-full min-w-0 max-w-full text-[11px] font-bold text-primary bg-white border border-slate-200 rounded-md px-1.5 py-1.5 outline-none focus:ring-2 focus:ring-secondary/40';
 
   const handleDownloadInventory = async () => {
-    if (products.length === 0) {
-      alert('Não há itens para exportar.');
-      return;
-    }
+    if (isExportingInventory) return;
+    setIsExportingInventory(true);
     try {
-      await downloadInventoryWorkbookFromTemplate(products);
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        alert('Faça login para exportar o inventário.');
+        return;
+      }
+
+      const allItems = (await fetchAllTenantItems(supabase, user.id)) as Product[];
+      if (allItems.length === 0) {
+        alert('Não há itens para exportar.');
+        return;
+      }
+
+      await downloadInventoryWorkbookFromTemplate(allItems);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Falha ao gerar planilha de inventário.';
       alert(message);
+    } finally {
+      setIsExportingInventory(false);
     }
   };
 
@@ -1061,14 +1076,18 @@ function InventoryContent() {
           <button
             type="button"
             onClick={() => void handleDownloadInventory()}
-            disabled={loading || products.length === 0}
+            disabled={loading || isExportingInventory}
             className="flex w-full md:w-auto items-center justify-center gap-2 bg-white text-primary border border-slate-200 px-3 py-3 md:px-4 md:py-2 rounded-lg hover:bg-slate-50 transition-all font-medium text-sm disabled:opacity-50 min-h-[48px]"
-            title="Baixa em XLSX usando o modelo do inventário com os dados atuais da sua conta"
+            title="Baixa em XLSX com todos os itens da sua conta, incluindo TAG"
           >
-            <Download size={18} className="text-secondary shrink-0" />
+            {isExportingInventory ? (
+              <Loader2 size={18} className="text-secondary shrink-0 animate-spin" />
+            ) : (
+              <Download size={18} className="text-secondary shrink-0" />
+            )}
             <span className="truncate">
-              <span className="md:hidden">CSV</span>
-              <span className="hidden md:inline">Baixar inventário</span>
+              <span className="md:hidden">{isExportingInventory ? 'Gerando…' : 'CSV'}</span>
+              <span className="hidden md:inline">{isExportingInventory ? 'Gerando planilha…' : 'Baixar inventário'}</span>
             </span>
           </button>
           <button

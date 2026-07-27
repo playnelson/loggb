@@ -119,6 +119,30 @@ function cloneCellStyle(style: Partial<ExcelJS.Style>): Partial<ExcelJS.Style> {
   return JSON.parse(JSON.stringify(style || {})) as Partial<ExcelJS.Style>;
 }
 
+function ensureExportColumn(
+  worksheet: ExcelJS.Worksheet,
+  headerRow: number,
+  columns: Record<string, number>,
+  key: string,
+  headerLabel: string,
+  styleSourceKey: string,
+  minWidth = 16
+): void {
+  if (columns[key] != null) return;
+
+  const insertAt = Math.max(...Object.values(columns), 0) + 1;
+  columns[key] = insertAt;
+
+  const styleSourceCol = columns[styleSourceKey] ?? columns.descricao ?? 1;
+  const headerCell = worksheet.getRow(headerRow).getCell(insertAt);
+  const sourceHeaderCell = worksheet.getRow(headerRow).getCell(styleSourceCol);
+  headerCell.value = headerLabel;
+  headerCell.style = cloneCellStyle(sourceHeaderCell.style);
+
+  const sourceWidth = Number(worksheet.getColumn(styleSourceCol).width || minWidth);
+  worksheet.getColumn(insertAt).width = Math.max(minWidth, sourceWidth);
+}
+
 export async function downloadInventoryWorkbookFromTemplate(items: InventoryExportItem[]): Promise<void> {
   const response = await fetch(TEMPLATE_URL, { cache: 'no-store' });
   if (!response.ok) {
@@ -133,6 +157,7 @@ export async function downloadInventoryWorkbookFromTemplate(items: InventoryExpo
     throw new Error('O modelo de inventario nao possui abas.');
   }
   const { headerRow, columns } = findHeaderRowAndColumns(worksheet);
+  ensureExportColumn(worksheet, headerRow, columns, 'tagCadastro', 'TAG cadastro', 'descricao', 18);
   if (columns.posseDe == null) {
     const insertAt =
       columns.posseDetalhe != null
