@@ -65,7 +65,8 @@ export function HomeAlertsFeed() {
       let itemRes = await supabase
         .from('items')
         .select('id, description, calibration_due_date, expiration_date')
-        .eq('user_id', user.id);
+        .eq('user_id', user.id)
+        .is('archived_at', null);
 
       if (
         itemRes.error?.message &&

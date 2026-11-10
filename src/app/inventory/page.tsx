@@ -10,8 +10,14 @@ import { Plus, AlertCircle, X, FileUp, Users, History, Edit, Trash2, Loader2, Ar
 import ImportSpreadsheet from '@/components/ImportSpreadsheet';
 import QuickMovementModal from '@/components/QuickMovementModal';
 import { itemCodeFromDescription } from '@/lib/itemCode';
-import { registerMovement } from '@/lib/movements';
-import { fetchTenantItems, fetchAllTenantItems, isLikelyMissingColumn } from '@/lib/tenantItems';
+import {
+  registerMovement,
+  formatQty,
+  parseQty,
+  movementReasonOf,
+  MOVEMENT_REASON_LABEL,
+} from '@/lib/movements';
+import { fetchAllTenantItems, isLikelyMissingColumn } from '@/lib/tenantItems';
 import { downloadInventoryImportTemplate } from '@/lib/inventoryImportTemplate';
 import { downloadInventoryWorkbookFromTemplate } from '@/lib/inventoryExportTemplate';
 import { CatalogProductAutocomplete } from '@/components/CatalogProductAutocomplete';
@@ -91,6 +97,8 @@ interface Product {
   quantity_min: number;
   unit: string;
   updated_at?: string;
+  /** Preenchido quando o item foi arquivado (sai da lista, mantém o histórico). */
+  archived_at?: string | null;
   possession?: PossessionDetail[];
   site_possession?: SitePossessionDetail[];
 }
@@ -109,6 +117,10 @@ interface EmployeeLite {
 interface ItemMovement {
   id: string;
   type: 'IN' | 'OUT' | string;
+  reason?: string | null;
+  tag?: string | null;
+  employee_id?: string | null;
+  work_site_id?: string | null;
   quantity: number;
   created_at: string;
   employees?: { full_name: string } | null;
@@ -149,9 +161,10 @@ function InventoryContent() {
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
   const [loading, setLoading] = useState(true);
   const [isExportingInventory, setIsExportingInventory] = useState(false);
-  const [isLoadingMoreProducts, setIsLoadingMoreProducts] = useState(false);
-  const [nextProductsOffset, setNextProductsOffset] = useState(0);
-  const [hasMoreProducts, setHasMoreProducts] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  /** Quantos itens filtrados estão renderizados (a lista cresce ao rolar). Reinicia quando o filtro muda. */
+  const [visibleState, setVisibleState] = useState<{ key: string; count: number }>({ key: '', count: ITEMS_PAGE_SIZE });
+  const [filterArchived, setFilterArchived] = useState<'active' | 'archived'>('active');
   const [filterDescription, setFilterDescription] = useState('');
   const [filterConsumable, setFilterConsumable] = useState<'all' | 'sim' | 'nao'>('all');
   const [filterEstoque, setFilterEstoque] = useState<'all' | 'zero' | 'positive' | 'below_min'>('all');
@@ -192,7 +205,7 @@ function InventoryContent() {
   const [cartPickQty, setCartPickQty] = useState(1);
   const [cartPickTag, setCartPickTag] = useState('');
   const hasBootstrappedRef = useRef(false);
-  const isFetchingProductsRef = useRef(false);
+  const productsReqIdRef = useRef(0);
   const loadMoreAnchorRef = useRef<HTMLDivElement | null>(null);
 
   // Form states for NEW/EDIT
@@ -254,71 +267,42 @@ function InventoryContent() {
     setCategories(list);
   };
 
-  const fetchProducts = useCallback(async (options: { reset?: boolean } = {}) => {
-    const { reset = true } = options;
-    if (isFetchingProductsRef.current) return;
-    if (!reset && (!hasMoreProducts || loading || isLoadingMoreProducts)) return;
-
-    isFetchingProductsRef.current = true;
+  /**
+   * Carrega TODOS os itens da conta (inclusive arquivados) em páginas de 500.
+   * Busca e filtros rodam sobre a lista inteira — antes só valiam para os itens já carregados na rolagem.
+   * A tela renderiza aos poucos (visibleCount) para continuar leve.
+   */
+  const fetchProducts = useCallback(async () => {
+    const reqId = ++productsReqIdRef.current;
     try {
-      if (reset) {
-        setLoading(true);
-        setHasMoreProducts(true);
-        setNextProductsOffset(0);
-      } else {
-        setIsLoadingMoreProducts(true);
-      }
-
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        setProducts([]);
-        setHasMoreProducts(false);
-        setNextProductsOffset(0);
+        if (reqId === productsReqIdRef.current) setProducts([]);
         return;
       }
-
-      const offset = reset ? 0 : nextProductsOffset;
-      const { data, error } = await fetchTenantItems(supabase, user.id, {
-        offset,
-        limit: ITEMS_PAGE_SIZE,
-      });
-
-      if (error) {
-        console.error('Error fetching products:', error);
-        if (reset) {
-          setProducts([]);
-          setHasMoreProducts(false);
-          setNextProductsOffset(0);
-        }
-        return;
-      }
-
-      let incoming = (data as Product[]) || [];
-
-      const consumableWithPossession = incoming.filter(
-        (p) => p.consumable && (p.possession?.some((pos) => Number(pos.quantity) > 0) ?? false)
+      const all = (await fetchAllTenantItems(supabase, user.id, { includeArchived: true })) as Product[];
+      if (reqId !== productsReqIdRef.current) return; // resposta antiga: ignora
+      // Quantidades são numeric no banco: garante número no front (somas e comparações).
+      setProducts(
+        all.map((p) => ({
+          ...p,
+          quantity_current: Number(p.quantity_current ?? 0),
+          quantity_min: Number(p.quantity_min ?? 0),
+          possession: p.possession?.map((pos) => ({ ...pos, quantity: Number(pos.quantity ?? 0) })),
+          site_possession: p.site_possession?.map((sp) => ({ ...sp, quantity: Number(sp.quantity ?? 0) })),
+        }))
       );
-      if (consumableWithPossession.length > 0) {
-        await Promise.all(
-          consumableWithPossession.map((p) =>
-            Promise.all([
-              supabase.from('possession').delete().eq('item_id', p.id),
-              supabase.from('site_possession').delete().eq('item_id', p.id),
-            ])
-          )
-        );
-        incoming = incoming.map((p) => (p.consumable ? { ...p, possession: [] } : p));
+      setLoadError(null);
+    } catch (error) {
+      console.error('Error fetching products:', error);
+      if (reqId === productsReqIdRef.current) {
+        const msg = (error as { message?: unknown } | null)?.message;
+        setLoadError(typeof msg === 'string' && msg ? msg : 'Falha ao carregar o inventário.');
       }
-
-      setProducts((prev) => (reset ? incoming : [...prev, ...incoming]));
-      setHasMoreProducts(incoming.length === ITEMS_PAGE_SIZE);
-      setNextProductsOffset(offset + incoming.length);
     } finally {
-      setIsLoadingMoreProducts(false);
-      setLoading(false);
-      isFetchingProductsRef.current = false;
+      if (reqId === productsReqIdRef.current) setLoading(false);
     }
-  }, [hasMoreProducts, isLoadingMoreProducts, loading, nextProductsOffset]);
+  }, []);
 
   const fetchEmployees = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -373,22 +357,6 @@ function InventoryContent() {
       void fetchWorkSites();
     });
   }, [fetchCategories, fetchEmployees, fetchProducts, fetchWorkSites]);
-
-  useEffect(() => {
-    const anchor = loadMoreAnchorRef.current;
-    if (!anchor || !hasMoreProducts) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (!entries[0]?.isIntersecting) return;
-        void fetchProducts({ reset: false });
-      },
-      { root: null, rootMargin: '0px 0px 280px 0px', threshold: 0.05 }
-    );
-
-    observer.observe(anchor);
-    return () => observer.disconnect();
-  }, [fetchProducts, hasMoreProducts]);
 
   const syncCartWithProducts = useCallback((lines: CartLine[], currentProducts: Product[]) => {
     if (lines.length === 0 || currentProducts.length === 0) return lines;
@@ -517,19 +485,20 @@ function InventoryContent() {
 
   const openHistory = async (item: Product) => {
     setHistoryItem(item);
+    setItemMovements([]);
     const { data } = await supabase
       .from('movements')
       .select('*, employees(full_name), work_sites(name, kind)')
       .eq('item_id', item.id)
       .order('created_at', { ascending: false })
-      .limit(30);
+      .limit(100);
     setItemMovements((data || []) as ItemMovement[]);
   };
 
   const handleAdjustStock = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!adjustItem) return;
-    const qty = Number(adjustQty || 0);
+    const qty = parseQty(adjustQty || 0);
     if (!Number.isFinite(qty) || qty === 0) return;
     setIsSubmitting(true);
 
@@ -548,6 +517,7 @@ function InventoryContent() {
       item_id: adjustItem.id,
       quantity: abs,
       type,
+      reason: 'ajuste',
       stock_delta: qty,
     });
     if (!res.ok) {
@@ -562,32 +532,85 @@ function InventoryContent() {
     setIsSubmitting(false);
   };
 
-  const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`Tem certeza que deseja excluir "${name}"? Esta ação é irreversível.`)) return;
+  /**
+   * Remover item:
+   * - sem movimentações nem aluguéis → apaga de vez (cadastro feito por engano);
+   * - com histórico → ARQUIVA (sai da lista, não movimenta, mas o histórico fica guardado).
+   * Bloqueia se ainda houver material com colaboradores ou em canteiros/sedes.
+   */
+  const handleDelete = async (p: Product) => {
+    const name = formatProductLabelDisplay(p.description);
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       alert('Usuário não autenticado.');
       return;
     }
 
-    const dependentDeletes = [
-      { table: 'equipment_rentals', filter: { item_id: id } },
-      { table: 'site_possession', filter: { item_id: id } },
-      { table: 'possession', filter: { item_id: id } },
-      { table: 'movements', filter: { item_id: id } },
-    ] as const;
-
-    for (const { table, filter } of dependentDeletes) {
-      const { error: depError } = await supabase.from(table).delete().match(filter);
-      if (depError && !depError.message.toLowerCase().includes('does not exist')) {
-        alert(`Erro ao limpar vínculos (${table}): ${depError.message}`);
-        return;
-      }
+    const withEmployees = (p.possession || []).reduce((s, pos) => s + Number(pos.quantity || 0), 0);
+    const atSites = sitePossessionTotal(p);
+    if (withEmployees > 0 || atSites > 0) {
+      const parts = [
+        withEmployees > 0 ? `${formatQty(withEmployees)} ${p.unit} com colaboradores` : '',
+        atSites > 0 ? `${formatQty(atSites)} ${p.unit} em canteiros/sedes` : '',
+      ].filter(Boolean);
+      alert(`Não é possível remover "${name}": ainda há ${parts.join(' e ')}. Registre a devolução antes.`);
+      return;
     }
 
-    const { error } = await supabase.from('items').delete().eq('id', id).eq('user_id', user.id);
-    if (error) alert('Erro ao excluir: ' + error.message);
-    else fetchProducts();
+    const [movRes, rentRes] = await Promise.all([
+      supabase.from('movements').select('id', { count: 'exact', head: true }).eq('item_id', p.id),
+      supabase.from('equipment_rentals').select('id', { count: 'exact', head: true }).eq('item_id', p.id),
+    ]);
+    if (movRes.error) {
+      alert(`Erro ao verificar o histórico do item: ${movRes.error.message}`);
+      return;
+    }
+    const movCount = movRes.count ?? 0;
+    const rentCount = rentRes.error ? 0 : rentRes.count ?? 0;
+
+    if (movCount === 0 && rentCount === 0) {
+      if (!confirm(`Excluir "${name}"? O item não tem nenhuma movimentação, então será apagado de vez.`)) return;
+      const { error } = await supabase.from('items').delete().eq('id', p.id).eq('user_id', user.id);
+      if (error) alert('Erro ao excluir: ' + error.message);
+      else void fetchProducts();
+      return;
+    }
+
+    const stockWarn =
+      Number(p.quantity_current) > 0
+        ? `\n\nAtenção: ainda há ${formatQty(p.quantity_current)} ${p.unit} em estoque. Se o material não existe mais, faça um ajuste antes.`
+        : '';
+    const ok = confirm(
+      `"${name}" tem ${movCount} movimentação(ões) no histórico, então será ARQUIVADO em vez de apagado.\n\n` +
+        `Ele sai da lista e não pode mais ser movimentado, mas o histórico continua guardado. ` +
+        `Para reativar, use o filtro "Arquivados".${stockWarn}`
+    );
+    if (!ok) return;
+    const { error } = await supabase
+      .from('items')
+      .update({ archived_at: new Date().toISOString() })
+      .eq('id', p.id)
+      .eq('user_id', user.id);
+    if (error) alert('Erro ao arquivar: ' + error.message);
+    else {
+      setCart((prev) => prev.filter((l) => l.itemId !== p.id));
+      void fetchProducts();
+    }
+  };
+
+  const handleRestore = async (p: Product) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      alert('Usuário não autenticado.');
+      return;
+    }
+    const { error } = await supabase
+      .from('items')
+      .update({ archived_at: null })
+      .eq('id', p.id)
+      .eq('user_id', user.id);
+    if (error) alert('Erro ao reativar: ' + error.message);
+    else void fetchProducts();
   };
 
   const handleEditSubmit = async (e: React.FormEvent) => {
@@ -601,7 +624,25 @@ function InventoryContent() {
       return;
     }
 
+    // Virar consumível apaga as carteiras/saldos em locais deste item — confirmar antes.
+    if (!editingItem.consumable && formData.consumable) {
+      const withEmployees = (editingItem.possession || []).reduce((s, pos) => s + Number(pos.quantity || 0), 0);
+      const atSites = sitePossessionTotal(editingItem);
+      if (
+        (withEmployees > 0 || atSites > 0) &&
+        !confirm(
+          `Ao marcar como consumível, os saldos em posse (${formatQty(withEmployees)} com colaboradores` +
+            `${atSites > 0 ? `, ${formatQty(atSites)} em locais` : ''}) deixam de ser controlados e serão zerados. Continuar?`
+        )
+      ) {
+        setIsSubmitting(false);
+        return;
+      }
+    }
+
     const descNorm = normalizeProductLabelForSave(formData.description);
+    // O saldo (quantity_current) NÃO é enviado aqui: ele só muda por movimentação/ajuste,
+    // para o histórico sempre bater e para não sobrescrever uma baixa feita enquanto o formulário estava aberto.
     const basePatch = {
       description: descNorm,
       category: formData.category,
@@ -611,8 +652,7 @@ function InventoryContent() {
       is_rented: formData.is_rented,
       calibration_due_date: formData.calibration_due_date || null,
       expiration_date: formData.expiration_date || null,
-      quantity_current: formData.quantity_current,
-      quantity_min: formData.quantity_min,
+      quantity_min: parseQty(formData.quantity_min),
       unit: formData.unit,
       code: itemCodeFromDescription(descNorm),
     };
@@ -675,7 +715,17 @@ function InventoryContent() {
     }
 
     const descNew = normalizeProductLabelForSave(formData.description);
-    const finalData: Record<string, unknown> = {
+    const code = itemCodeFromDescription(descNew);
+    const initialQty = parseQty(formData.quantity_current);
+    if (initialQty < 0) {
+      alert('O saldo inicial não pode ser negativo.');
+      setIsSubmitting(false);
+      return;
+    }
+
+    // O item nasce com saldo 0; o saldo inicial entra como movimentação ("Saldo inicial"),
+    // para o histórico explicar o saldo desde o primeiro dia.
+    const row: Record<string, unknown> = {
       description: descNew,
       category: formData.category,
       location: formData.location,
@@ -684,42 +734,69 @@ function InventoryContent() {
       is_rented: formData.is_rented,
       calibration_due_date: formData.calibration_due_date || null,
       expiration_date: formData.expiration_date || null,
-      quantity_current: formData.quantity_current,
-      quantity_min: formData.quantity_min,
+      quantity_current: 0,
+      quantity_min: parseQty(formData.quantity_min),
       unit: formData.unit,
       tag: formData.tag.trim() || null,
-      code: itemCodeFromDescription(descNew),
+      code,
       user_id: user.id,
     };
 
-    let row: Record<string, unknown> = { ...finalData };
-    let { error } = await supabase.from('items').insert([row]);
-    if (
-      error?.message &&
-      (
-        isLikelyMissingColumn(error.message, 'tag') ||
-        isLikelyMissingColumn(error.message, 'is_rented') ||
-        isLikelyMissingColumn(error.message, 'calibration_due_date') ||
-        isLikelyMissingColumn(error.message, 'expiration_date')
-      )
-    ) {
-      const legacy = { ...row } as Record<string, unknown>;
-      delete legacy.tag;
-      delete legacy.is_rented;
-      delete legacy.calibration_due_date;
-      delete legacy.expiration_date;
-      row = legacy;
-      ({ error } = await supabase.from('items').insert([row]));
-    }
+    const { data: created, error } = await supabase.from('items').insert([row]).select('id').single();
 
     if (error) {
-      console.error('Error adding item:', error);
-      alert(`Erro ao cadastrar item: ${error.message}`);
-    } else {
-      setIsModalOpen(false);
-      setFormData(emptyItemForm());
-      void fetchProducts();
+      // Mesma descrição de um item já cadastrado (código único por conta).
+      if (error.code === '23505') {
+        const { data: existing } = await supabase
+          .from('items')
+          .select('id, archived_at')
+          .eq('user_id', user.id)
+          .eq('code', code)
+          .maybeSingle();
+        if (existing?.archived_at) {
+          if (confirm('Já existe um item ARQUIVADO com esta descrição. Deseja reativá-lo em vez de criar outro?')) {
+            const { error: restoreErr } = await supabase
+              .from('items')
+              .update({ archived_at: null })
+              .eq('id', existing.id)
+              .eq('user_id', user.id);
+            if (restoreErr) alert('Erro ao reativar: ' + restoreErr.message);
+            else {
+              setIsModalOpen(false);
+              setFormData(emptyItemForm());
+              void fetchProducts();
+            }
+          }
+        } else {
+          alert('Já existe um item com esta descrição. Procure-o na lista ou use outra descrição.');
+        }
+      } else {
+        console.error('Error adding item:', error);
+        alert(`Erro ao cadastrar item: ${error.message}`);
+      }
+      setIsSubmitting(false);
+      return;
     }
+
+    if (initialQty > 0 && created?.id) {
+      const res = await registerMovement(supabase, {
+        item_id: String(created.id),
+        type: 'IN',
+        reason: 'saldo_inicial',
+        quantity: initialQty,
+        stock_delta: initialQty,
+      });
+      if (!res.ok) {
+        alert(
+          `O item foi cadastrado, mas o saldo inicial não foi registrado: ${res.message}\n` +
+            'Use "Ajustar estoque" no item para lançar o saldo.'
+        );
+      }
+    }
+
+    setIsModalOpen(false);
+    setFormData(emptyItemForm());
+    void fetchProducts();
     setIsSubmitting(false);
   };
 
@@ -732,12 +809,24 @@ function InventoryContent() {
     setFilterMinimo('all');
     setFilterCategory('');
     setFilterCart('all');
+    setFilterArchived('active');
   };
+
+  const activeProductsCount = useMemo(() => products.filter((p) => !p.archived_at).length, [products]);
+  const archivedProductsCount = products.length - activeProductsCount;
 
   const filteredProducts = useMemo(() => {
     const q = normalizeSearchText(filterDescription);
     return products.filter((p) => {
-      if (q && !normalizeSearchText(p.description).includes(q)) return false;
+      if (filterArchived === 'active' ? p.archived_at : !p.archived_at) return false;
+      if (
+        q &&
+        !normalizeSearchText(p.description).includes(q) &&
+        !normalizeSearchText(p.tag || '').includes(q) &&
+        !normalizeSearchText(p.location || '').includes(q)
+      ) {
+        return false;
+      }
       if (filterConsumable === 'sim' && !p.consumable) return false;
       if (filterConsumable === 'nao' && p.consumable) return false;
 
@@ -768,6 +857,7 @@ function InventoryContent() {
     });
   }, [
     products,
+    filterArchived,
     filterDescription,
     filterConsumable,
     filterEstoque,
@@ -778,6 +868,39 @@ function InventoryContent() {
     filterCart,
     cart,
   ]);
+
+  // Renderização progressiva: mostra 30 itens filtrados e acrescenta mais 30 ao chegar no fim da lista.
+  const filterKey = [
+    filterArchived,
+    filterDescription,
+    filterConsumable,
+    filterEstoque,
+    filterPosse,
+    filterTotal,
+    filterMinimo,
+    filterCategory,
+    filterCart,
+  ].join('|');
+  const visibleCount = visibleState.key === filterKey ? visibleState.count : ITEMS_PAGE_SIZE;
+  const visibleProducts = filteredProducts.slice(0, visibleCount);
+  const hasMoreToShow = filteredProducts.length > visibleCount;
+
+  useEffect(() => {
+    const anchor = loadMoreAnchorRef.current;
+    if (!anchor || !hasMoreToShow) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0]?.isIntersecting) return;
+        setVisibleState((prev) => ({
+          key: filterKey,
+          count: (prev.key === filterKey ? prev.count : ITEMS_PAGE_SIZE) + ITEMS_PAGE_SIZE,
+        }));
+      },
+      { root: null, rootMargin: '0px 0px 280px 0px', threshold: 0.05 }
+    );
+    observer.observe(anchor);
+    return () => observer.disconnect();
+  }, [filterKey, hasMoreToShow, visibleCount]);
 
   const selectFilterClass =
     'w-full min-w-0 max-w-full text-[11px] font-bold text-primary bg-white border border-slate-200 rounded-md px-1.5 py-1.5 outline-none focus:ring-2 focus:ring-secondary/40';
@@ -814,17 +937,21 @@ function InventoryContent() {
 
   const appendProductToCart = useCallback((product: Product, quantity: number, tag: string): boolean => {
     const isUnique = Boolean(product.unique_item);
-    const qty = isUnique ? 1 : Math.max(1, Math.floor(Number(quantity || 1)));
+    const qty = isUnique ? 1 : parseQty(quantity);
     const t = (tag.trim() || product.tag?.trim() || '');
 
     if (isUnique && !t) {
+      return false;
+    }
+    if (!(qty > 0)) {
+      alert('Informe uma quantidade maior que zero.');
       return false;
     }
 
     const inCartQty = cart
       .filter((l) => l.itemId === product.id)
       .reduce((s, l) => s + l.quantity, 0);
-    if (qty + inCartQty > product.quantity_current) {
+    if (parseQty(qty + inCartQty) > product.quantity_current) {
       alert('Quantidade no carrinho maior que o saldo atual do estoque.');
       return false;
     }
@@ -871,7 +998,7 @@ function InventoryContent() {
         ];
       }
       const next = [...prev];
-      next[idx] = { ...next[idx], quantity: next[idx].quantity + qty };
+      next[idx] = { ...next[idx], quantity: parseQty(next[idx].quantity + qty) };
       return next;
     });
     return true;
@@ -879,6 +1006,7 @@ function InventoryContent() {
 
   const addItemToCartFromRow = useCallback(
     (product: Product) => {
+      if (product.archived_at) return;
       if (product.quantity_current <= 0) {
         alert('Sem saldo disponível no almoxarifado para retirada.');
         return;
@@ -896,7 +1024,8 @@ function InventoryContent() {
         setIsCartOpen(true);
         return;
       }
-      appendProductToCart(product, 1, '');
+      // Saldo fracionado menor que 1 (ex.: 0,5 kg): adiciona o que houver.
+      appendProductToCart(product, Math.min(1, product.quantity_current), '');
     },
     [appendProductToCart, fetchWorkSites]
   );
@@ -908,7 +1037,7 @@ function InventoryContent() {
       alert('Informe a TAG para item único.');
       return;
     }
-    const qty = cartPickedItem.unique_item ? 1 : Math.max(1, Math.floor(Number(cartPickQty || 1)));
+    const qty = cartPickedItem.unique_item ? 1 : parseQty(cartPickQty);
     const ok = appendProductToCart(cartPickedItem, qty, tag);
     if (!ok) return;
     setCartPickQty(1);
@@ -923,12 +1052,12 @@ function InventoryContent() {
       if (line.unique_item) return prev;
       const item = products.find((p) => p.id === line.itemId);
       if (!item) return prev;
-      const nextQty = line.quantity + delta;
+      const nextQty = parseQty(line.quantity + delta);
       if (nextQty <= 0) return prev.filter((l) => l.lineId !== lineId);
       const others = prev
         .filter((l) => l.itemId === line.itemId && l.lineId !== lineId)
         .reduce((s, l) => s + l.quantity, 0);
-      if (nextQty + others > item.quantity_current) {
+      if (parseQty(nextQty + others) > item.quantity_current) {
         alert('Saldo insuficiente para aumentar esse item.');
         return prev;
       }
@@ -1197,16 +1326,32 @@ function InventoryContent() {
 
       {/* Inventory Table */}
       <div className="bg-white rounded-xl border border-border shadow-sm overflow-hidden">
+        {loadError ? (
+          <div className="px-4 py-3 border-b border-rose-200 bg-rose-50 text-rose-800 text-xs font-bold">
+            Não foi possível carregar o inventário: {loadError}
+          </div>
+        ) : null}
         <div className="hidden md:flex px-4 py-2 border-b border-slate-100 flex-wrap items-center justify-between gap-2 bg-slate-50/80">
           <p className="text-[11px] font-bold text-slate-500">
             Filtros na primeira linha do cabeçalho da tabela abaixo.
-            {!loading && products.length > 0 ? (
+            {!loading ? (
               <span className="text-slate-400 font-medium">
                 {' '}
-                · Mostrando {filteredProducts.length} de {products.length} itens carregados
+                · {filteredProducts.length} de{' '}
+                {filterArchived === 'active' ? activeProductsCount : archivedProductsCount}{' '}
+                {filterArchived === 'active' ? 'itens ativos' : 'itens arquivados'}
               </span>
             ) : null}
           </p>
+          <select
+            className="text-[11px] font-bold text-primary bg-white border border-slate-200 rounded-md px-2 py-1.5 outline-none focus:ring-2 focus:ring-secondary/40"
+            value={filterArchived}
+            onChange={(e) => setFilterArchived(e.target.value as 'active' | 'archived')}
+            title="Itens arquivados saem da lista mas mantêm o histórico"
+          >
+            <option value="active">Itens ativos</option>
+            <option value="archived">Arquivados ({archivedProductsCount})</option>
+          </select>
         </div>
 
         {/* Filtros compactos — celular (mesmos estados da tabela) */}
@@ -1214,16 +1359,26 @@ function InventoryContent() {
           <p className="text-xs font-bold text-slate-600 leading-snug">
             Busque o material e refine com os filtros. Toque nos botões do card para saída, entrada ou carrinho.
           </p>
-          {!loading && products.length > 0 ? (
+          {!loading ? (
             <p className="text-[11px] font-bold text-slate-400">
-              Mostrando {filteredProducts.length} de {products.length} itens carregados
+              {filteredProducts.length} de{' '}
+              {filterArchived === 'active' ? activeProductsCount : archivedProductsCount}{' '}
+              {filterArchived === 'active' ? 'itens ativos' : 'itens arquivados'}
             </p>
           ) : null}
+          <select
+            className={`${selectFilterClass} min-h-[44px]`}
+            value={filterArchived}
+            onChange={(e) => setFilterArchived(e.target.value as 'active' | 'archived')}
+          >
+            <option value="active">Itens ativos</option>
+            <option value="archived">Arquivados ({archivedProductsCount})</option>
+          </select>
           <input
             type="text"
             value={filterDescription}
             onChange={(e) => setFilterDescription(e.target.value)}
-            placeholder="Buscar por descrição…"
+            placeholder="Buscar por descrição, TAG ou local…"
             className="w-full text-sm font-bold text-primary bg-white border border-slate-200 rounded-xl px-3 py-3 outline-none focus:ring-2 focus:ring-secondary/40 min-h-[48px]"
           />
           <div className="grid grid-cols-2 gap-2">
@@ -1427,8 +1582,8 @@ function InventoryContent() {
                   <td colSpan={9} className="px-6 py-12 text-center text-slate-400">Nenhum item encontrado.</td>
                 </tr>
               ) : (
-                filteredProducts.map((p) => {
-                  const isLowStock = p.quantity_current <= p.quantity_min;
+                visibleProducts.map((p) => {
+                  const isLowStock = p.quantity_min > 0 && p.quantity_current <= p.quantity_min;
                   const totalInPossession = possessionTotalForProduct(p);
                   const totalAtSites = sitePossessionTotal(p);
                   const totalQuantity = p.quantity_current + totalInPossession;
@@ -1460,7 +1615,7 @@ function InventoryContent() {
                       <td className="px-6 py-4 bg-slate-50/30">
                         <div className="flex flex-col items-center gap-1">
                           <span className={`font-black text-sm ${isLowStock ? 'text-red-500' : 'text-primary'}`}>
-                            {p.quantity_current}
+                            {formatQty(p.quantity_current)}
                           </span>
                           {totalAtSites > 0 ? (
                             <div className="relative inline-block">
@@ -1473,7 +1628,7 @@ function InventoryContent() {
                                 title="Material enviado a canteiros ou sedes — saldo do almoxarifado mantido"
                               >
                                 <MapPin size={10} />
-                                {totalAtSites} em locais
+                                {formatQty(totalAtSites)}em locais
                               </button>
                               {activePopover === popoverSitesKey && (
                                 <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-52 bg-white border border-border rounded-xl shadow-xl z-30 p-3 animate-in fade-in slide-in-from-bottom-2 duration-200">
@@ -1491,7 +1646,7 @@ function InventoryContent() {
                                           <span className="text-slate-600 truncate mr-2">
                                             {sitePossessionLabel(sp.work_sites) || 'Local'}
                                           </span>
-                                          <span className="font-bold text-primary">{sp.quantity}</span>
+                                          <span className="font-bold text-primary">{formatQty(sp.quantity)}</span>
                                         </div>
                                       ))}
                                   </div>
@@ -1509,7 +1664,7 @@ function InventoryContent() {
                               className="flex items-center gap-1 mx-auto bg-slate-100 px-3 py-1 rounded-full text-primary font-bold hover:bg-slate-200 transition-colors text-xs"
                             >
                               <Users size={12} className="text-secondary" />
-                              {totalInPossession}
+                              {formatQty(totalInPossession)}
                             </button>
                             
                             {activePopover === popoverPosseKey && (
@@ -1519,7 +1674,7 @@ function InventoryContent() {
                                   {p.possession?.map(pos => (
                                     <div key={pos.id} className="flex justify-between text-[10px]">
                                       <span className="text-slate-600 truncate mr-2">{possessionEmployeeName(pos.employees)}</span>
-                                      <span className="font-bold text-primary">{pos.quantity}</span>
+                                      <span className="font-bold text-primary">{formatQty(pos.quantity)}</span>
                                     </div>
                                   ))}
                                 </div>
@@ -1530,10 +1685,10 @@ function InventoryContent() {
                           <span className="text-slate-300 text-[10px] font-bold">0</span>
                         )}
                       </td>
-                      <td className="px-6 py-4 text-center font-black text-primary text-sm bg-slate-50/30 transition-colors group-hover:bg-slate-100/50">{totalQuantity}</td>
+                      <td className="px-6 py-4 text-center font-black text-primary text-sm bg-slate-50/30 transition-colors group-hover:bg-slate-100/50">{formatQty(totalQuantity)}</td>
                       <td className="px-6 py-4 text-center">
                         <div className="flex flex-col items-center">
-                          <span className="text-slate-400 font-bold text-xs">{p.quantity_min}</span>
+                          <span className="text-slate-400 font-bold text-xs">{formatQty(p.quantity_min)}</span>
                           {isLowStock && <AlertCircle size={10} className="text-red-400 mt-1 animate-pulse" />}
                         </div>
                       </td>
@@ -1551,7 +1706,7 @@ function InventoryContent() {
                       <td className="px-6 py-4 text-center border-x border-slate-50/80">
                         <button
                           type="button"
-                          disabled={p.quantity_current <= 0}
+                          disabled={p.quantity_current <= 0 || Boolean(p.archived_at)}
                           onClick={() => addItemToCartFromRow(p)}
                           className="inline-flex items-center justify-center p-2.5 rounded-xl bg-teal-50 text-teal-700 border border-teal-200/80 hover:bg-teal-100 hover:border-teal-300 disabled:opacity-35 disabled:pointer-events-none transition-colors"
                           title={
@@ -1564,8 +1719,27 @@ function InventoryContent() {
                         </button>
                       </td>
                       <td className="px-6 py-4 text-right">
+                        {p.archived_at ? (
+                          <div className="flex justify-end items-center gap-1">
+                            <span className="text-[10px] font-black uppercase text-slate-400 mr-1">Arquivado</span>
+                            <button
+                              onClick={() => openHistory(p)}
+                              className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-secondary"
+                              title="Histórico"
+                            >
+                              <History size={16} />
+                            </button>
+                            <button
+                              onClick={() => void handleRestore(p)}
+                              className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-bold text-primary hover:bg-slate-50"
+                              title="Volta para a lista de itens ativos"
+                            >
+                              Reativar
+                            </button>
+                          </div>
+                        ) : (
                         <div className="flex justify-end gap-1">
-                          <button 
+                          <button
                             onClick={() => {
                               setQuickMovementItem(p);
                               setQuickMovementMode('OUT');
@@ -1619,14 +1793,15 @@ function InventoryContent() {
                           >
                             <Edit size={16} />
                           </button>
-                          <button 
-                            onClick={() => handleDelete(p.id, p.description)}
+                          <button
+                            onClick={() => void handleDelete(p)}
                             className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-red-500"
-                            title="Excluir"
+                            title="Excluir ou arquivar (itens com histórico são arquivados)"
                           >
                             <Trash2 size={16} />
                           </button>
                         </div>
+                        )}
                       </td>
                     </tr>
                   );
@@ -1646,8 +1821,8 @@ function InventoryContent() {
           ) : filteredProducts.length === 0 ? (
             <p className="text-center text-slate-400 py-12">Nenhum item encontrado.</p>
           ) : (
-            filteredProducts.map((p) => {
-              const isLowStock = p.quantity_current <= p.quantity_min;
+            visibleProducts.map((p) => {
+              const isLowStock = p.quantity_min > 0 && p.quantity_current <= p.quantity_min;
               const totalInPossession = possessionTotalForProduct(p);
               const totalAtSites = sitePossessionTotal(p);
               const totalQuantity = p.quantity_current + totalInPossession;
@@ -1702,22 +1877,22 @@ function InventoryContent() {
                       <div
                         className={`text-lg font-black ${isLowStock ? 'text-red-500' : 'text-primary'}`}
                       >
-                        {p.quantity_current}
+                        {formatQty(p.quantity_current)}
                       </div>
                     </div>
                     <div className="rounded-xl bg-slate-50 border border-slate-100 px-2 py-2">
                       <div className="text-[9px] font-black uppercase text-slate-400">Posse</div>
-                      <div className="text-lg font-black text-primary">{totalInPossession}</div>
+                      <div className="text-lg font-black text-primary">{formatQty(totalInPossession)}</div>
                     </div>
                     <div className="rounded-xl bg-slate-50 border border-slate-100 px-2 py-2">
                       <div className="text-[9px] font-black uppercase text-slate-400">Total</div>
-                      <div className="text-lg font-black text-primary">{totalQuantity}</div>
+                      <div className="text-lg font-black text-primary">{formatQty(totalQuantity)}</div>
                     </div>
                   </div>
                   {isLowStock ? (
                     <p className="text-[11px] font-bold text-red-600 flex items-center gap-1">
                       <AlertCircle size={14} />
-                      Abaixo ou no mínimo ({p.quantity_min})
+                      Abaixo ou no mínimo ({formatQty(p.quantity_min)})
                     </p>
                   ) : null}
 
@@ -1725,7 +1900,7 @@ function InventoryContent() {
                     <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-3">
                       <p className="text-[10px] font-black uppercase text-amber-800 mb-2 flex items-center gap-1">
                         <MapPin size={12} />
-                        {totalAtSites} em canteiros / sedes
+                        {formatQty(totalAtSites)}em canteiros / sedes
                       </p>
                       <p className="text-[10px] text-amber-900/80 mb-2">
                         O saldo do almoxarifado permanece; este aviso indica onde o material foi enviado.
@@ -1738,7 +1913,7 @@ function InventoryContent() {
                               <span className="text-amber-950 truncate pr-2">
                                 {sitePossessionLabel(sp.work_sites) || 'Local'}
                               </span>
-                              <span className="text-amber-900 shrink-0">{sp.quantity}</span>
+                              <span className="text-amber-900 shrink-0">{formatQty(sp.quantity)}</span>
                             </div>
                           ))}
                       </div>
@@ -1754,13 +1929,32 @@ function InventoryContent() {
                             <span className="text-slate-600 truncate pr-2">
                               {possessionEmployeeName(pos.employees) || '—'}
                             </span>
-                            <span className="text-primary shrink-0">{pos.quantity}</span>
+                            <span className="text-primary shrink-0">{formatQty(pos.quantity)}</span>
                           </div>
                         ))}
                       </div>
                     </div>
                   ) : null}
 
+                  {p.archived_at ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => openHistory(p)}
+                      className="min-h-[48px] flex items-center justify-center gap-2 rounded-xl bg-slate-50 text-slate-700 border border-slate-200 font-bold text-sm"
+                    >
+                      <History size={18} />
+                      Histórico
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleRestore(p)}
+                      className="min-h-[48px] flex items-center justify-center gap-2 rounded-xl bg-white text-primary border border-slate-300 font-bold text-sm"
+                    >
+                      Reativar
+                    </button>
+                  </div>
+                  ) : (
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
@@ -1829,13 +2023,14 @@ function InventoryContent() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleDelete(p.id, p.description)}
+                      onClick={() => void handleDelete(p)}
                       className="min-h-[48px] flex items-center justify-center gap-2 rounded-xl bg-slate-50 text-red-600 border border-slate-200 font-bold text-sm"
                     >
                       <Trash2 size={18} />
                       Excluir
                     </button>
                   </div>
+                  )}
                 </div>
               );
             })
@@ -1843,21 +2038,16 @@ function InventoryContent() {
         </div>
         {!loading ? (
           <div className="px-4 pb-5 border-t border-slate-100 bg-slate-50/40">
-            {isLoadingMoreProducts ? (
-              <div className="py-4 text-center text-xs font-bold text-slate-500">
-                <Loader2 className="animate-spin inline mr-2" size={14} />
-                Carregando mais 30 itens...
-              </div>
-            ) : hasMoreProducts ? (
+            {hasMoreToShow ? (
               <div
                 ref={loadMoreAnchorRef}
                 className="py-4 text-center text-xs font-bold text-slate-500"
               >
-                Role at&eacute; o final para carregar mais itens.
+                Mostrando {visibleProducts.length} de {filteredProducts.length}. Role at&eacute; o final para ver mais.
               </div>
-            ) : products.length > 0 ? (
+            ) : filteredProducts.length > 0 ? (
               <div className="py-4 text-center text-xs font-bold text-slate-400">
-                Todos os itens foram carregados.
+                Todos os {filteredProducts.length} itens estão na lista.
               </div>
             ) : null}
           </div>
@@ -1882,24 +2072,35 @@ function InventoryContent() {
                 {itemMovements.length === 0 ? (
                   <p className="text-center text-slate-400 py-8 italic">Nenhuma movimentação registrada.</p>
                 ) : (
-                  itemMovements.map((move) => (
+                  itemMovements.map((move) => {
+                    const reason = movementReasonOf(move);
+                    return (
                     <div key={move.id} className="flex gap-4 items-start p-4 bg-slate-50 rounded-xl border border-slate-100">
                       <div className={`mt-1 p-2 rounded-lg ${move.type === 'IN' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
-                        {move.type === 'IN' ? <Plus size={16} /> : <Trash2 size={16} />}
+                        {move.type === 'IN' ? <ArrowDownLeft size={16} /> : <ArrowUpRight size={16} />}
                       </div>
                       <div className="flex-1">
-                        <div className="flex justify-between items-start">
+                        <div className="flex justify-between items-start gap-2">
                           <p className="font-bold text-primary">{movementCounterpartyLabel(move)}</p>
-                          <span className="text-[10px] bg-white px-2 py-1 rounded-md border text-slate-400 font-mono">
-                            {new Date(move.created_at).toLocaleString()}
+                          <span className="text-[10px] bg-white px-2 py-1 rounded-md border text-slate-400 font-mono shrink-0">
+                            {new Date(move.created_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
                           </span>
                         </div>
                         <p className="text-sm text-slate-600">
-                          {move.type === 'IN' ? 'Devolveu' : 'Retirou'} <span className="font-bold">{move.quantity}</span> {historyItem.unit}
+                          <span className="font-bold">{MOVEMENT_REASON_LABEL[reason]}</span>
+                          {' · '}
+                          <span className={`font-bold ${move.type === 'IN' ? 'text-green-700' : 'text-red-700'}`}>
+                            {move.type === 'IN' ? '+' : '−'}{formatQty(move.quantity)}
+                          </span>{' '}
+                          {historyItem.unit}
+                          {move.tag && reason !== 'descarte' ? (
+                            <span className="ml-2 text-[10px] font-mono text-slate-400">TAG {move.tag}</span>
+                          ) : null}
                         </p>
                       </div>
                     </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>
@@ -2078,9 +2279,13 @@ function InventoryContent() {
 
               <div className="grid grid-cols-2 gap-4 pt-2">
                 <div className="space-y-1">
-                  <label className="text-xs font-bold uppercase text-secondary">Qtd. em Estoque</label>
-                  <input 
-                    type="number" 
+                  <label className="text-xs font-bold uppercase text-secondary">
+                    {editingItem ? 'Qtd. em Estoque' : 'Saldo inicial'}
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    min="0"
                     disabled={!!editingItem}
                     className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none font-bold disabled:opacity-60"
                     value={formData.quantity_current === 0 ? '' : formData.quantity_current}
@@ -2104,8 +2309,10 @@ function InventoryContent() {
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold uppercase text-red-500">Alerta Mínimo</label>
-                  <input 
-                    type="number" 
+                  <input
+                    type="number"
+                    step="any"
+                    min="0"
                     className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none font-bold"
                     value={formData.quantity_min === 0 ? '' : formData.quantity_min}
                     onChange={(e) => setFormData({...formData, quantity_min: Number(e.target.value)})}
@@ -2249,15 +2456,16 @@ function InventoryContent() {
                     }}
                   >
                     <option value="">Item para adicionar...</option>
-                    {products.map((p) => (
+                    {products.filter((p) => !p.archived_at).map((p) => (
                       <option key={p.id} value={p.id} disabled={p.quantity_current <= 0}>
-                        {formatProductLabelDisplay(p.description)} - saldo {p.quantity_current}
+                        {formatProductLabelDisplay(p.description)} - saldo {formatQty(p.quantity_current)}
                       </option>
                     ))}
                   </select>
                   <input
                     type="number"
-                    min={1}
+                    step="any"
+                    min="0"
                     disabled={Boolean(cartPickedItem?.unique_item)}
                     className="md:col-span-2 p-3 bg-white border border-slate-200 rounded-lg outline-none font-bold disabled:opacity-60"
                     value={cartPickedItem?.unique_item ? 1 : cartPickQty === 0 ? '' : cartPickQty}
@@ -2321,7 +2529,7 @@ function InventoryContent() {
                             <Minus size={14} />
                           </button>
                         )}
-                        <span className="font-black min-w-8 text-center">{line.quantity}</span>
+                        <span className="font-black min-w-8 text-center">{formatQty(line.quantity)}</span>
                         {!line.unique_item && (
                           <button
                             type="button"
@@ -2346,7 +2554,7 @@ function InventoryContent() {
             </div>
             <div className="p-4 border-t bg-slate-50 flex items-center justify-between">
               <div className="text-sm font-bold text-slate-600">
-                Itens: {cart.length} linhas / {cartTotalUnits} unidades
+                Itens: {cart.length} linhas / {formatQty(cartTotalUnits)} unidades
               </div>
               <div className="flex gap-2">
                 <button
@@ -2415,6 +2623,7 @@ function InventoryContent() {
                 </label>
                 <input
                   type="number"
+                  step="any"
                   className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none font-black text-lg"
                   value={adjustQty === 0 ? '' : adjustQty}
                   onChange={(e) => setAdjustQty(Number(e.target.value))}

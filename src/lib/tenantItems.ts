@@ -7,7 +7,7 @@ const SITE_POSSESSION_SELECT =
   'site_possession (quantity, site_id, work_sites (id, name, kind))';
 
 export const ITEMS_SELECT_WITHOUT_TAG =
-  `id, code, description, category, location, consumable, unique_item, is_rented, calibration_due_date, expiration_date, quantity_current, quantity_min, unit, updated_at, user_id, ${SITE_POSSESSION_SELECT}, possession (id, quantity, employee_id, employees (id, full_name))`;
+  `id, code, description, category, location, consumable, unique_item, is_rented, calibration_due_date, expiration_date, quantity_current, quantity_min, unit, updated_at, archived_at, user_id, ${SITE_POSSESSION_SELECT}, possession (id, quantity, employee_id, employees (id, full_name))`;
 
 export const ITEMS_SELECT_WITH_TAG = ITEMS_SELECT_WITHOUT_TAG.replace(
   'unique_item,',
@@ -38,6 +38,8 @@ export const ITEMS_SELECT_WITH_TAG_WITHOUT_SITE_POSSESSION = ITEMS_SELECT_WITH_T
 type FetchTenantItemsOptions = {
   offset?: number;
   limit?: number;
+  /** Inclui itens arquivados (archived_at preenchido). Padrão: só ativos. */
+  includeArchived?: boolean;
 };
 
 export function isLikelyMissingColumn(errMessage: string, column: string): boolean {
@@ -55,9 +57,15 @@ export async function fetchTenantItems(
   userId: string,
   options: FetchTenantItemsOptions = {}
 ) {
-  const { offset = 0, limit } = options;
+  const { offset = 0, limit, includeArchived = false } = options;
   const run = (sel: string) => {
-    let query = supabase.from('items').select(sel).eq('user_id', userId).order('description', { ascending: true });
+    let query = supabase
+      .from('items')
+      .select(sel)
+      .eq('user_id', userId)
+      .order('description', { ascending: true })
+      .order('id', { ascending: true });
+    if (!includeArchived) query = query.is('archived_at', null);
 
     if (typeof limit === 'number' && limit > 0) {
       query = query.range(Math.max(0, offset), Math.max(0, offset) + limit - 1);
@@ -95,7 +103,11 @@ export async function fetchTenantItems(
 }
 
 /** Carrega todos os itens do tenant (paginação interna) — use em exportações completas. */
-export async function fetchAllTenantItems(supabase: SupabaseBrowserClient, userId: string) {
+export async function fetchAllTenantItems(
+  supabase: SupabaseBrowserClient,
+  userId: string,
+  opts: { includeArchived?: boolean } = {}
+) {
   const pageSize = 500;
   let offset = 0;
   const all: NonNullable<Awaited<ReturnType<typeof fetchTenantItems>>['data']> = [];
@@ -105,6 +117,7 @@ export async function fetchAllTenantItems(supabase: SupabaseBrowserClient, userI
     const { data, error } = await fetchTenantItems(supabase, userId, {
       offset,
       limit: pageSize,
+      includeArchived: opts.includeArchived,
     });
     if (error) throw error;
 

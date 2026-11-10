@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { fetchAlmoxDashboardSnapshot, type AlmoxDashboardSnapshot } from '@/lib/almoxDashboard';
 import { formatProductLabelDisplay } from '@/lib/productDisplayText';
+import { formatQty } from '@/lib/movements';
 import {
   AlertTriangle,
   ArrowDownLeft,
@@ -131,22 +132,22 @@ export function AlmoxHomeDashboard() {
         />
         <StatCard
           label="Unidades em estoque"
-          value={qtyTotal}
+          value={formatQty(qtyTotal)}
           sub="Soma do saldo no almox."
           icon={<BarChart3 size={22} />}
           tone="slate"
         />
         <StatCard
           label={`Saídas (${30}d)`}
-          value={snap.totalOutLast30}
+          value={formatQty(snap.totalOutLast30)}
           sub={`${snap.movementsLast30} movimentos no período`}
           icon={<ArrowUpRight size={22} />}
           tone="amber"
         />
         <StatCard
           label={`Entradas (${30}d)`}
-          value={snap.totalInLast30}
-          sub="Soma das quantidades IN"
+          value={formatQty(snap.totalInLast30)}
+          sub="Recebimentos (sem devoluções e ajustes)"
           icon={<ArrowDownLeft size={22} />}
           tone="emerald"
         />
@@ -176,7 +177,7 @@ export function AlmoxHomeDashboard() {
                         {formatProductLabelDisplay(row.description)}
                       </p>
                       <p className="text-[10px] text-slate-500 font-medium">
-                        {row.movements_count} saída(s) · {row.out_qty} {row.unit}
+                        {row.movements_count} saída(s) · {formatQty(row.out_qty)} {row.unit}
                       </p>
                     </div>
                   </li>
@@ -210,7 +211,7 @@ export function AlmoxHomeDashboard() {
                         {formatProductLabelDisplay(i.description)}
                       </p>
                       <p className="text-[10px] text-slate-600 font-medium">
-                        Saldo {i.quantity_current} {i.unit} · mín. {i.quantity_min}
+                        Saldo {formatQty(i.quantity_current)} {i.unit} · mín. {formatQty(i.quantity_min)}
                       </p>
                     </div>
                   </li>

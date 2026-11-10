@@ -305,44 +305,92 @@ export default function ImportSpreadsheet({
           iCount++;
           setProgress(prev => ({ ...prev, message: `Sincronizando Itens: ${iCount}/${uniqueItems.size}` }));
           
-          let existingId = null;
+          let existingId: string | null = null;
+          let existingQty = 0;
+          const code = itemCodeFromDescription(itm.description);
           if (itm.description) {
+            // Mesmo código = mesma descrição (o código é derivado dela). Busca exata, sem curingas.
             const { data: byDesc } = await supabase
               .from('items')
-              .select('id')
-              .ilike('description', itm.description)
+              .select('id, quantity_current')
+              .eq('code', code)
               .eq('user_id', user.id)
               .maybeSingle();
-            if (byDesc) existingId = byDesc.id;
+            if (byDesc) {
+              existingId = String(byDesc.id);
+              existingQty = Number(byDesc.quantity_current ?? 0);
+            } else {
+              // Itens antigos podem ter a descrição com outra caixa: busca sem diferenciar maiúsculas.
+              const escaped = itm.description.replace(/[\\%_]/g, (c: string) => `\\${c}`);
+              const { data: byLike } = await supabase
+                .from('items')
+                .select('id, quantity_current')
+                .ilike('description', escaped)
+                .eq('user_id', user.id)
+                .limit(1);
+              if (byLike && byLike[0]) {
+                existingId = String(byLike[0].id);
+                existingQty = Number(byLike[0].quantity_current ?? 0);
+              }
+            }
           }
           if (!existingId && itm.sheetCode && !itm.sheetCode.startsWith('REF-')) {
             const { data: byCode } = await supabase
               .from('items')
-              .select('id')
+              .select('id, quantity_current')
               .eq('code', itm.sheetCode)
               .eq('user_id', user.id)
               .maybeSingle();
-            if (byCode) existingId = byCode.id;
+            if (byCode) {
+              existingId = String(byCode.id);
+              existingQty = Number(byCode.quantity_current ?? 0);
+            }
           }
 
+          // O saldo NÃO é gravado direto no item: a diferença entra como movimentação "Importação",
+          // para o histórico explicar o saldo. Itens arquivados que aparecem na planilha são reativados.
           const itemData = {
-            code: itemCodeFromDescription(itm.description),
+            code,
             description: itm.description,
             category: itm.category,
             location: itm.location,
             unit: itm.unit,
             consumable: itm.consumable,
             quantity_min: itm.min,
+            archived_at: null,
             user_id: user.id,
-            ...(mode === 'inventory' ? { quantity_current: itm.qty } : {})
           };
 
+          let itemId: string | null = null;
           if (existingId) {
-            await supabase.from('items').update(itemData).eq('id', existingId).eq('user_id', user.id);
-            itemMap.set(key, existingId);
+            const { error: upErr } = await supabase.from('items').update(itemData).eq('id', existingId).eq('user_id', user.id);
+            if (upErr) throw new Error(`Item "${itm.description}": ${upErr.message}`);
+            itemId = existingId;
           } else {
-            const { data: newItem } = await supabase.from('items').insert(itemData).select('id').single();
-            if (newItem) itemMap.set(key, newItem.id);
+            const { data: newItem, error: insErr } = await supabase
+              .from('items')
+              .insert({ ...itemData, quantity_current: 0 })
+              .select('id')
+              .single();
+            if (insErr) throw new Error(`Item "${itm.description}": ${insErr.message}`);
+            itemId = newItem ? String(newItem.id) : null;
+            existingQty = 0;
+          }
+          if (itemId) itemMap.set(key, itemId);
+
+          if (mode === 'inventory' && itemId) {
+            const target = Math.round(Number(itm.qty || 0) * 1000) / 1000;
+            const diff = Math.round((target - existingQty) * 1000) / 1000;
+            if (diff !== 0 && target >= 0) {
+              const res = await registerMovement(supabase, {
+                item_id: itemId,
+                type: diff > 0 ? 'IN' : 'OUT',
+                reason: existingId ? 'importacao' : 'saldo_inicial',
+                quantity: Math.abs(diff),
+                stock_delta: diff,
+              });
+              if (!res.ok) throw new Error(`Saldo de "${itm.description}": ${res.message}`);
+            }
           }
         }
 
@@ -381,8 +429,8 @@ export default function ImportSpreadsheet({
                 .eq('item_id', itemId)
                 .maybeSingle();
               
-              const currentQty = currentPos?.quantity || 0;
-              const diff = targetQty - currentQty;
+              const currentQty = Number(currentPos?.quantity || 0);
+              const diff = Math.round((targetQty - currentQty) * 1000) / 1000;
 
               if (diff !== 0) {
                 // Record adjustment movement
@@ -395,6 +443,7 @@ export default function ImportSpreadsheet({
                   item_id: itemId,
                   quantity: moveQty,
                   type: moveType,
+                  reason: 'importacao',
                   possession_delta: diff,
                   stock_delta: -diff,
                 });

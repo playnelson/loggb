@@ -550,7 +550,7 @@ export default function QuickMovementModal({
                     required
                     type="number"
                     min="0.01"
-                    step="0.01"
+                    step="any"
                     disabled={isUnique}
                     className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-secondary/20 outline-none font-bold text-center text-lg disabled:opacity-60"
                     value={effectiveQty}

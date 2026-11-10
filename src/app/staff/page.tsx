@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 import { useCallback, useMemo, useRef, useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { formatProductLabelDisplay } from '@/lib/productDisplayText';
-import { recordMovement, registerMovement } from '@/lib/movements';
+import { registerMovement } from '@/lib/movements';
 import { formatEmployeeName, normalizeEmployeeNameForSave, normalizeSearchText } from '@/lib/employeeName';
 import { Search, UserPlus, Mail, Phone, ExternalLink, X, FileUp, Filter, Package, AlertCircle, History, RotateCcw, Download, Loader2, ArrowLeft, FileText, Trash2, Pencil } from 'lucide-react';
 import ImportSpreadsheet from '@/components/ImportSpreadsheet';
@@ -127,16 +127,21 @@ async function loadEpiConsumableBalancesMap(
 ): Promise<Record<string, EpiConsumableBalanceRow[]>> {
   if (employeeIds.length === 0) return {};
   const byEmp = new Map<string, Map<string, { description: string; unit: string; balance: number }>>();
-  let from = 0;
   const pageSize = 1000;
+  // IDs em lotes de 100: com centenas de colaboradores, a lista inteira na URL estoura o limite da requisição.
+  const idChunks: string[][] = [];
+  for (let i = 0; i < employeeIds.length; i += 100) idChunks.push(employeeIds.slice(i, i + 100));
+  for (const ids of idChunks) {
+  let from = 0;
   // eslint-disable-next-line no-constant-condition
   while (true) {
     const { data, error } = await supabase
       .from('movements')
       .select('employee_id, item_id, quantity, type, items(description, unit, consumable, category)')
       .not('employee_id', 'is', null)
-      .in('employee_id', employeeIds)
+      .in('employee_id', ids)
       .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
       .range(from, from + pageSize - 1);
     if (error) {
       console.error('loadEpiConsumableBalancesMap', error);
@@ -169,16 +174,17 @@ async function loadEpiConsumableBalancesMap(
     from += pageSize;
     if (from > 100_000) break;
   }
+  }
   const result: Record<string, EpiConsumableBalanceRow[]> = {};
   for (const [empId, m] of byEmp) {
     const rows = Array.from(m.entries())
-      .filter(([, v]) => v.balance > 0)
       .map(([item_id, v]) => ({
         item_id,
         description: v.description,
         unit: v.unit,
-        balance: v.balance,
-      }));
+        balance: Math.round(v.balance * 1000) / 1000,
+      }))
+      .filter((r) => r.balance > 0);
     if (rows.length) result[empId] = rows;
   }
   return result;
@@ -201,13 +207,13 @@ function aggregateEpiConsumableBalancesFromMovements(movements: any[]): EpiConsu
     map.set(itemId, current);
   }
   return Array.from(map.entries())
-    .filter(([, value]) => value.balance > 0)
     .map(([item_id, value]) => ({
       item_id,
       description: value.description,
       unit: value.unit,
-      balance: value.balance,
-    }));
+      balance: Math.round(value.balance * 1000) / 1000,
+    }))
+    .filter((r) => r.balance > 0);
 }
 
 export default function StaffPage() {
@@ -687,12 +693,14 @@ export default function StaffPage() {
       return;
     }
     const empId = epiDiscard.employeeId;
-    const mvRes = await recordMovement(supabase, {
+    // Descarte: só registra (não volta ao estoque nem mexe na carteira) — saldo de EPI consumível
+    // em uso é calculado pelo histórico (saídas − devoluções − descartes).
+    const mvRes = await registerMovement(supabase, {
       item_id: epiDiscard.item_id,
       employee_id: empId,
       quantity: discardQty,
       type: 'IN',
-      performed_by: user.id,
+      reason: 'descarte',
       tag: EPI_DISCARD_TAG,
     });
     if (!mvRes.ok) {
@@ -1841,7 +1849,8 @@ export default function StaffPage() {
                         <input
                           required
                           type="number"
-                          min="1"
+                          step="any"
+                          min="0"
                           max={walletReturn.maxQty}
                           className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-lg text-lg font-bold outline-none focus:ring-2 focus:ring-secondary/50"
                           value={returnQty === 0 ? '' : returnQty}
@@ -1892,7 +1901,8 @@ export default function StaffPage() {
                   <input
                     required
                     type="number"
-                    min={1}
+                    step="any"
+                    min="0"
                     max={epiDiscard.maxQty}
                     className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-lg text-lg font-bold outline-none focus:ring-2 focus:ring-secondary/50"
                     value={discardQty === 0 ? '' : discardQty}
@@ -1950,8 +1960,9 @@ export default function StaffPage() {
                 <div className="flex items-center gap-3">
                   <input 
                     required
-                    type="number" 
-                    min="1" 
+                    type="number"
+                    step="any"
+                    min="0"
                     max={returnItem.item.quantity}
                     className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-lg text-lg font-bold outline-none focus:ring-2 focus:ring-secondary/50"
                     value={returnQty === 0 ? '' : returnQty}

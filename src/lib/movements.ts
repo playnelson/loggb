@@ -4,60 +4,62 @@ type SupabaseClient = ReturnType<typeof createBrowserClient>;
 
 export type MovementType = 'IN' | 'OUT';
 
-export type RecordMovementInput = {
-  item_id: string;
-  employee_id: string | null;
-  work_site_id?: string | null;
-  quantity: number;
-  type: MovementType;
-  performed_by: string;
-  tag?: string | null;
+/** Motivo da movimentação (coluna movements.reason). */
+export type MovementReason =
+  | 'entrada'
+  | 'saida'
+  | 'devolucao'
+  | 'ajuste'
+  | 'descarte'
+  | 'saldo_inicial'
+  | 'importacao';
+
+export const MOVEMENT_REASON_LABEL: Record<MovementReason, string> = {
+  entrada: 'Entrada',
+  saida: 'Saída',
+  devolucao: 'Devolução',
+  ajuste: 'Ajuste',
+  descarte: 'Descarte',
+  saldo_inicial: 'Saldo inicial',
+  importacao: 'Importação',
 };
 
-export async function recordMovement(
-  supabase: SupabaseClient,
-  input: RecordMovementInput
-): Promise<{ ok: true } | { ok: false; message: string }> {
-  const payload: Record<string, unknown> = {
-    item_id: input.item_id,
-    employee_id: input.employee_id,
-    quantity: input.quantity,
-    type: input.type,
-    performed_by: input.performed_by,
-  };
-  if (input.tag) payload.tag = input.tag;
-  if (input.work_site_id) payload.work_site_id = input.work_site_id;
+export const MOVEMENT_REASONS = Object.keys(MOVEMENT_REASON_LABEL) as MovementReason[];
 
-  const { error: err1 } = await supabase.from('movements').insert([payload]);
-  if (!err1) return { ok: true };
+/** Motivo de uma linha do histórico; linhas antigas sem `reason` são deduzidas do tipo. */
+export function movementReasonOf(m: {
+  reason?: string | null;
+  type?: string | null;
+  employee_id?: string | null;
+  work_site_id?: string | null;
+  tag?: string | null;
+}): MovementReason {
+  if (m.reason && m.reason in MOVEMENT_REASON_LABEL) return m.reason as MovementReason;
+  const hasParty = Boolean(m.employee_id || m.work_site_id);
+  if (m.type === 'OUT') return hasParty ? 'saida' : 'ajuste';
+  if (String(m.tag || '').toUpperCase().includes('DESCARTE')) return 'descarte';
+  return hasParty ? 'devolucao' : 'entrada';
+}
 
-  const msg = String(err1.message || '').toLowerCase();
-  // If DB doesn't have optional column yet, retry without it.
-  if (input.tag && msg.includes('column') && msg.includes('tag')) {
-    const { tag: _tag, ...withoutTag } = payload as { tag?: unknown };
-    const { error: err2 } = await supabase.from('movements').insert([withoutTag]);
-    if (!err2) return { ok: true };
-    return { ok: false, message: err2.message || 'Erro ao registrar movimentação.' };
-  }
-  if (input.work_site_id && msg.includes('column') && msg.includes('work_site')) {
-    const { work_site_id: _ws, ...withoutSite } = payload as { work_site_id?: unknown };
-    const { error: err2 } = await supabase.from('movements').insert([withoutSite]);
-    if (!err2) {
-      return {
-        ok: false,
-        message:
-          'A coluna work_site_id não existe em movements. Execute o script supabase/work_sites.sql no Supabase.',
-      };
-    }
-    return { ok: false, message: err2.message || 'Erro ao registrar movimentação.' };
-  }
+/** Quantidade no padrão brasileiro (até 3 casas decimais, vírgula). */
+export function formatQty(value: number | string | null | undefined): string {
+  const n = Number(value ?? 0);
+  if (!Number.isFinite(n)) return '0';
+  return n.toLocaleString('pt-BR', { maximumFractionDigits: 3 });
+}
 
-  return { ok: false, message: err1.message || 'Erro ao registrar movimentação.' };
+/** Lê quantidade digitada (aceita vírgula) e arredonda em 3 casas. */
+export function parseQty(value: string | number): number {
+  const n = typeof value === 'number' ? value : Number(String(value).replace(',', '.'));
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n * 1000) / 1000;
 }
 
 export type RegisterMovementInput = {
   item_id: string;
   type: MovementType;
+  /** Motivo; se omitido, o banco deduz (saída, devolução, entrada, ajuste, descarte). */
+  reason?: MovementReason;
   /** Quantidade registrada no histórico (sempre positiva). */
   quantity: number;
   employee_id?: string | null;
@@ -97,6 +99,7 @@ export async function registerMovement(
     p_possession_delta: input.possession_delta ?? 0,
     p_site_delta: input.site_delta ?? 0,
     p_possession_clamp: input.possession_clamp ?? false,
+    p_reason: input.reason ?? null,
   });
 
   if (error) {

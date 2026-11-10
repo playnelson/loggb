@@ -2,23 +2,27 @@
 
 export const dynamic = 'force-dynamic';
 
-import { useMemo, useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { formatProductLabelDisplay } from '@/lib/productDisplayText';
 import { formatEmployeeName, normalizeSearchText } from '@/lib/employeeName';
-import { 
-  History, 
-  Search, 
-  Filter, 
-  Download, 
-  ArrowUpRight, 
-  ArrowDownLeft, 
+import {
+  formatQty,
+  movementReasonOf,
+  MOVEMENT_REASONS,
+  MOVEMENT_REASON_LABEL,
+  type MovementReason,
+} from '@/lib/movements';
+import {
+  History,
+  Search,
+  Filter,
+  Download,
+  ArrowUpRight,
+  ArrowDownLeft,
   Calendar,
   Loader2,
-  ChevronLeft,
-  ChevronRight,
   Package,
-  User
 } from 'lucide-react';
 
 interface Movement {
@@ -26,10 +30,14 @@ interface Movement {
   created_at: string;
   quantity: number;
   type: string;
+  reason?: string | null;
+  tag?: string | null;
+  employee_id?: string | null;
+  work_site_id?: string | null;
   items: {
     description: string;
     unit: string;
-  };
+  } | null;
   employees?: {
     full_name: string;
   } | null;
@@ -37,6 +45,32 @@ interface Movement {
     name: string;
     kind: string;
   } | null;
+}
+
+const PAGE = 1000;
+const RENDER_STEP = 200;
+
+const REASON_TONE: Record<MovementReason, string> = {
+  entrada: 'bg-green-100 text-green-700',
+  saida: 'bg-red-100 text-red-700',
+  devolucao: 'bg-teal-100 text-teal-700',
+  ajuste: 'bg-slate-200 text-slate-700',
+  descarte: 'bg-orange-100 text-orange-700',
+  saldo_inicial: 'bg-blue-100 text-blue-700',
+  importacao: 'bg-purple-100 text-purple-700',
+};
+
+function isoDay(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function defaultFromDate(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 90);
+  return isoDay(d);
 }
 
 function movementCounterpartyLabel(m: Movement): string {
@@ -47,121 +81,118 @@ function movementCounterpartyLabel(m: Movement): string {
     const k = ws.kind === 'sede' ? 'Sede' : 'Canteiro';
     return `${k}: ${ws.name}`;
   }
-  return 'Almoxarifado / ajuste';
+  return 'Almoxarifado';
 }
 
 export default function HistoryPage() {
   const [movements, setMovements] = useState<Movement[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [typeFilter, setTypeFilter] = useState('ALL');
-  const [dateFilter, setDateFilter] = useState('');
-
+  const [reasonFilter, setReasonFilter] = useState<'ALL' | MovementReason>('ALL');
+  const [dateFrom, setDateFrom] = useState(defaultFromDate);
+  const [dateTo, setDateTo] = useState('');
+  const [renderLimit, setRenderLimit] = useState(RENDER_STEP);
   const searchLower = useMemo(() => normalizeSearchText(searchTerm), [searchTerm]);
 
-  const fetchMovements = async () => {
-    setLoading(true);
+  /** Lê TODAS as páginas do período (a API devolve no máximo 1000 linhas por vez). */
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
     const { data: { user } } = await supabase.auth.getUser();
+    if (cancelled) return;
     if (!user) {
       setMovements([]);
       setLoading(false);
       return;
     }
+    setLoading(true);
+    setLoadError(null);
 
-    const { data: itemRows, error: itemErr } = await supabase.from('items').select('id').eq('user_id', user.id);
-    if (itemErr) {
-      console.error('Error fetching items for history:', itemErr);
-      setMovements([]);
-      setLoading(false);
-      return;
-    }
-    const itemIds = (itemRows || []).map((r: { id: string }) => r.id);
-    if (itemIds.length === 0) {
-      setMovements([]);
-      setLoading(false);
-      return;
-    }
-
-    const chunkSize = 120;
-    const merged: Movement[] = [];
-    for (let i = 0; i < itemIds.length; i += chunkSize) {
-      const slice = itemIds.slice(i, i + chunkSize);
+    const all: Movement[] = [];
+    for (let from = 0; from < 200_000; from += PAGE) {
       let q = supabase
         .from('movements')
-        .select('*, items(description, unit), employees(full_name), work_sites(name, kind)')
-        .in('item_id', slice)
-        .order('created_at', { ascending: false });
+        .select(
+          'id, created_at, quantity, type, reason, tag, employee_id, work_site_id, items(description, unit), employees(full_name), work_sites(name, kind)'
+        )
+        .eq('performed_by', user.id)
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false });
+      if (reasonFilter !== 'ALL') q = q.eq('reason', reasonFilter);
+      if (dateFrom) q = q.gte('created_at', new Date(`${dateFrom}T00:00:00`).toISOString());
+      if (dateTo) q = q.lte('created_at', new Date(`${dateTo}T23:59:59.999`).toISOString());
 
-      if (typeFilter !== 'ALL') {
-        q = q.eq('type', typeFilter);
-      }
-      if (dateFilter) {
-        const start = new Date(`${dateFilter}T00:00:00`);
-        const end = new Date(`${dateFilter}T23:59:59.999`);
-        q = q.gte('created_at', start.toISOString()).lte('created_at', end.toISOString());
-      }
-
-      const { data, error } = await q;
+      const { data, error } = await q.range(from, from + PAGE - 1);
+      if (cancelled) return; // filtro mudou no meio: resposta antiga
       if (error) {
         console.error('Error fetching history:', error);
-        setMovements([]);
-        setLoading(false);
-        return;
+        setLoadError(error.message);
+        break;
       }
-      merged.push(...(((data as unknown) as Movement[]) || []));
+      const chunk = ((data as unknown) as Movement[]) || [];
+      all.push(...chunk);
+      if (chunk.length < PAGE) break;
     }
 
-    merged.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-    setMovements(merged);
+    setMovements(all);
+    setRenderLimit(RENDER_STEP);
     setLoading(false);
-  };
-
-  useEffect(() => {
-    // eslint-disable-next-line @typescript-eslint/no-floating-promises
-    fetchMovements();
-  }, [typeFilter, dateFilter]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [reasonFilter, dateFrom, dateTo]);
 
   const filteredMovements = useMemo(() => {
     if (!searchLower) return movements;
     return movements.filter((m) => {
-      const item = (m.items?.description || '').toLowerCase();
+      const item = normalizeSearchText(m.items?.description || '');
       const emp = normalizeSearchText(m.employees?.full_name || '');
       const site = normalizeSearchText(m.work_sites?.name || '');
+      const tag = normalizeSearchText(m.tag || '');
       return (
-        normalizeSearchText(item).includes(searchLower) ||
+        item.includes(searchLower) ||
         emp.includes(searchLower) ||
-        site.includes(searchLower)
+        site.includes(searchLower) ||
+        tag.includes(searchLower)
       );
     });
   }, [movements, searchLower]);
 
+  const visibleMovements = filteredMovements.slice(0, renderLimit);
+
   const csvCell = (v: unknown): string => {
     const s = v == null ? '' : String(v);
     const escaped = s.replace(/"/g, '""');
-    return /[",\n\r]/.test(escaped) ? `"${escaped}"` : escaped;
+    return /[",;\n\r]/.test(escaped) ? `"${escaped}"` : escaped;
   };
 
   const downloadCSV = () => {
-    const headers = ['Data', 'Tipo', 'Material', 'Colaborador / local', 'Quantidade', 'Unidade'];
-    const rows = filteredMovements.map(m => [
-      new Date(m.created_at).toLocaleString(),
-      m.type === 'IN' ? 'Entrada' : 'Saída',
+    const headers = ['Data', 'Motivo', 'Direção', 'Material', 'Colaborador / local', 'Quantidade', 'Unidade', 'TAG'];
+    const rows = filteredMovements.map((m) => [
+      new Date(m.created_at).toLocaleString('pt-BR'),
+      MOVEMENT_REASON_LABEL[movementReasonOf(m)],
+      m.type === 'IN' ? 'Entrada no almoxarifado' : 'Saída do almoxarifado',
       m.items?.description,
       movementCounterpartyLabel(m),
-      m.quantity,
-      m.items?.unit
+      formatQty(m.quantity),
+      m.items?.unit,
+      m.tag || '',
     ]);
 
-    const csvContent = [headers, ...rows].map((row) => row.map(csvCell).join(',')).join('\n');
+    // ";" e BOM: abre certo no Excel em português (vírgula é separador decimal).
+    const csvContent = '﻿' + [headers, ...rows].map((row) => row.map(csvCell).join(';')).join('\r\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
-    link.setAttribute('download', `historico_movimentacoes_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('download', `historico_movimentacoes_${isoDay(new Date())}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -172,11 +203,12 @@ export default function HistoryPage() {
             <History className="text-secondary" />
             Histórico Completo
           </h1>
-          <p className="text-slate-500 text-sm">Registro detalhado de todas as entradas e saídas do sistema.</p>
+          <p className="text-slate-500 text-sm">Todas as movimentações do período, com o motivo de cada uma.</p>
         </div>
-        <button 
+        <button
           onClick={downloadCSV}
-          className="flex items-center gap-2 bg-white border border-border px-4 py-2 rounded-lg text-primary font-bold text-sm hover:bg-slate-50 transition-all shadow-sm"
+          disabled={loading || filteredMovements.length === 0}
+          className="flex items-center justify-center gap-2 bg-white border border-border px-4 py-2 rounded-lg text-primary font-bold text-sm hover:bg-slate-50 transition-all shadow-sm disabled:opacity-50"
         >
           <Download size={16} />
           Exportar CSV
@@ -188,40 +220,80 @@ export default function HistoryPage() {
         <div className="flex flex-col lg:flex-row gap-4">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-            <input 
-              type="text" 
-              placeholder="Buscar por material, colaborador ou local..." 
+            <input
+              type="text"
+              placeholder="Buscar por material, colaborador, local ou TAG..."
               className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-secondary/50 outline-none transition-all"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
-          
+
           <div className="flex flex-wrap gap-3">
             <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1">
               <Filter size={14} className="text-slate-400" />
-              <select 
+              <select
                 className="bg-transparent border-none text-sm font-bold text-slate-600 focus:ring-0 outline-none"
-                value={typeFilter}
-                onChange={(e) => setTypeFilter(e.target.value)}
+                value={reasonFilter}
+                onChange={(e) => setReasonFilter(e.target.value as 'ALL' | MovementReason)}
               >
-                <option value="ALL">Todos os Tipos</option>
-                <option value="IN">Entradas (IN)</option>
-                <option value="OUT">Saídas (OUT)</option>
+                <option value="ALL">Todos os motivos</option>
+                {MOVEMENT_REASONS.map((r) => (
+                  <option key={r} value={r}>
+                    {MOVEMENT_REASON_LABEL[r]}
+                  </option>
+                ))}
               </select>
             </div>
 
             <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1">
               <Calendar size={14} className="text-slate-400" />
-              <input 
-                type="date" 
+              <span className="text-[11px] font-bold text-slate-400">De</span>
+              <input
+                type="date"
                 className="bg-transparent border-none text-sm font-bold text-slate-600 focus:ring-0 outline-none"
-                value={dateFilter}
-                onChange={(e) => setDateFilter(e.target.value)}
+                value={dateFrom}
+                max={dateTo || undefined}
+                onChange={(e) => setDateFrom(e.target.value)}
+              />
+              <span className="text-[11px] font-bold text-slate-400">até</span>
+              <input
+                type="date"
+                className="bg-transparent border-none text-sm font-bold text-slate-600 focus:ring-0 outline-none"
+                value={dateTo}
+                min={dateFrom || undefined}
+                onChange={(e) => setDateTo(e.target.value)}
               />
             </div>
+            {dateFrom || dateTo ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setDateFrom('');
+                  setDateTo('');
+                }}
+                className="text-xs font-bold text-secondary hover:underline px-1"
+              >
+                Todo o período
+              </button>
+            ) : null}
           </div>
         </div>
+        {!loading ? (
+          <p className="text-[11px] font-bold text-slate-400">
+            {filteredMovements.length} movimentação(ões)
+            {dateFrom || dateTo
+              ? ` · ${dateFrom ? new Date(`${dateFrom}T12:00:00`).toLocaleDateString('pt-BR') : 'início'} a ${
+                  dateTo ? new Date(`${dateTo}T12:00:00`).toLocaleDateString('pt-BR') : 'hoje'
+                }`
+              : ' · todo o período'}
+          </p>
+        ) : null}
+        {loadError ? (
+          <p className="text-xs font-bold text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+            Erro ao carregar o histórico: {loadError}
+          </p>
+        ) : null}
       </div>
 
       {/* History Table */}
@@ -231,7 +303,7 @@ export default function HistoryPage() {
             <thead className="bg-slate-50 border-b border-border">
               <tr>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Data / Hora</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Tipo</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Motivo</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Material</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Colaborador / local</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Qtd.</th>
@@ -247,65 +319,82 @@ export default function HistoryPage() {
                 </tr>
               ) : filteredMovements.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-12 text-center text-slate-300 italic font-medium">Nenhuma movimentação encontrada com estes filtros.</td>
+                  <td colSpan={5} className="px-6 py-12 text-center text-slate-300 italic font-medium">
+                    Nenhuma movimentação encontrada com estes filtros.
+                  </td>
                 </tr>
               ) : (
-                filteredMovements.map((move) => (
-                  <tr key={move.id} className="hover:bg-slate-50 transition-colors group">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-xs font-bold text-primary font-mono bg-slate-50 inline-block px-2 py-1 rounded">
-                        {new Date(move.created_at).toLocaleString('pt-BR', {
-                          day: '2-digit',
-                          month: '2-digit',
-                          year: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit'
-                        })}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 text-center">
-                      <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-tighter ${
-                        move.type === 'IN' 
-                        ? 'bg-green-100 text-green-700' 
-                        : 'bg-red-100 text-red-700'
-                      }`}>
-                        {move.type === 'IN' ? <ArrowDownLeft size={12} /> : <ArrowUpRight size={12} />}
-                        {move.type === 'IN' ? 'Entrada' : 'Saída'}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-3">
-                        <div className="p-2 bg-slate-100 rounded-lg group-hover:bg-white transition-colors">
-                          <Package size={14} className="text-slate-400" />
+                visibleMovements.map((move) => {
+                  const reason = movementReasonOf(move);
+                  return (
+                    <tr key={move.id} className="hover:bg-slate-50 transition-colors group">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-xs font-bold text-primary font-mono bg-slate-50 inline-block px-2 py-1 rounded">
+                          {new Date(move.created_at).toLocaleString('pt-BR', {
+                            day: '2-digit',
+                            month: '2-digit',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
                         </div>
-                        <div className="flex flex-col">
-                          <p className="text-sm font-bold text-primary leading-tight">
-                            {formatProductLabelDisplay(move.items?.description)}
-                          </p>
-
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <div
+                          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-tighter ${REASON_TONE[reason]}`}
+                        >
+                          {move.type === 'IN' ? <ArrowDownLeft size={12} /> : <ArrowUpRight size={12} />}
+                          {MOVEMENT_REASON_LABEL[reason]}
                         </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
-                        <div className="w-6 h-6 bg-slate-100 rounded-full flex items-center justify-center text-[10px] font-bold text-secondary">
-                          {movementCounterpartyLabel(move).charAt(0)}
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 bg-slate-100 rounded-lg group-hover:bg-white transition-colors">
+                            <Package size={14} className="text-slate-400" />
+                          </div>
+                          <div className="flex flex-col">
+                            <p className="text-sm font-bold text-primary leading-tight">
+                              {formatProductLabelDisplay(move.items?.description)}
+                            </p>
+                            {move.tag && reason !== 'descarte' ? (
+                              <span className="text-[10px] font-mono text-slate-400">TAG {move.tag}</span>
+                            ) : null}
+                          </div>
                         </div>
-                        <span className="text-sm font-medium text-slate-600">{movementCounterpartyLabel(move)}</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <span className={`text-sm font-black ${move.type === 'IN' ? 'text-green-600' : 'text-red-600'}`}>
-                        {move.type === 'IN' ? '+' : '-'}{move.quantity}
-                      </span>
-                      <span className="ml-1 text-[10px] font-bold text-slate-400 lowercase">{move.items?.unit}</span>
-                    </td>
-                  </tr>
-                ))
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 bg-slate-100 rounded-full flex items-center justify-center text-[10px] font-bold text-secondary">
+                            {movementCounterpartyLabel(move).charAt(0)}
+                          </div>
+                          <span className="text-sm font-medium text-slate-600">{movementCounterpartyLabel(move)}</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-right whitespace-nowrap">
+                        <span className={`text-sm font-black ${move.type === 'IN' ? 'text-green-600' : 'text-red-600'}`}>
+                          {move.type === 'IN' ? '+' : '−'}
+                          {formatQty(move.quantity)}
+                        </span>
+                        <span className="ml-1 text-[10px] font-bold text-slate-400 lowercase">{move.items?.unit}</span>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
         </div>
+        {!loading && filteredMovements.length > visibleMovements.length ? (
+          <div className="p-4 border-t border-slate-100 text-center">
+            <button
+              type="button"
+              onClick={() => setRenderLimit((n) => n + RENDER_STEP)}
+              className="px-4 py-2 rounded-lg border border-slate-200 bg-white text-sm font-bold text-primary hover:bg-slate-50"
+            >
+              Mostrar mais ({visibleMovements.length} de {filteredMovements.length})
+            </button>
+          </div>
+        ) : null}
       </div>
     </div>
   );
