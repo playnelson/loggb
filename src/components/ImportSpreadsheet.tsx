@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { itemCodeFromDescription } from '@/lib/itemCode';
 import { normalizeProductLabelForSave } from '@/lib/productDisplayText';
 import { normalizeEmployeeNameForSave, normalizeSearchText } from '@/lib/employeeName';
-import { recordMovement, updatePossessionQuantity, updateStock } from '@/lib/movements';
+import { registerMovement } from '@/lib/movements';
 import { FileUp, Loader2, CheckCircle2, AlertCircle, X, Info, Users, Package, Download } from 'lucide-react';
 import { downloadInventoryImportTemplate } from '@/lib/inventoryImportTemplate';
 
@@ -389,22 +389,16 @@ export default function ImportSpreadsheet({
                 const moveType = diff > 0 ? 'OUT' : 'IN'; // Positive diff means more items OUT to employee
                 const moveQty = Math.abs(diff);
 
-                const mvRes = await recordMovement(supabase, {
+                // Histórico + carteira (+diff) + estoque (-diff) numa única transação.
+                const res = await registerMovement(supabase, {
                   employee_id: empId,
                   item_id: itemId,
                   quantity: moveQty,
                   type: moveType,
-                  performed_by: user.id,
+                  possession_delta: diff,
+                  stock_delta: -diff,
                 });
-                if (!mvRes.ok) throw new Error(mvRes.message);
-
-                // Update possession record
-                const posRes = await updatePossessionQuantity(supabase, empId, itemId, targetQty, user.id);
-                if (!posRes.ok) throw new Error(posRes.message);
-
-                // Update Stock (if OUT, decrease stock. if IN, increase stock)
-                const stockRes = await updateStock(supabase, itemId, -diff);
-                if (!stockRes.ok) throw new Error(stockRes.message);
+                if (!res.ok) throw new Error(`Linha ${i + 1}: ${res.message}`);
               }
               ok++;
             }

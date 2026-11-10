@@ -10,7 +10,7 @@ import { Plus, AlertCircle, X, FileUp, Users, History, Edit, Trash2, Loader2, Ar
 import ImportSpreadsheet from '@/components/ImportSpreadsheet';
 import QuickMovementModal from '@/components/QuickMovementModal';
 import { itemCodeFromDescription } from '@/lib/itemCode';
-import { recordMovement, updatePossessionQuantity, updateSitePossessionQuantity, updateStock } from '@/lib/movements';
+import { registerMovement } from '@/lib/movements';
 import { fetchTenantItems, fetchAllTenantItems, isLikelyMissingColumn } from '@/lib/tenantItems';
 import { downloadInventoryImportTemplate } from '@/lib/inventoryImportTemplate';
 import { downloadInventoryWorkbookFromTemplate } from '@/lib/inventoryExportTemplate';
@@ -543,22 +543,15 @@ function InventoryContent() {
     const type = qty > 0 ? 'IN' : 'OUT';
     const abs = Math.abs(qty);
 
-    const { error: moveError } = await supabase.from('movements').insert([{
+    // Ajuste: histórico + saldo numa única transação.
+    const res = await registerMovement(supabase, {
       item_id: adjustItem.id,
-      employee_id: null,
       quantity: abs,
       type,
-      performed_by: user.id
-    }]);
-    if (moveError) {
-      alert(`Erro ao registrar ajuste: ${moveError.message}`);
-      setIsSubmitting(false);
-      return;
-    }
-
-    const stockRes = await updateStock(supabase, adjustItem.id, qty);
-    if (!stockRes.ok) {
-      alert(`Erro ao atualizar estoque: ${stockRes.message}`);
+      stock_delta: qty,
+    });
+    if (!res.ok) {
+      alert(`Erro ao registrar ajuste: ${res.message}`);
       setIsSubmitting(false);
       return;
     }
@@ -970,72 +963,27 @@ function InventoryContent() {
       const line = cart[i];
       const currentItem = products.find((p) => p.id === line.itemId);
       const isConsumableNow = currentItem ? Boolean(currentItem.consumable) : line.consumable;
-      const mvRes = await recordMovement(supabase, {
+      // Cada linha é gravada numa única transação (histórico + carteira/local + estoque).
+      // Envio para canteiro/sede não baixa o almoxarifado — só aumenta o saldo no local.
+      const toSite = cartDestination === 'site';
+      const res = await registerMovement(supabase, {
         item_id: line.itemId,
         employee_id: cartDestination === 'employee' ? cartEmployeeId : null,
-        work_site_id: cartDestination === 'site' ? cartWorkSiteId : null,
+        work_site_id: toSite ? cartWorkSiteId : null,
         quantity: line.quantity,
         type: 'OUT',
-        performed_by: user.id,
         tag: line.tag || null,
+        stock_delta: toSite ? 0 : -line.quantity,
+        possession_delta: !toSite && !isConsumableNow ? line.quantity : 0,
+        site_delta: toSite ? line.quantity : 0,
       });
-      if (!mvRes.ok) {
-        alert(`Erro na linha ${i + 1}: ${mvRes.message}`);
+      if (!res.ok) {
+        const done = i > 0 ? ` As ${i} linha(s) anteriores já foram gravadas e saíram do carrinho.` : '';
+        alert(`Erro na linha ${i + 1} (${line.description}): ${res.message}${done}`);
+        setCart((prev) => prev.slice(i));
         setIsSubmitting(false);
+        await fetchProducts();
         return;
-      }
-
-      if (!isConsumableNow) {
-        if (cartDestination === 'employee') {
-          const { data: currentPos } = await supabase
-            .from('possession')
-            .select('quantity')
-            .eq('employee_id', cartEmployeeId)
-            .eq('item_id', line.itemId)
-            .maybeSingle();
-          const currentQty = Number(currentPos?.quantity ?? 0);
-          const posRes = await updatePossessionQuantity(
-            supabase,
-            cartEmployeeId,
-            line.itemId,
-            currentQty + line.quantity,
-            user.id
-          );
-          if (!posRes.ok) {
-            alert(`Erro ao atualizar carteira (${line.description}): ${posRes.message}`);
-            setIsSubmitting(false);
-            return;
-          }
-        }
-      }
-
-      if (cartDestination === 'site') {
-        const { data: currentSp } = await supabase
-          .from('site_possession')
-          .select('quantity')
-          .eq('site_id', cartWorkSiteId)
-          .eq('item_id', line.itemId)
-          .maybeSingle();
-        const cur = Number(currentSp?.quantity ?? 0);
-        const spRes = await updateSitePossessionQuantity(
-          supabase,
-          cartWorkSiteId,
-          line.itemId,
-          cur + line.quantity,
-          user.id
-        );
-        if (!spRes.ok) {
-          alert(`Erro ao atualizar estoque no local (${line.description}): ${spRes.message}`);
-          setIsSubmitting(false);
-          return;
-        }
-      } else {
-        const stockRes = await updateStock(supabase, line.itemId, -line.quantity);
-        if (!stockRes.ok) {
-          alert(`Erro ao atualizar estoque (${line.description}): ${stockRes.message}`);
-          setIsSubmitting(false);
-          return;
-        }
       }
     }
 

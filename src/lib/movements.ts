@@ -55,82 +55,63 @@ export async function recordMovement(
   return { ok: false, message: err1.message || 'Erro ao registrar movimentação.' };
 }
 
-export async function updateStock(
+export type RegisterMovementInput = {
+  item_id: string;
+  type: MovementType;
+  /** Quantidade registrada no histórico (sempre positiva). */
+  quantity: number;
+  employee_id?: string | null;
+  work_site_id?: string | null;
+  tag?: string | null;
+  /** Variação do saldo do almoxarifado (items.quantity_current). Ex.: saída = -quantidade. */
+  stock_delta?: number;
+  /** Variação da carteira do colaborador (exige employee_id). */
+  possession_delta?: number;
+  /** Variação do saldo no canteiro/sede (exige work_site_id). */
+  site_delta?: number;
+  /** Se true, carteira insuficiente é zerada em vez de dar erro. */
+  possession_clamp?: boolean;
+};
+
+export type RegisterMovementResult =
+  | { ok: true; quantity_current: number | null }
+  | { ok: false; message: string };
+
+/**
+ * Registra movimentação + saldo do almoxarifado + carteira + saldo no local numa ÚNICA transação
+ * (função `register_movement` no Postgres — ver supabase/register_movement.sql).
+ * Se qualquer parte falhar, nada é gravado.
+ */
+export async function registerMovement(
   supabase: SupabaseClient,
-  itemId: string,
-  delta: number
-): Promise<{ ok: true } | { ok: false; message: string }> {
-  const { error } = await supabase.rpc('update_stock', { p_item_id: itemId, p_quantity: delta });
-  if (!error) return { ok: true };
+  input: RegisterMovementInput
+): Promise<RegisterMovementResult> {
+  const { data, error } = await supabase.rpc('register_movement', {
+    p_item_id: input.item_id,
+    p_type: input.type,
+    p_quantity: input.quantity,
+    p_employee_id: input.employee_id ?? null,
+    p_work_site_id: input.work_site_id ?? null,
+    p_tag: input.tag ?? null,
+    p_stock_delta: input.stock_delta ?? 0,
+    p_possession_delta: input.possession_delta ?? 0,
+    p_site_delta: input.site_delta ?? 0,
+    p_possession_clamp: input.possession_clamp ?? false,
+  });
 
-  // RPC ausente, RLS ou permissão: tenta o mesmo efeito lendo e gravando em `items`.
-  const rpcMsg = error.message || '';
-  const { data: row, error: selErr } = await supabase
-    .from('items')
-    .select('quantity_current')
-    .eq('id', itemId)
-    .maybeSingle();
-
-  if (selErr) {
-    return {
-      ok: false,
-      message: rpcMsg || selErr.message || 'Erro ao atualizar estoque.',
-    };
-  }
-  if (!row) {
-    return { ok: false, message: 'Item não encontrado para atualizar o estoque.' };
-  }
-
-  const next = Number(row.quantity_current ?? 0) + delta;
-  if (!Number.isFinite(next) || next < 0) {
-    return { ok: false, message: 'Saldo em estoque inválido após a operação.' };
+  if (error) {
+    const msg = error.message || '';
+    if (error.code === 'PGRST202' || /could not find the function/i.test(msg)) {
+      return {
+        ok: false,
+        message:
+          'A função register_movement não existe no banco. Execute o script supabase/register_movement.sql no Supabase.',
+      };
+    }
+    return { ok: false, message: msg || 'Erro ao registrar movimentação.' };
   }
 
-  const { error: upErr } = await supabase.from('items').update({ quantity_current: next }).eq('id', itemId);
-  if (upErr) {
-    return { ok: false, message: upErr.message || rpcMsg || 'Erro ao atualizar estoque.' };
-  }
-  return { ok: true };
-}
-
-export async function updatePossessionQuantity(
-  supabase: SupabaseClient,
-  employeeId: string,
-  itemId: string,
-  nextQty: number,
-  userId: string
-): Promise<{ ok: true } | { ok: false; message: string }> {
-  if (nextQty <= 0) {
-    const { error } = await supabase.from('possession').delete().match({ employee_id: employeeId, item_id: itemId });
-    if (error) return { ok: false, message: error.message || 'Erro ao atualizar carteira.' };
-    return { ok: true };
-  }
-  const { error } = await supabase
-    .from('possession')
-    .upsert({ employee_id: employeeId, item_id: itemId, quantity: nextQty, user_id: userId }, { onConflict: 'employee_id,item_id' });
-  if (error) return { ok: false, message: error.message || 'Erro ao atualizar carteira.' };
-  return { ok: true };
-}
-
-export async function updateSitePossessionQuantity(
-  supabase: SupabaseClient,
-  siteId: string,
-  itemId: string,
-  nextQty: number,
-  userId: string
-): Promise<{ ok: true } | { ok: false; message: string }> {
-  if (nextQty <= 0) {
-    const { error } = await supabase.from('site_possession').delete().match({ site_id: siteId, item_id: itemId });
-    if (error) return { ok: false, message: error.message || 'Erro ao atualizar estoque no local.' };
-    return { ok: true };
-  }
-  const { error } = await supabase
-    .from('site_possession')
-    .upsert(
-      { site_id: siteId, item_id: itemId, quantity: nextQty, user_id: userId },
-      { onConflict: 'site_id,item_id' }
-    );
-  if (error) return { ok: false, message: error.message || 'Erro ao atualizar estoque no local.' };
-  return { ok: true };
+  const qc = (data as { quantity_current?: unknown } | null)?.quantity_current;
+  return { ok: true, quantity_current: qc == null ? null : Number(qc) };
 }
 

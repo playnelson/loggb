@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 import { useCallback, useMemo, useRef, useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { formatProductLabelDisplay } from '@/lib/productDisplayText';
-import { recordMovement, updatePossessionQuantity, updateStock } from '@/lib/movements';
+import { recordMovement, registerMovement } from '@/lib/movements';
 import { formatEmployeeName, normalizeEmployeeNameForSave, normalizeSearchText } from '@/lib/employeeName';
 import { Search, UserPlus, Mail, Phone, ExternalLink, X, FileUp, Filter, Package, AlertCircle, History, RotateCcw, Download, Loader2, ArrowLeft, FileText, Trash2, Pencil } from 'lucide-react';
 import ImportSpreadsheet from '@/components/ImportSpreadsheet';
@@ -574,38 +574,25 @@ export default function StaffPage() {
     setIsSubmitting(true);
 
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!user) {
+      alert('Usuário não autenticado.');
+      setIsSubmitting(false);
+      return;
+    }
 
-    // 1) Movement IN
-    const mvRes = await recordMovement(supabase, {
+    // Devolução: histórico + carteira (-) + estoque (+) numa única transação.
+    const res = await registerMovement(supabase, {
       item_id: returnItem.item.item_id,
       employee_id: returnItem.employeeId,
       quantity: returnQty,
       type: 'IN',
-      performed_by: user.id,
+      stock_delta: returnQty,
+      possession_delta: -returnQty,
     });
-    if (!mvRes.ok) {
-      alert(mvRes.message);
+    if (!res.ok) {
+      alert(res.message);
       setIsSubmitting(false);
       return;
-    }
-
-    // 2) Possession decrement/delete
-    const newQty = returnItem.item.quantity - returnQty;
-    const posRes = await updatePossessionQuantity(supabase, returnItem.employeeId, returnItem.item.item_id, newQty, user.id);
-    if (!posRes.ok) {
-      alert(posRes.message);
-      setIsSubmitting(false);
-      return;
-    }
-
-    // 3) Stock +
-    const stockRes = await updateStock(supabase, returnItem.item.item_id, returnQty);
-    if (!stockRes.ok) {
-      alert(
-        `Estoque não foi atualizado: ${stockRes.message}\n` +
-          'O histórico registrou a devolução e a carteira já foi descontada, mas o saldo em estoque não mudou. Use “Ajustar estoque” em Inventário se precisar corrigir.'
-      );
     }
 
     setReturnItem(null);
@@ -658,44 +645,28 @@ export default function StaffPage() {
     setIsSubmitting(true);
 
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!user) {
+      alert('Usuário não autenticado.');
+      setIsSubmitting(false);
+      return;
+    }
 
-    // 1) movement IN
-    const mvRes = await recordMovement(supabase, {
+    // Devolução pela carteira: histórico + carteira (-) + estoque (+) numa única transação.
+    // possession_clamp: EPIs consumíveis podem não ter linha em `possession` (saldo vem do histórico);
+    // nesse caso a carteira só é zerada, como antes.
+    const res = await registerMovement(supabase, {
       item_id: walletReturn.item_id,
       employee_id: walletReturn.employeeId,
       quantity: returnQty,
       type: 'IN',
-      performed_by: user.id,
+      stock_delta: returnQty,
+      possession_delta: -returnQty,
+      possession_clamp: true,
     });
-    if (!mvRes.ok) {
-      alert(mvRes.message);
+    if (!res.ok) {
+      alert(res.message);
       setIsSubmitting(false);
       return;
-    }
-
-    const { data: currentPos } = await supabase
-      .from('possession')
-      .select('quantity')
-      .eq('employee_id', walletReturn.employeeId)
-      .eq('item_id', walletReturn.item_id)
-      .maybeSingle();
-    const cur = Number(currentPos?.quantity || 0);
-    const next = cur - returnQty;
-    const posRes = await updatePossessionQuantity(supabase, walletReturn.employeeId, walletReturn.item_id, next, user.id);
-    if (!posRes.ok) {
-      alert(posRes.message);
-      setIsSubmitting(false);
-      return;
-    }
-
-    // 3) stock +
-    const stockRes = await updateStock(supabase, walletReturn.item_id, returnQty);
-    if (!stockRes.ok) {
-      alert(
-        `Estoque não foi atualizado: ${stockRes.message}\n` +
-          'A devolução já está no histórico (e a carteira, quando for o caso, já foi atualizada), mas o saldo em estoque não mudou. Use “Ajustar estoque” em Inventário se precisar corrigir.'
-      );
     }
 
     setWalletReturn(null);

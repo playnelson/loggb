@@ -4,10 +4,14 @@ import {
   searchSinapi,
   type CatalogHit,
 } from '@/lib/catalogSearchSources';
+import { requireUser } from '@/lib/apiAuth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: Request) {
+  const auth = await requireUser();
+  if (!auth.ok) return auth.response;
+
   const q = new URL(req.url).searchParams.get('q')?.trim() ?? '';
   if (q.length < 3) {
     return Response.json({ error: 'Informe pelo menos 3 caracteres.', results: [] }, { status: 400 });

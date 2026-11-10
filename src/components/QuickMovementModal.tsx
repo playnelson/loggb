@@ -4,7 +4,7 @@ import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { formatProductLabelDisplay } from '@/lib/productDisplayText';
 import { formatEmployeeName } from '@/lib/employeeName';
-import { recordMovement, updateStock, updatePossessionQuantity, updateSitePossessionQuantity } from '@/lib/movements';
+import { registerMovement } from '@/lib/movements';
 import { 
   X, 
   ArrowUpRight, 
@@ -250,11 +250,6 @@ export default function QuickMovementModal({
     possessionHolders,
   ]);
 
-  const insertMovement = useCallback(async (payload: Record<string, unknown>) => {
-    const res = await recordMovement(supabase, payload as any);
-    return res.ok ? null : new Error(res.message);
-  }, []);
-
   const handleAction = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!item) return;
@@ -284,18 +279,8 @@ export default function QuickMovementModal({
       counterparty === 'site' && (needsSite || (showSiteOptionalOnIn && selectedSiteId)) ? selectedSiteId : null;
     const isSiteCounterparty = counterparty === 'site' && !!siteForMove;
 
-    // 1. Record Movement
-    const movePayload: Record<string, unknown> = {
-      item_id: item.id,
-      employee_id: employeeForMove,
-      work_site_id: siteForMove,
-      type: mode,
-      quantity: effectiveQty,
-      performed_by: user.id,
-    };
-    if (isUnique) movePayload.tag = movementTag;
-
-    // 1b. Antes de gravar: validar carteira (colaborador ou local).
+    // Antes de gravar: validar carteira (colaborador ou local) para mensagens amigáveis.
+    // A função no banco valida de novo dentro da transação.
     if (!item.consumable && mode === 'IN') {
       if (counterparty === 'employee' && selectedEmployee) {
         if (item.unique_item) {
@@ -337,82 +322,25 @@ export default function QuickMovementModal({
       }
     }
 
-    const moveError = await insertMovement(movePayload);
-
-    if (moveError) {
-      setError(moveError.message || 'Erro ao registrar movimentação.');
+    // Movimentação + carteira/local + estoque numa única transação.
+    // - Carteira: só itens não consumíveis com colaborador.
+    // - Canteiro/sede não altera o saldo do almoxarifado (só o saldo no local).
+    const signed = mode === 'OUT' ? effectiveQty : -effectiveQty; // visto do lado do colaborador/local
+    const res = await registerMovement(supabase, {
+      item_id: item.id,
+      type: mode,
+      quantity: effectiveQty,
+      employee_id: employeeForMove,
+      work_site_id: siteForMove,
+      tag: isUnique ? movementTag : null,
+      stock_delta: isSiteCounterparty ? 0 : -signed,
+      possession_delta: !item.consumable && employeeForMove ? signed : 0,
+      site_delta: isSiteCounterparty ? signed : 0,
+    });
+    if (!res.ok) {
+      setError(res.message);
       setLoading(false);
       return;
-    }
-
-    // 2. Update Possession (colaborador) ou estoque no local (canteiro/sede)
-    if (!item.consumable && counterparty === 'employee' && selectedEmployee) {
-      const { data: currentPos } = await supabase
-        .from('possession')
-        .select('quantity')
-        .eq('employee_id', selectedEmployee)
-        .eq('item_id', item.id)
-        .maybeSingle();
-
-      const currentQty = Number(currentPos?.quantity ?? 0);
-      const nextQty = mode === 'OUT' ? currentQty + effectiveQty : currentQty - effectiveQty;
-
-      if (mode === 'IN' && nextQty < 0) {
-        setError('Esse colaborador não tem essa quantidade na carteira para devolver.');
-        setLoading(false);
-        return;
-      }
-
-      const posRes = await updatePossessionQuantity(supabase, selectedEmployee, item.id, nextQty, user.id);
-      if (!posRes.ok) {
-        setError(posRes.message);
-        setLoading(false);
-        return;
-      }
-    }
-
-    if (isSiteCounterparty && selectedSiteId) {
-      const { data: currentSp } = await supabase
-        .from('site_possession')
-        .select('quantity')
-        .eq('site_id', selectedSiteId)
-        .eq('item_id', item.id)
-        .maybeSingle();
-      const currentSiteQty = Number(currentSp?.quantity ?? 0);
-      const nextSiteQty = mode === 'OUT' ? currentSiteQty + effectiveQty : currentSiteQty - effectiveQty;
-
-      if (mode === 'IN' && nextSiteQty < 0) {
-        setError('Esse local não tem essa quantidade registrada para devolver ao almoxarifado.');
-        setLoading(false);
-        return;
-      }
-
-      const spRes = await updateSitePossessionQuantity(
-        supabase,
-        selectedSiteId,
-        item.id,
-        nextSiteQty,
-        user.id
-      );
-      if (!spRes.ok) {
-        setError(spRes.message);
-        setLoading(false);
-        return;
-      }
-    }
-
-    // 3. Update stock quantity (saída/entrada por colaborador; canteiro/sede não altera saldo do almoxarifado)
-    if (!isSiteCounterparty) {
-      const rpcQty = mode === 'IN' ? effectiveQty : -effectiveQty;
-      const stockRes = await updateStock(supabase, item.id, rpcQty);
-      if (!stockRes.ok) {
-        setError(
-          stockRes.message ||
-            'Movimentação registrada, mas o estoque não pôde ser atualizado. Revise o saldo e o histórico ou peça suporte.'
-        );
-        setLoading(false);
-        return;
-      }
     }
 
     setSuccess(true);

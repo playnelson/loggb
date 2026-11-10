@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { Sidebar, Header, MobileBottomNav } from '@/components/Navigation';
+import AppFooter from '@/components/AppFooter';
 
 export default function LayoutWrapper({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -83,7 +84,10 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
             sidebarCollapsed ? 'md:ml-20 md:w-[calc(100vw-80px)]' : 'md:ml-64 md:w-[calc(100vw-256px)]'
           }`}
         >
-          <div className="mx-auto w-full max-w-[1800px]">{children}</div>
+          <div className="mx-auto w-full max-w-[1800px]">
+            {children}
+            <AppFooter />
+          </div>
         </main>
       </div>
     </>

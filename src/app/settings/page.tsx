@@ -65,42 +65,19 @@ export default function SettingsPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Usuário não autenticado.');
 
-      // 1. Deletar Movimentações (dependem de itens e funcionários)
-      const { error: moveError } = await supabase
-        .from('movements')
-        .delete()
-        .eq('performed_by', user.id);
-      
-      if (moveError) console.error('Erro ao deletar movimentos:', moveError);
-
-      // 2. Deletar Funcionários
-      const { error: rentalsError } = await supabase
-        .from('equipment_rentals')
-        .delete()
-        .eq('user_id', user.id);
-      if (rentalsError) console.error('Erro ao deletar aluguéis:', rentalsError);
-
-      const { error: suppliersError } = await supabase
-        .from('rental_suppliers')
-        .delete()
-        .eq('user_id', user.id);
-      if (suppliersError) console.error('Erro ao deletar locadoras:', suppliersError);
-
-      // 3. Deletar Funcionários
-      const { error: empError } = await supabase
-        .from('employees')
-        .delete()
-        .eq('user_id', user.id);
-      
-      if (empError) console.error('Erro ao deletar funcionários:', empError);
-
-      // 4. Deletar Itens
-      const { error: itemError } = await supabase
-        .from('items')
-        .delete()
-        .eq('user_id', user.id);
-      
-      if (itemError) console.error('Erro ao deletar itens:', itemError);
+      // Apaga TODOS os módulos (estoque, colaboradores, histórico, ordens de compra, obras,
+      // kanban, mural, lembretes, aluguéis, financeiro…) numa única transação no banco.
+      // Ver supabase/reset_account_data.sql.
+      const { error: resetError } = await supabase.rpc('reset_my_account_data');
+      if (resetError) {
+        const missing =
+          resetError.code === 'PGRST202' || /could not find the function/i.test(resetError.message || '');
+        throw new Error(
+          missing
+            ? 'A função reset_my_account_data não existe no banco. Execute supabase/reset_account_data.sql no Supabase.'
+            : `Nada foi apagado: ${resetError.message}`
+        );
+      }
 
       // Sucesso
       setTimeout(() => {
@@ -372,7 +349,8 @@ export default function SettingsPage() {
                 <div className="space-y-1">
                   <p className="font-bold text-red-900">Zerar Todos os Dados</p>
                   <p className="text-xs text-red-700">
-                    Isso apagará permanentemente todos os materiais, funcionários e históricos vinculados à sua conta.
+                    Isso apagará permanentemente todos os dados da sua conta em todos os módulos: materiais,
+                    funcionários, históricos, ordens de compra, obras, kanban, mural, lembretes e aluguéis.
                   </p>
                 </div>
                 <button 

@@ -13,6 +13,8 @@ import { createSupabaseServerClient } from '@/lib/supabaseServer';
 
 export const runtime = 'nodejs';
 
+const MAX_PDF_BYTES = 15 * 1024 * 1024;
+
 const requirePdf = createRequire(import.meta.url);
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const pdfParse = requirePdf('pdf-parse') as (b: Buffer, opts?: any) => Promise<{ text: string }>;
@@ -50,6 +52,10 @@ export async function POST(req: Request) {
     const name = file.name || 'ordem.pdf';
     if (!/\.pdf$/i.test(name)) {
       return Response.json({ error: 'Somente arquivos .pdf são aceitos.' }, { status: 415 });
+    }
+
+    if (file.size > MAX_PDF_BYTES) {
+      return Response.json({ error: 'PDF muito grande (máximo 15 MB).' }, { status: 413 });
     }
 
     const buf = Buffer.from(await file.arrayBuffer());

@@ -1,66 +1,22 @@
 import { NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabaseServer';
+import { ACCOUNT_TABLES_RESTORE_ORDER, type AccountTable } from '@/lib/accountTables';
 
 type JsonObject = Record<string, unknown>;
+type Supa = Awaited<ReturnType<typeof createSupabaseServerClient>>;
 
 const BACKUP_VERSION = 1;
+/** O Supabase devolve no máximo 1000 linhas por consulta; paginamos abaixo disso. */
+const PAGE_SIZE = 500;
+/** Lotes para `.in(...)` e upsert, evitando URL/corpo grandes demais. */
+const CHUNK = 100;
 
-const USER_SCOPED_TABLES = [
-  'item_categories',
-  'employees',
-  'items',
-  'work_sites',
-  'movements',
-  'possession',
-  'site_possession',
-  'rental_suppliers',
-  'equipment_rentals',
-  'mural_notes',
-  'dashboard_reminders',
-  'purchase_orders',
-] as const;
-
-const IMPORT_UPSERT_ORDER = [
-  'item_categories',
-  'employees',
-  'items',
-  'work_sites',
-  'rental_suppliers',
-  'purchase_orders',
-  'possession',
-  'site_possession',
-  'movements',
-  'equipment_rentals',
-  'mural_notes',
-  'dashboard_reminders',
-  'purchase_order_items',
-] as const;
-
-const DELETE_ORDER = [
-  'purchase_orders',
-  'equipment_rentals',
-  'site_possession',
-  'possession',
-  'movements',
-  'rental_suppliers',
-  'work_sites',
-  'items',
-  'employees',
-  'item_categories',
-  'mural_notes',
-  'dashboard_reminders',
-] as const;
-
-const ON_CONFLICT_BY_TABLE: Partial<Record<string, string>> = {
-  possession: 'employee_id,item_id',
-  site_possession: 'site_id,item_id',
-};
-
+/** Só "tabela não existe" — coluna inexistente NÃO deve ser tratada como tabela ausente. */
 function isTableMissingError(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
-  const maybeError = error as { code?: string; message?: string };
-  const msg = String(maybeError.message || '').toLowerCase();
-  return maybeError.code === '42P01' || msg.includes('does not exist') || msg.includes('relation');
+  const e = error as { code?: string; message?: string };
+  const msg = String(e.message || '').toLowerCase();
+  return e.code === '42P01' || e.code === 'PGRST205' || msg.includes('could not find the table');
 }
 
 function asObjectArray(input: unknown): JsonObject[] {
@@ -68,11 +24,30 @@ function asObjectArray(input: unknown): JsonObject[] {
   return input.filter((row): row is JsonObject => typeof row === 'object' && row !== null);
 }
 
-function forceUserId(rows: JsonObject[], userId: string): JsonObject[] {
-  return rows.map((row) => {
-    if (!Object.prototype.hasOwnProperty.call(row, 'user_id')) return row;
-    return { ...row, user_id: userId };
-  });
+function chunks<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+/** Lê todas as linhas (paginado) de uma consulta. */
+async function selectAll(
+  build: (from: number, to: number) => PromiseLike<{ data: unknown; error: unknown }>
+): Promise<{ rows: JsonObject[]; error: unknown }> {
+  const rows: JsonObject[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await build(from, from + PAGE_SIZE - 1);
+    if (error) return { rows, error };
+    const page = asObjectArray(data);
+    rows.push(...page);
+    if (page.length < PAGE_SIZE) return { rows, error: null };
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error && typeof error === 'object' && 'message' in error
+    ? String((error as { message: unknown }).message)
+    : 'erro desconhecido';
 }
 
 function extractBackupPayload(body: unknown): { data: Record<string, JsonObject[]>; replaceExisting: boolean } | null {
@@ -80,26 +55,21 @@ function extractBackupPayload(body: unknown): { data: Record<string, JsonObject[
   const obj = body as Record<string, unknown>;
   const replaceExisting = Boolean(obj.replaceExisting);
   const backup = (obj.backup && typeof obj.backup === 'object' ? obj.backup : obj) as Record<string, unknown>;
-  const dataValue = backup.data;
-  const version = backup.version;
-  if (version !== BACKUP_VERSION) return null;
-  if (!dataValue || typeof dataValue !== 'object') return null;
-  const rawData = dataValue as Record<string, unknown>;
+  if (backup.version !== BACKUP_VERSION) return null;
+  if (!backup.data || typeof backup.data !== 'object') return null;
   const parsed: Record<string, JsonObject[]> = {};
-  for (const [table, rows] of Object.entries(rawData)) {
+  for (const [table, rows] of Object.entries(backup.data as Record<string, unknown>)) {
     parsed[table] = asObjectArray(rows);
   }
   return { data: parsed, replaceExisting };
 }
 
-async function upsertRows(
-  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
-  table: string,
-  rows: JsonObject[]
-) {
-  if (rows.length === 0) return { error: null };
-  const onConflict = ON_CONFLICT_BY_TABLE[table] ?? 'id';
-  return supabase.from(table).upsert(rows, { onConflict, ignoreDuplicates: false });
+async function upsertRows(supabase: Supa, t: AccountTable | { table: string; onConflict?: string }, rows: JsonObject[]) {
+  for (const part of chunks(rows, CHUNK)) {
+    const res = await supabase.from(t.table).upsert(part, { onConflict: t.onConflict ?? 'id', ignoreDuplicates: false });
+    if (res.error) return res;
+  }
+  return { error: null };
 }
 
 export async function GET() {
@@ -116,43 +86,47 @@ export async function GET() {
     const warnings: string[] = [];
     const data: Record<string, JsonObject[]> = {};
 
-    for (const table of USER_SCOPED_TABLES) {
-      const query = await supabase.from(table).select('*').eq('user_id', user.id);
-      if (query.error) {
-        if (isTableMissingError(query.error)) {
-          warnings.push(`Tabela não encontrada e ignorada: ${table}.`);
-          data[table] = [];
+    for (const t of ACCOUNT_TABLES_RESTORE_ORDER) {
+      const { rows, error } = await selectAll((from, to) => {
+        let q = supabase.from(t.table).select('*').eq(t.ownerColumn, user.id);
+        for (const col of t.orderBy ?? ['id']) q = q.order(col, { ascending: true });
+        return q.range(from, to);
+      });
+      if (error) {
+        if (isTableMissingError(error)) {
+          warnings.push(`Tabela não encontrada e ignorada: ${t.table}.`);
+          data[t.table] = [];
           continue;
         }
         return NextResponse.json(
-          { error: `Falha ao exportar a tabela ${table}: ${query.error.message}` },
+          { error: `Falha ao exportar a tabela ${t.table}: ${errorMessage(error)}` },
           { status: 500 }
         );
       }
-      data[table] = asObjectArray(query.data ?? []);
+      data[t.table] = rows;
     }
 
+    // Itens das ordens de compra (não têm user_id próprio; pertencem à ordem).
     const orderIds = (data.purchase_orders ?? [])
       .map((row) => (typeof row.id === 'string' ? row.id : null))
       .filter((id): id is string => Boolean(id));
 
-    if (orderIds.length > 0) {
-      const itemsRes = await supabase.from('purchase_order_items').select('*').in('purchase_order_id', orderIds);
-      if (itemsRes.error) {
-        if (isTableMissingError(itemsRes.error)) {
+    data.purchase_order_items = [];
+    for (const ids of chunks(orderIds, CHUNK)) {
+      const { rows, error } = await selectAll((from, to) =>
+        supabase.from('purchase_order_items').select('*').in('purchase_order_id', ids).order('id', { ascending: true }).range(from, to)
+      );
+      if (error) {
+        if (isTableMissingError(error)) {
           warnings.push('Tabela não encontrada e ignorada: purchase_order_items.');
-          data.purchase_order_items = [];
-        } else {
-          return NextResponse.json(
-            { error: `Falha ao exportar a tabela purchase_order_items: ${itemsRes.error.message}` },
-            { status: 500 }
-          );
+          break;
         }
-      } else {
-        data.purchase_order_items = asObjectArray(itemsRes.data ?? []);
+        return NextResponse.json(
+          { error: `Falha ao exportar a tabela purchase_order_items: ${errorMessage(error)}` },
+          { status: 500 }
+        );
       }
-    } else {
-      data.purchase_order_items = [];
+      data.purchase_order_items.push(...rows);
     }
 
     return NextResponse.json({
@@ -194,49 +168,51 @@ export async function POST(request: Request) {
     const { data, replaceExisting } = parsed;
 
     if (replaceExisting) {
-      for (const table of DELETE_ORDER) {
-        const delRes = await supabase.from(table).delete().eq('user_id', user.id);
-        if (delRes.error) {
-          if (isTableMissingError(delRes.error)) {
-            warnings.push(`Tabela ausente no replace e ignorada: ${table}.`);
-            continue;
-          }
-          return NextResponse.json(
-            { error: `Falha ao limpar dados atuais na tabela ${table}: ${delRes.error.message}` },
-            { status: 500 }
-          );
-        }
-      }
-    }
-
-    for (const table of IMPORT_UPSERT_ORDER) {
-      const rawRows = asObjectArray(data[table] ?? []);
-      if (rawRows.length === 0) {
-        importedCounts[table] = 0;
-        continue;
-      }
-      const rows = table === 'purchase_order_items' ? rawRows : forceUserId(rawRows, user.id);
-      const res = await upsertRows(supabase, table, rows);
-      if (res.error) {
-        if (isTableMissingError(res.error)) {
-          warnings.push(`Tabela ausente na importação e ignorada: ${table}.`);
-          importedCounts[table] = 0;
-          continue;
-        }
+      // Mesma rotina do "Zerar conta": apaga tudo numa transação no banco.
+      const { error: resetError } = await supabase.rpc('reset_my_account_data');
+      if (resetError) {
         return NextResponse.json(
-          { error: `Falha ao importar tabela ${table}: ${res.error.message}` },
+          { error: `Falha ao limpar dados atuais: ${resetError.message}` },
           { status: 500 }
         );
       }
-      importedCounts[table] = rows.length;
     }
 
-    return NextResponse.json({
-      ok: true,
-      importedCounts,
-      warnings,
-      replaceExisting,
-    });
+    for (const t of ACCOUNT_TABLES_RESTORE_ORDER) {
+      // O dono passa a ser SEMPRE o usuário logado (permite migrar para outra conta).
+      const rows = asObjectArray(data[t.table] ?? []).map((row) => ({ ...row, [t.ownerColumn]: user.id }));
+      if (rows.length === 0) {
+        importedCounts[t.table] = 0;
+        continue;
+      }
+      const res = await upsertRows(supabase, t, rows);
+      if (res.error) {
+        if (isTableMissingError(res.error)) {
+          warnings.push(`Tabela ausente na importação e ignorada: ${t.table}.`);
+          importedCounts[t.table] = 0;
+          continue;
+        }
+        return NextResponse.json(
+          { error: `Falha ao importar tabela ${t.table}: ${errorMessage(res.error)}` },
+          { status: 500 }
+        );
+      }
+      importedCounts[t.table] = rows.length;
+    }
+
+    const poItems = asObjectArray(data.purchase_order_items ?? []);
+    if (poItems.length > 0) {
+      const res = await upsertRows(supabase, { table: 'purchase_order_items' }, poItems);
+      if (res.error && !isTableMissingError(res.error)) {
+        return NextResponse.json(
+          { error: `Falha ao importar tabela purchase_order_items: ${errorMessage(res.error)}` },
+          { status: 500 }
+        );
+      }
+    }
+    importedCounts.purchase_order_items = poItems.length;
+
+    return NextResponse.json({ ok: true, importedCounts, warnings, replaceExisting });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Erro inesperado ao importar backup.';
     return NextResponse.json({ error: message }, { status: 500 });
