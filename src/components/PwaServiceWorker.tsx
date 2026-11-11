@@ -8,9 +8,13 @@ export default function PwaServiceWorker() {
       return;
     }
 
-    void navigator.serviceWorker.register('/sw.js').catch((error) => {
-      console.error('Falha ao registrar service worker:', error);
-    });
+    // updateViaCache 'none': o navegador sempre busca o sw.js novo, para correções chegarem logo.
+    void navigator.serviceWorker
+      .register('/sw.js', { updateViaCache: 'none' })
+      .then((reg) => reg.update())
+      .catch((error) => {
+        console.error('Falha ao registrar service worker:', error);
+      });
   }, []);
 
   return null;
