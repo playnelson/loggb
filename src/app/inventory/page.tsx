@@ -6,7 +6,7 @@ import { useState, useEffect, Suspense, useCallback, useMemo, useRef } from 'rea
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { formatProductLabelDisplay, normalizeProductLabelForSave } from '@/lib/productDisplayText';
-import { Plus, AlertCircle, X, FileUp, Users, History, Edit, Trash2, Loader2, ArrowUpRight, ArrowDownLeft, Tags, ShoppingCart, User, Minus, Tag, Download, MapPin, FilterX } from 'lucide-react';
+import { Plus, AlertCircle, X, FileUp, Users, History, Edit, Trash2, Loader2, ArrowUpRight, ArrowDownLeft, Tags, ShoppingCart, User, Minus, Tag, Download, MapPin, FilterX, Printer } from 'lucide-react';
 import ImportSpreadsheet from '@/components/ImportSpreadsheet';
 import QuickMovementModal from '@/components/QuickMovementModal';
 import { itemCodeFromDescription } from '@/lib/itemCode';
@@ -16,7 +16,12 @@ import {
   parseQty,
   movementReasonOf,
   MOVEMENT_REASON_LABEL,
+  MOVEMENT_DOCUMENT_MAX,
+  MOVEMENT_NOTE_MAX,
+  newBatchId,
+  receiptNumber,
 } from '@/lib/movements';
+import { openPrintable, buildReceiptHtml, loadCompanyInfo } from '@/lib/printDocs';
 import { fetchAllTenantItems, isLikelyMissingColumn } from '@/lib/tenantItems';
 import { downloadInventoryImportTemplate } from '@/lib/inventoryImportTemplate';
 import { downloadInventoryWorkbookFromTemplate } from '@/lib/inventoryExportTemplate';
@@ -93,6 +98,8 @@ interface Product {
   tag?: string | null;
   calibration_due_date?: string | null;
   expiration_date?: string | null;
+  /** Nº do Certificado de Aprovação (EPI). */
+  ca_number?: string | null;
   quantity_current: number;
   quantity_min: number;
   unit: string;
@@ -119,6 +126,8 @@ interface ItemMovement {
   type: 'IN' | 'OUT' | string;
   reason?: string | null;
   tag?: string | null;
+  note?: string | null;
+  document?: string | null;
   employee_id?: string | null;
   work_site_id?: string | null;
   quantity: number;
@@ -154,6 +163,7 @@ const emptyItemForm = () => ({
   tag: '',
   calibration_due_date: '',
   expiration_date: '',
+  ca_number: '',
 });
 
 function InventoryContent() {
@@ -204,6 +214,10 @@ function InventoryContent() {
   const [cartPickItemId, setCartPickItemId] = useState('');
   const [cartPickQty, setCartPickQty] = useState(1);
   const [cartPickTag, setCartPickTag] = useState('');
+  const [cartDocument, setCartDocument] = useState('');
+  const [cartNote, setCartNote] = useState('');
+  /** Retirada recém-gravada: mostra a confirmação com o botão de recibo. */
+  const [lastReceipt, setLastReceipt] = useState<{ batchId: string; lines: number; destination: string } | null>(null);
   const hasBootstrappedRef = useRef(false);
   const productsReqIdRef = useRef(0);
   const loadMoreAnchorRef = useRef<HTMLDivElement | null>(null);
@@ -654,6 +668,7 @@ function InventoryContent() {
       expiration_date: formData.expiration_date || null,
       quantity_min: parseQty(formData.quantity_min),
       unit: formData.unit,
+      ca_number: formData.ca_number.trim() || null,
       code: itemCodeFromDescription(descNorm),
     };
     const tagVal = formData.tag.trim() || null;
@@ -738,6 +753,7 @@ function InventoryContent() {
       quantity_min: parseQty(formData.quantity_min),
       unit: formData.unit,
       tag: formData.tag.trim() || null,
+      ca_number: formData.ca_number.trim() || null,
       code,
       user_id: user.id,
     };
@@ -1088,13 +1104,28 @@ function InventoryContent() {
       return;
     }
 
+    if (cartDocument.trim().length > MOVEMENT_DOCUMENT_MAX || cartNote.trim().length > MOVEMENT_NOTE_MAX) {
+      alert(`Documento até ${MOVEMENT_DOCUMENT_MAX} caracteres e observação até ${MOVEMENT_NOTE_MAX}.`);
+      setIsSubmitting(false);
+      return;
+    }
+
+    // Todas as linhas desta retirada compartilham o mesmo lote = um recibo.
+    const batchId = newBatchId();
+    const toSite = cartDestination === 'site';
+    const destination = toSite
+      ? (() => {
+          const s = workSites.find((w) => w.id === cartWorkSiteId);
+          return s ? `${s.kind === 'sede' ? 'Sede' : 'Canteiro'}: ${s.name}` : 'local';
+        })()
+      : formatEmployeeName(employees.find((e) => e.id === cartEmployeeId)?.full_name || 'colaborador');
+
     for (let i = 0; i < cart.length; i++) {
       const line = cart[i];
       const currentItem = products.find((p) => p.id === line.itemId);
       const isConsumableNow = currentItem ? Boolean(currentItem.consumable) : line.consumable;
       // Cada linha é gravada numa única transação (histórico + carteira/local + estoque).
       // Envio para canteiro/sede não baixa o almoxarifado — só aumenta o saldo no local.
-      const toSite = cartDestination === 'site';
       const res = await registerMovement(supabase, {
         item_id: line.itemId,
         employee_id: cartDestination === 'employee' ? cartEmployeeId : null,
@@ -1105,9 +1136,15 @@ function InventoryContent() {
         stock_delta: toSite ? 0 : -line.quantity,
         possession_delta: !toSite && !isConsumableNow ? line.quantity : 0,
         site_delta: toSite ? line.quantity : 0,
+        document: cartDocument,
+        note: cartNote,
+        batch_id: batchId,
       });
       if (!res.ok) {
-        const done = i > 0 ? ` As ${i} linha(s) anteriores já foram gravadas e saíram do carrinho.` : '';
+        const done =
+          i > 0
+            ? ` As ${i} linha(s) anteriores já foram gravadas e saíram do carrinho (recibo ${receiptNumber(batchId)} no Histórico).`
+            : '';
         alert(`Erro na linha ${i + 1} (${line.description}): ${res.message}${done}`);
         setCart((prev) => prev.slice(i));
         setIsSubmitting(false);
@@ -1116,13 +1153,26 @@ function InventoryContent() {
       }
     }
 
+    setLastReceipt({ batchId, lines: cart.length, destination });
     setCart([]);
     setCartPickItemId('');
     setCartPickQty(1);
     setCartPickTag('');
-    setIsCartOpen(false);
+    setCartDocument('');
+    setCartNote('');
     setIsSubmitting(false);
     await fetchProducts();
+  };
+
+  const closeCart = () => {
+    setIsCartOpen(false);
+    setLastReceipt(null);
+  };
+
+  const printReceipt = (batchId: string) => {
+    void openPrintable(`Recibo ${receiptNumber(batchId)}`, () =>
+      buildReceiptHtml(supabase, { batchId }, loadCompanyInfo())
+    );
   };
 
   return (
@@ -1786,6 +1836,7 @@ function InventoryContent() {
                                 tag: p.tag ?? '',
                                 calibration_due_date: p.calibration_due_date?.slice(0, 10) ?? '',
                                 expiration_date: p.expiration_date?.slice(0, 10) ?? '',
+                                ca_number: p.ca_number ?? '',
                               });
                             }}
                             className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-blue-500"
@@ -2014,6 +2065,7 @@ function InventoryContent() {
                           tag: p.tag ?? '',
                           calibration_due_date: p.calibration_due_date?.slice(0, 10) ?? '',
                           expiration_date: p.expiration_date?.slice(0, 10) ?? '',
+                          ca_number: p.ca_number ?? '',
                         });
                       }}
                       className="min-h-[48px] flex items-center justify-center gap-2 rounded-xl bg-slate-50 text-blue-700 border border-slate-200 font-bold text-sm"
@@ -2097,6 +2149,13 @@ function InventoryContent() {
                             <span className="ml-2 text-[10px] font-mono text-slate-400">TAG {move.tag}</span>
                           ) : null}
                         </p>
+                        {move.document || move.note ? (
+                          <p className="text-[11px] text-slate-500 mt-1">
+                            {move.document ? <span className="font-bold">Doc. {move.document}</span> : null}
+                            {move.document && move.note ? ' · ' : null}
+                            {move.note}
+                          </p>
+                        ) : null}
                       </div>
                     </div>
                     );
@@ -2256,6 +2315,25 @@ function InventoryContent() {
                 </p>
               </div>
 
+              {(formData.category.trim().toUpperCase() === 'EPI' || formData.ca_number.trim() !== '') && (
+                <div className="space-y-1">
+                  <label className="text-xs font-bold uppercase text-slate-400">Nº do CA (Certificado de Aprovação)</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={20}
+                    placeholder="Ex.: 12345"
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none text-sm font-mono"
+                    value={formData.ca_number}
+                    onChange={(e) => setFormData({ ...formData, ca_number: e.target.value })}
+                  />
+                  <p className="text-[10px] text-slate-400 font-bold leading-relaxed">
+                    Sai no recibo e na ficha de EPI. Cada entrega guarda o CA do momento, então trocar aqui não altera
+                    entregas antigas.
+                  </p>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-xs font-bold uppercase text-slate-400">Próxima aferição</label>
@@ -2354,13 +2432,55 @@ function InventoryContent() {
               </div>
               <button
                 type="button"
-                onClick={() => setIsCartOpen(false)}
+                onClick={closeCart}
                 className="p-2 hover:bg-slate-200 rounded-full"
               >
                 <X size={20} />
               </button>
             </div>
 
+            {lastReceipt ? (
+              <div className="p-8 text-center space-y-4">
+                <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto text-green-600">
+                  <ShoppingCart size={28} />
+                </div>
+                <div>
+                  <h4 className="text-lg font-bold text-primary">Retirada registrada</h4>
+                  <p className="text-sm text-slate-500 mt-1">
+                    {lastReceipt.lines} item(ns) para <span className="font-bold">{lastReceipt.destination}</span> · recibo nº{' '}
+                    <span className="font-mono font-bold">{receiptNumber(lastReceipt.batchId)}</span>
+                  </p>
+                </div>
+                <div className="flex flex-col sm:flex-row gap-2 justify-center pt-2">
+                  <button
+                    type="button"
+                    onClick={() => printReceipt(lastReceipt.batchId)}
+                    className="px-5 py-3 bg-primary text-white rounded-xl font-bold flex items-center justify-center gap-2"
+                  >
+                    <Printer size={18} />
+                    Imprimir recibo
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLastReceipt(null)}
+                    className="px-5 py-3 border border-slate-200 rounded-xl font-bold text-slate-600 hover:bg-slate-50"
+                  >
+                    Nova retirada
+                  </button>
+                  <button
+                    type="button"
+                    onClick={closeCart}
+                    className="px-5 py-3 border border-slate-200 rounded-xl font-bold text-slate-500 hover:bg-slate-50"
+                  >
+                    Fechar
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  O recibo também pode ser impresso depois, pelo Histórico. Dados da empresa no recibo: Colaboradores → Fichas.
+                </p>
+              </div>
+            ) : (
+            <>
             <div className="p-6 space-y-4 overflow-y-auto">
               <div className="space-y-3">
                 <label className="text-xs font-bold uppercase text-slate-400">Destino da saída</label>
@@ -2437,6 +2557,32 @@ function InventoryContent() {
                       </div>
                     </div>
                   )}
+                  <div>
+                    <label className="text-xs font-bold uppercase text-slate-400 mb-1 block">
+                      Documento <span className="normal-case font-medium">(requisição, OS, NF — opcional)</span>
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={MOVEMENT_DOCUMENT_MAX}
+                      placeholder="Ex.: REQ 0458"
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none font-medium"
+                      value={cartDocument}
+                      onChange={(e) => setCartDocument(e.target.value)}
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="text-xs font-bold uppercase text-slate-400 mb-1 block">
+                      Observação <span className="normal-case font-medium">(opcional, sai no recibo)</span>
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={MOVEMENT_NOTE_MAX}
+                      placeholder="Ex.: troca por desgaste, frente de serviço 3…"
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none font-medium"
+                      value={cartNote}
+                      onChange={(e) => setCartNote(e.target.value)}
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -2583,6 +2729,8 @@ function InventoryContent() {
                 </button>
               </div>
             </div>
+            </>
+            )}
           </div>
         </div>
       )}

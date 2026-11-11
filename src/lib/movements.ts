@@ -73,11 +73,36 @@ export type RegisterMovementInput = {
   site_delta?: number;
   /** Se true, carteira insuficiente é zerada em vez de dar erro. */
   possession_clamp?: boolean;
+  /** Observação livre (até 500 caracteres). */
+  note?: string | null;
+  /** Documento de referência: requisição, OS, NF (até 120 caracteres). */
+  document?: string | null;
+  /** Agrupa as linhas de uma mesma retirada (um recibo). */
+  batch_id?: string | null;
 };
 
 export type RegisterMovementResult =
-  | { ok: true; quantity_current: number | null }
+  | { ok: true; quantity_current: number | null; movement_id: string | null }
   | { ok: false; message: string };
+
+/** Limites dos campos de texto da movimentação (iguais aos do banco). */
+export const MOVEMENT_NOTE_MAX = 500;
+export const MOVEMENT_DOCUMENT_MAX = 120;
+
+/** Identificador novo para agrupar linhas de uma retirada. */
+export function newBatchId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  // Navegadores antigos: UUID v4 a partir de Math.random (suficiente para agrupar linhas).
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
+
+/** Número curto do recibo (8 primeiros caracteres do lote, em maiúsculas). */
+export function receiptNumber(id: string): string {
+  return id.replace(/-/g, '').slice(0, 8).toUpperCase();
+}
 
 /**
  * Registra movimentação + saldo do almoxarifado + carteira + saldo no local numa ÚNICA transação
@@ -100,6 +125,9 @@ export async function registerMovement(
     p_site_delta: input.site_delta ?? 0,
     p_possession_clamp: input.possession_clamp ?? false,
     p_reason: input.reason ?? null,
+    p_note: input.note?.trim() || null,
+    p_document: input.document?.trim() || null,
+    p_batch_id: input.batch_id ?? null,
   });
 
   if (error) {
@@ -114,7 +142,12 @@ export async function registerMovement(
     return { ok: false, message: msg || 'Erro ao registrar movimentação.' };
   }
 
-  const qc = (data as { quantity_current?: unknown } | null)?.quantity_current;
-  return { ok: true, quantity_current: qc == null ? null : Number(qc) };
+  const out = data as { quantity_current?: unknown; movement_id?: unknown } | null;
+  const qc = out?.quantity_current;
+  return {
+    ok: true,
+    quantity_current: qc == null ? null : Number(qc),
+    movement_id: out?.movement_id ? String(out.movement_id) : null,
+  };
 }
 

@@ -11,8 +11,10 @@ import {
   movementReasonOf,
   MOVEMENT_REASONS,
   MOVEMENT_REASON_LABEL,
+  receiptNumber,
   type MovementReason,
 } from '@/lib/movements';
+import { openPrintable, buildReceiptHtml, loadCompanyInfo } from '@/lib/printDocs';
 import {
   History,
   Search,
@@ -23,6 +25,7 @@ import {
   Calendar,
   Loader2,
   Package,
+  Printer,
 } from 'lucide-react';
 
 interface Movement {
@@ -32,6 +35,10 @@ interface Movement {
   type: string;
   reason?: string | null;
   tag?: string | null;
+  note?: string | null;
+  document?: string | null;
+  batch_id?: string | null;
+  ca_number?: string | null;
   employee_id?: string | null;
   work_site_id?: string | null;
   items: {
@@ -114,7 +121,7 @@ export default function HistoryPage() {
       let q = supabase
         .from('movements')
         .select(
-          'id, created_at, quantity, type, reason, tag, employee_id, work_site_id, items(description, unit), employees(full_name), work_sites(name, kind)'
+          'id, created_at, quantity, type, reason, tag, note, document, batch_id, ca_number, employee_id, work_site_id, items(description, unit), employees(full_name), work_sites(name, kind)'
         )
         .eq('performed_by', user.id)
         .order('created_at', { ascending: false })
@@ -151,14 +158,26 @@ export default function HistoryPage() {
       const emp = normalizeSearchText(m.employees?.full_name || '');
       const site = normalizeSearchText(m.work_sites?.name || '');
       const tag = normalizeSearchText(m.tag || '');
+      const extra = normalizeSearchText(
+        `${m.document || ''} ${m.note || ''} ${m.batch_id ? receiptNumber(m.batch_id) : ''}`
+      );
       return (
         item.includes(searchLower) ||
         emp.includes(searchLower) ||
         site.includes(searchLower) ||
-        tag.includes(searchLower)
+        tag.includes(searchLower) ||
+        extra.includes(searchLower)
       );
     });
   }, [movements, searchLower]);
+
+  /** Recibo: a retirada inteira (lote) ou só esta linha, se for antiga/sem lote. */
+  const printReceipt = (m: Movement) => {
+    const number = receiptNumber(m.batch_id || m.id);
+    void openPrintable(`Recibo ${number}`, () =>
+      buildReceiptHtml(supabase, m.batch_id ? { batchId: m.batch_id } : { movementId: m.id }, loadCompanyInfo())
+    );
+  };
 
   const visibleMovements = filteredMovements.slice(0, renderLimit);
 
@@ -169,7 +188,20 @@ export default function HistoryPage() {
   };
 
   const downloadCSV = () => {
-    const headers = ['Data', 'Motivo', 'Direção', 'Material', 'Colaborador / local', 'Quantidade', 'Unidade', 'TAG'];
+    const headers = [
+      'Data',
+      'Motivo',
+      'Direção',
+      'Material',
+      'Colaborador / local',
+      'Quantidade',
+      'Unidade',
+      'TAG',
+      'Nº CA',
+      'Documento',
+      'Observação',
+      'Recibo',
+    ];
     const rows = filteredMovements.map((m) => [
       new Date(m.created_at).toLocaleString('pt-BR'),
       MOVEMENT_REASON_LABEL[movementReasonOf(m)],
@@ -179,6 +211,10 @@ export default function HistoryPage() {
       formatQty(m.quantity),
       m.items?.unit,
       m.tag || '',
+      m.ca_number || '',
+      m.document || '',
+      m.note || '',
+      m.employee_id || m.work_site_id ? receiptNumber(m.batch_id || m.id) : '',
     ]);
 
     // ";" e BOM: abre certo no Excel em português (vírgula é separador decimal).
@@ -222,7 +258,7 @@ export default function HistoryPage() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
             <input
               type="text"
-              placeholder="Buscar por material, colaborador, local ou TAG..."
+              placeholder="Buscar por material, colaborador, local, TAG, documento ou nº do recibo..."
               className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-secondary/50 outline-none transition-all"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -307,19 +343,20 @@ export default function HistoryPage() {
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Material</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Colaborador / local</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Qtd.</th>
+                <th className="px-4 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Recibo</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {loading ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-12 text-center text-slate-400">
+                  <td colSpan={6} className="px-6 py-12 text-center text-slate-400">
                     <Loader2 className="animate-spin inline mr-2 text-secondary" size={20} />
                     Carregando histórico...
                   </td>
                 </tr>
               ) : filteredMovements.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-12 text-center text-slate-300 italic font-medium">
+                  <td colSpan={6} className="px-6 py-12 text-center text-slate-300 italic font-medium">
                     Nenhuma movimentação encontrada com estes filtros.
                   </td>
                 </tr>
@@ -359,6 +396,16 @@ export default function HistoryPage() {
                             {move.tag && reason !== 'descarte' ? (
                               <span className="text-[10px] font-mono text-slate-400">TAG {move.tag}</span>
                             ) : null}
+                            {move.ca_number ? (
+                              <span className="text-[10px] font-mono text-slate-400">CA {move.ca_number}</span>
+                            ) : null}
+                            {move.document || move.note ? (
+                              <span className="text-[11px] text-slate-500 max-w-xs">
+                                {move.document ? <span className="font-bold">Doc. {move.document}</span> : null}
+                                {move.document && move.note ? ' · ' : null}
+                                {move.note}
+                              </span>
+                            ) : null}
                           </div>
                         </div>
                       </td>
@@ -376,6 +423,21 @@ export default function HistoryPage() {
                           {formatQty(move.quantity)}
                         </span>
                         <span className="ml-1 text-[10px] font-bold text-slate-400 lowercase">{move.items?.unit}</span>
+                      </td>
+                      <td className="px-4 py-4 text-center whitespace-nowrap">
+                        {move.employee_id || move.work_site_id ? (
+                          <button
+                            type="button"
+                            onClick={() => printReceipt(move)}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-slate-200 text-[11px] font-bold text-slate-600 hover:bg-white hover:text-primary"
+                            title={move.batch_id ? 'Recibo da retirada inteira' : 'Recibo desta movimentação'}
+                          >
+                            <Printer size={12} />
+                            <span className="font-mono">{receiptNumber(move.batch_id || move.id)}</span>
+                          </button>
+                        ) : (
+                          <span className="text-slate-300">—</span>
+                        )}
                       </td>
                     </tr>
                   );

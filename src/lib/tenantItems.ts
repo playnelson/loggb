@@ -7,7 +7,7 @@ const SITE_POSSESSION_SELECT =
   'site_possession (quantity, site_id, work_sites (id, name, kind))';
 
 export const ITEMS_SELECT_WITHOUT_TAG =
-  `id, code, description, category, location, consumable, unique_item, is_rented, calibration_due_date, expiration_date, quantity_current, quantity_min, unit, updated_at, archived_at, user_id, ${SITE_POSSESSION_SELECT}, possession (id, quantity, employee_id, employees (id, full_name))`;
+  `id, code, description, category, location, consumable, unique_item, is_rented, calibration_due_date, expiration_date, quantity_current, quantity_min, unit, ca_number, updated_at, archived_at, user_id, ${SITE_POSSESSION_SELECT}, possession (id, quantity, employee_id, employees (id, full_name))`;
 
 export const ITEMS_SELECT_WITH_TAG = ITEMS_SELECT_WITHOUT_TAG.replace(
   'unique_item,',

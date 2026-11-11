@@ -4,18 +4,20 @@ import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { formatProductLabelDisplay } from '@/lib/productDisplayText';
 import { formatEmployeeName } from '@/lib/employeeName';
-import { registerMovement } from '@/lib/movements';
-import { 
-  X, 
-  ArrowUpRight, 
-  ArrowDownLeft, 
-  Package, 
-  User, 
-  Loader2, 
+import { registerMovement, receiptNumber, MOVEMENT_DOCUMENT_MAX, MOVEMENT_NOTE_MAX } from '@/lib/movements';
+import { openPrintable, buildReceiptHtml, loadCompanyInfo } from '@/lib/printDocs';
+import {
+  X,
+  ArrowUpRight,
+  ArrowDownLeft,
+  Package,
+  User,
+  Loader2,
   CheckCircle2,
   AlertCircle,
   Tag,
-  MapPin
+  MapPin,
+  Printer
 } from 'lucide-react';
 
 type PossessionRow = {
@@ -97,6 +99,10 @@ export default function QuickMovementModal({
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [moveDocument, setMoveDocument] = useState('');
+  const [note, setNote] = useState('');
+  /** Movimentação gravada com colaborador/local: permite imprimir o recibo antes de fechar. */
+  const [savedMovementId, setSavedMovementId] = useState<string | null>(null);
 
   const fetchEmployees = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -142,6 +148,9 @@ export default function QuickMovementModal({
       setSelectedSiteId('');
       setSuccess(false);
       setError(null);
+      setMoveDocument('');
+      setNote('');
+      setSavedMovementId(null);
       void fetchEmployees();
       void fetchWorkSites();
     }
@@ -336,6 +345,8 @@ export default function QuickMovementModal({
       stock_delta: isSiteCounterparty ? 0 : -signed,
       possession_delta: !item.consumable && employeeForMove ? signed : 0,
       site_delta: isSiteCounterparty ? signed : 0,
+      document: moveDocument,
+      note,
     });
     if (!res.ok) {
       setError(res.message);
@@ -345,11 +356,21 @@ export default function QuickMovementModal({
 
     setSuccess(true);
     setLoading(false);
-    
+
+    // Com colaborador ou local há recibo: a janela fica aberta para imprimir.
+    if ((employeeForMove || siteForMove) && res.movement_id) {
+      setSavedMovementId(res.movement_id);
+      return;
+    }
     setTimeout(() => {
       onComplete();
       onClose();
     }, 1500);
+  };
+
+  const finish = () => {
+    onComplete();
+    onClose();
   };
 
   if (!isOpen || !item) return null;
@@ -369,7 +390,7 @@ export default function QuickMovementModal({
               <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">UNIDADE: {item.unit}</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-1 hover:bg-slate-200 rounded-full transition-colors">
+          <button onClick={success ? finish : onClose} className="p-1 hover:bg-slate-200 rounded-full transition-colors">
             <X size={20} />
           </button>
         </div>
@@ -382,6 +403,29 @@ export default function QuickMovementModal({
               </div>
               <h3 className="text-xl font-bold text-primary">Movimentação Concluída!</h3>
               <p className="text-slate-500">O estoque foi atualizado com sucesso.</p>
+              {savedMovementId && (
+                <div className="flex flex-col sm:flex-row gap-2 justify-center pt-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void openPrintable(`Recibo ${receiptNumber(savedMovementId)}`, () =>
+                        buildReceiptHtml(supabase, { movementId: savedMovementId }, loadCompanyInfo())
+                      )
+                    }
+                    className="px-5 py-3 bg-primary text-white rounded-xl font-bold flex items-center justify-center gap-2"
+                  >
+                    <Printer size={18} />
+                    Imprimir recibo
+                  </button>
+                  <button
+                    type="button"
+                    onClick={finish}
+                    className="px-5 py-3 border border-slate-200 rounded-xl font-bold text-slate-600 hover:bg-slate-50"
+                  >
+                    Fechar
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             <>
@@ -567,6 +611,31 @@ export default function QuickMovementModal({
                     <span className="font-bold text-primary text-lg">{item.quantity_current}</span>
                     <span className="ml-1 text-xs text-slate-400">{item.unit}</span>
                   </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-5 gap-3">
+                <div className="space-y-1 sm:col-span-2">
+                  <label className="text-xs font-bold uppercase text-slate-400">Documento</label>
+                  <input
+                    type="text"
+                    maxLength={MOVEMENT_DOCUMENT_MAX}
+                    placeholder={mode === 'IN' ? 'NF, requisição…' : 'Requisição, OS…'}
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none text-sm"
+                    value={moveDocument}
+                    onChange={(e) => setMoveDocument(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1 sm:col-span-3">
+                  <label className="text-xs font-bold uppercase text-slate-400">Observação</label>
+                  <input
+                    type="text"
+                    maxLength={MOVEMENT_NOTE_MAX}
+                    placeholder="Opcional"
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none text-sm"
+                    value={note}
+                    onChange={(e) => setNote(e.target.value)}
+                  />
                 </div>
               </div>
 

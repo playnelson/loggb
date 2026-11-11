@@ -5,9 +5,10 @@ export const dynamic = 'force-dynamic';
 import { useCallback, useMemo, useRef, useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { formatProductLabelDisplay } from '@/lib/productDisplayText';
-import { registerMovement } from '@/lib/movements';
+import { registerMovement, MOVEMENT_NOTE_MAX } from '@/lib/movements';
+import { openPrintable, buildEpiFichaHtml, loadCompanyInfo, saveCompanyInfo } from '@/lib/printDocs';
 import { formatEmployeeName, normalizeEmployeeNameForSave, normalizeSearchText } from '@/lib/employeeName';
-import { Search, UserPlus, Mail, Phone, ExternalLink, X, FileUp, Filter, Package, AlertCircle, History, RotateCcw, Download, Loader2, ArrowLeft, FileText, Trash2, Pencil } from 'lucide-react';
+import { Search, UserPlus, Mail, Phone, ExternalLink, X, FileUp, Filter, Package, AlertCircle, History, RotateCcw, Download, Loader2, ArrowLeft, FileText, Trash2, Pencil, Printer } from 'lucide-react';
 import ImportSpreadsheet from '@/components/ImportSpreadsheet';
 import {
   downloadFerramentasFichaTxt,
@@ -36,8 +37,6 @@ interface Employee {
   department?: string | null;
   possession?: Possession[];
 }
-
-const EPI_FICHA_STORAGE_KEY = 'loggb_epi_ficha_defaults';
 
 function formatMovementDateBr(iso: string | null | undefined) {
   if (!iso) return '—';
@@ -255,6 +254,9 @@ export default function StaffPage() {
     maxQty: number;
   } | null>(null);
   const [discardQty, setDiscardQty] = useState(0);
+  /** Observação da devolução/descarte em andamento. */
+  const [moveNote, setMoveNote] = useState('');
+  const [fichaSince, setFichaSince] = useState('');
   const walletReqIdRef = useRef(0);
   const [returnItem, setReturnItem] = useState<{employeeId: string, item: Possession} | null>(null);
   const [returnQty, setReturnQty] = useState<number>(0);
@@ -452,40 +454,67 @@ export default function StaffPage() {
   };
 
   const openEpiFichaModal = (employee: Employee) => {
-    let saved: Partial<EpiFichaFormState> = {};
-    if (typeof window !== 'undefined') {
-      try {
-        saved = JSON.parse(localStorage.getItem(EPI_FICHA_STORAGE_KEY) || '{}') as Partial<EpiFichaFormState>;
-      } catch {
-        saved = {};
-      }
-    }
-    const today = new Date().toISOString().slice(0, 10);
+    const saved = loadCompanyInfo();
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     setEpiFichaForm({
-      companyName: typeof saved.companyName === 'string' ? saved.companyName : '',
-      companyCnpj: typeof saved.companyCnpj === 'string' ? saved.companyCnpj : '',
-      branchOrDept:
-        typeof saved.branchOrDept === 'string' && saved.branchOrDept
-          ? saved.branchOrDept
-          : (employee.department || ''),
+      companyName: saved.companyName,
+      companyCnpj: saved.companyCnpj,
+      branchOrDept: saved.branchOrDept || employee.department || '',
       issuedAt: today,
-      responsibleName: typeof saved.responsibleName === 'string' ? saved.responsibleName : '',
+      responsibleName: saved.responsibleName,
     });
+    setFichaSince('');
     setEpiFichaEmployee(employee);
   };
 
+  /** Dados da empresa ficam salvos neste navegador e também saem nos recibos. */
   const persistFichaDefaults = () => {
-    if (typeof window === 'undefined') return;
-    localStorage.setItem(
-      EPI_FICHA_STORAGE_KEY,
-      JSON.stringify({
-        companyName: epiFichaForm.companyName,
-        companyCnpj: epiFichaForm.companyCnpj,
-        branchOrDept: epiFichaForm.branchOrDept,
-        responsibleName: epiFichaForm.responsibleName,
-      })
+    saveCompanyInfo({
+      companyName: epiFichaForm.companyName,
+      companyCnpj: epiFichaForm.companyCnpj,
+      branchOrDept: epiFichaForm.branchOrDept,
+      responsibleName: epiFichaForm.responsibleName,
+    });
+  };
+
+  const handlePrintEpiFicha = () => {
+    if (!epiFichaEmployee) return;
+    if (!epiFichaForm.companyName.trim()) {
+      alert('Informe o nome da empresa (razão social ou nome fantasia).');
+      return;
+    }
+    persistFichaDefaults();
+    const emp = epiFichaEmployee;
+    const company = {
+      companyName: epiFichaForm.companyName,
+      companyCnpj: epiFichaForm.companyCnpj,
+      branchOrDept: epiFichaForm.branchOrDept,
+      responsibleName: epiFichaForm.responsibleName,
+    };
+    void openPrintable(`Ficha de EPI - ${formatEmployeeName(emp.full_name)}`, () =>
+      buildEpiFichaHtml(
+        supabase,
+        { id: emp.id, full_name: emp.full_name, cpf: emp.cpf, role: emp.role, department: emp.department },
+        company,
+        { since: fichaSince || null, issuedAt: epiFichaForm.issuedAt || null }
+      )
     );
   };
+
+  const noteField = (label: string, placeholder: string) => (
+    <div className="space-y-1">
+      <label className="text-xs font-bold uppercase text-slate-400">{label}</label>
+      <input
+        type="text"
+        maxLength={MOVEMENT_NOTE_MAX}
+        placeholder={placeholder}
+        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none text-sm"
+        value={moveNote}
+        onChange={(e) => setMoveNote(e.target.value)}
+      />
+    </div>
+  );
 
   const fichaMetaFromForm = (issuedLabel: string) => ({
     companyName: epiFichaForm.companyName,
@@ -594,6 +623,7 @@ export default function StaffPage() {
       type: 'IN',
       stock_delta: returnQty,
       possession_delta: -returnQty,
+      note: moveNote,
     });
     if (!res.ok) {
       alert(res.message);
@@ -601,6 +631,7 @@ export default function StaffPage() {
       return;
     }
 
+    setMoveNote('');
     setReturnItem(null);
     setIsSubmitting(false);
     fetchEmployees();
@@ -668,6 +699,7 @@ export default function StaffPage() {
       stock_delta: returnQty,
       possession_delta: -returnQty,
       possession_clamp: true,
+      note: moveNote,
     });
     if (!res.ok) {
       alert(res.message);
@@ -675,6 +707,7 @@ export default function StaffPage() {
       return;
     }
 
+    setMoveNote('');
     setWalletReturn(null);
     setIsSubmitting(false);
     if (walletEmployeeId) {
@@ -702,12 +735,14 @@ export default function StaffPage() {
       type: 'IN',
       reason: 'descarte',
       tag: EPI_DISCARD_TAG,
+      note: moveNote,
     });
     if (!mvRes.ok) {
       alert(mvRes.message);
       setIsSubmitting(false);
       return;
     }
+    setMoveNote('');
     setEpiDiscard(null);
     setDiscardQty(0);
     setIsSubmitting(false);
@@ -1261,12 +1296,9 @@ export default function StaffPage() {
             </div>
             <div className="p-6 space-y-4 overflow-y-auto">
               <p className="text-xs text-slate-600 leading-relaxed">
-                Gere uma ficha <span className="font-bold">.xlsx</span> de EPI bem formatada e uma ficha{' '}
-                <span className="font-bold">.txt</span> de ferramentas: com a{' '}
-                <span className="font-bold">carteira de EPI</span> (não consumíveis em posse e consumíveis com saldo em
-                uso) e outro com <span className="font-bold">ferramentas e demais materiais</span> não consumíveis (tudo
-                que não é EPI). Nome, função e CPF vêm do cadastro. Descarte de EPI consumível registra-se no quadro;
-                devolução de consumível ao estoque continua no <span className="font-bold">Almoxarifado</span>.
+                A <span className="font-bold">ficha de EPI (NR-6)</span> traz o termo de responsabilidade e cada entrega,
+                devolução e descarte com data e nº do CA, com espaço para assinatura do colaborador. Imprima ou salve em
+                PDF. Nome, função e CPF vêm do cadastro; os dados da empresa ficam salvos e saem também nos recibos.
               </p>
               <div className="space-y-1">
                 <label className="text-xs font-bold uppercase text-slate-500">Nome da empresa *</label>
@@ -1320,14 +1352,33 @@ export default function StaffPage() {
                   />
                 </div>
               </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold uppercase text-slate-500">
+                  Entregas a partir de <span className="normal-case font-medium">(opcional — vazio = todo o histórico)</span>
+                </label>
+                <input
+                  type="date"
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-secondary/30 text-sm"
+                  value={fichaSince}
+                  onChange={(ev) => setFichaSince(ev.target.value)}
+                />
+              </div>
               <div className="flex flex-col gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={handlePrintEpiFicha}
+                  className="w-full p-3 bg-primary text-white rounded-xl font-bold hover:bg-slate-800 flex items-center justify-center gap-2"
+                >
+                  <Printer size={16} />
+                  Imprimir / PDF — ficha de EPI (NR-6)
+                </button>
                 <button
                   type="button"
                   onClick={() => void handleDownloadEpiExcel()}
                   className="w-full p-3 bg-purple-700 text-white rounded-xl font-bold hover:bg-purple-800 flex items-center justify-center gap-2"
                 >
                   <Download size={16} />
-                  Baixar ficha de EPI (.xlsx)
+                  Baixar EPIs em uso (.xlsx)
                 </button>
                 <button
                   type="button"
@@ -1863,10 +1914,14 @@ export default function StaffPage() {
                         Remove da carteira do colaborador e devolve ao estoque (material não consumível).
                       </div>
                     </div>
+                    {noteField('Observação (opcional)', 'Ex.: devolvido com defeito, fim da obra…')}
                     <div className="flex gap-2 pt-4">
                       <button
                         type="button"
-                        onClick={() => setWalletReturn(null)}
+                        onClick={() => {
+                          setWalletReturn(null);
+                          setMoveNote('');
+                        }}
                         className="flex-1 p-3 border border-slate-200 rounded-xl font-bold text-slate-500 hover:bg-slate-50"
                       >
                         Cancelar
@@ -1920,12 +1975,14 @@ export default function StaffPage() {
                   nem altera o saldo do almoxarifado.
                 </p>
               </div>
+              {noteField('Motivo do descarte (opcional)', 'Ex.: desgaste, rasgou, contaminado…')}
               <div className="flex gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => {
                     setEpiDiscard(null);
                     setDiscardQty(0);
+                    setMoveNote('');
                   }}
                   className="flex-1 p-3 border border-slate-200 rounded-xl font-bold text-slate-500 hover:bg-slate-50"
                 >
@@ -1933,7 +1990,7 @@ export default function StaffPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={isSubmitting || discardQty < 1}
+                  disabled={isSubmitting || discardQty <= 0}
                   className="flex-1 p-3 bg-amber-700 text-white rounded-xl font-bold hover:bg-amber-800 shadow-lg disabled:opacity-50"
                 >
                   {isSubmitting ? '…' : 'Confirmar descarte'}
@@ -1972,10 +2029,14 @@ export default function StaffPage() {
                   <span className="text-sm font-bold text-slate-400">de {returnItem.item.quantity}</span>
                 </div>
               </div>
+              {noteField('Observação (opcional)', 'Ex.: devolvido com defeito, fim da obra…')}
               <div className="flex gap-2 pt-4">
-                <button 
+                <button
                   type="button"
-                  onClick={() => setReturnItem(null)}
+                  onClick={() => {
+                    setReturnItem(null);
+                    setMoveNote('');
+                  }}
                   className="flex-1 p-3 border border-slate-200 rounded-xl font-bold text-slate-500 hover:bg-slate-50"
                 >
                   Cancelar
