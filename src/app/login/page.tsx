@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { useRouter } from 'next/navigation';
 import { Mail, Lock, LogIn, Loader2 } from 'lucide-react';
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -18,12 +17,22 @@ function isLimitExceededMessage(message: string) {
   );
 }
 
+/** Volta para a página pedida antes do login (ex.: item aberto pelo QR). Só caminhos internos. */
+function safeNextPath(): string {
+  try {
+    const next = new URLSearchParams(window.location.search).get('next') || '';
+    if (next.startsWith('/') && !next.startsWith('//') && !next.includes('\\') && !next.startsWith('/login')) return next;
+  } catch {
+    // ignora
+  }
+  return '/';
+}
+
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const router = useRouter();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,7 +51,7 @@ export default function LoginPage() {
     } else {
       // Force a tiny delay for cookies to settle on client before hitting the edge proxy
       setTimeout(() => {
-        window.location.replace('/');
+        window.location.replace(safeNextPath());
       }, 500);
     }
   };

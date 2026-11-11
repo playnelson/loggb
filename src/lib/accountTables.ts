@@ -28,6 +28,8 @@ export const ACCOUNT_TABLES_RESTORE_ORDER: readonly AccountTable[] = [
   { table: 'site_possession', ownerColumn: 'user_id', onConflict: 'site_id,item_id', orderBy: ['site_id', 'item_id'] },
   { table: 'movements', ownerColumn: 'performed_by' },
   { table: 'equipment_rentals', ownerColumn: 'user_id' },
+  { table: 'inventory_counts', ownerColumn: 'user_id' },
+  { table: 'inventory_count_lines', ownerColumn: 'user_id' },
   { table: 'mural_notes', ownerColumn: 'user_id' },
   { table: 'dashboard_reminders', ownerColumn: 'user_id' },
   { table: 'finance_account_templates', ownerColumn: 'user_id' },

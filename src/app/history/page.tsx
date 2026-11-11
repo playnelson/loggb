@@ -65,6 +65,7 @@ const REASON_TONE: Record<MovementReason, string> = {
   descarte: 'bg-orange-100 text-orange-700',
   saldo_inicial: 'bg-blue-100 text-blue-700',
   importacao: 'bg-purple-100 text-purple-700',
+  inventario: 'bg-indigo-100 text-indigo-700',
 };
 
 function isoDay(d: Date): string {

@@ -34,6 +34,9 @@ import {
   ChevronDown,
   ChevronRight,
 } from 'lucide-react';
+import ReceivePoLineModal, { type ReceivePoLine } from '@/components/ReceivePoLineModal';
+import { receivePoItem, type ReceivePoItemResult } from '@/lib/purchaseReceiving';
+import { formatQty } from '@/lib/movements';
 
 interface OrderRow {
   id: string;
@@ -55,6 +58,9 @@ interface OrderRow {
         quantity?: number | null;
         unit?: string | null;
         received_quantity?: number | null;
+        stocked_quantity?: number | null;
+        inventory_item_id?: string | null;
+        stock_skip?: boolean | null;
       }[]
     | null;
 }
@@ -155,6 +161,12 @@ export default function OrdensCompraPage() {
   const [parseConfidence, setParseConfidence] = useState<'high' | 'medium' | 'low'>('high');
   const [busyOrderId, setBusyOrderId] = useState<string | null>(null);
   const [busyItemId, setBusyItemId] = useState<string | null>(null);
+  /** Linha aberta na janela de recebimento (escolha do item do almoxarifado). */
+  const [receiveTarget, setReceiveTarget] = useState<{
+    orderId: string;
+    ocNumber: string | null;
+    line: ReceivePoLine;
+  } | null>(null);
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
 
   const fetchOrders = useCallback(async () => {
@@ -198,7 +210,7 @@ export default function OrdensCompraPage() {
     const withStage = await supabase
       .from('purchase_orders')
       .select(
-        'id, oc_number, title, vendor_name, notes, delivery_deadline, stage, created_at, purchase_order_items!purchase_order_items_purchase_order_id_fkey(id, line_number, delivered, delivered_at, description, quantity, unit)'
+        'id, oc_number, title, vendor_name, notes, delivery_deadline, stage, created_at, purchase_order_items!purchase_order_items_purchase_order_id_fkey(id, line_number, delivered, delivered_at, description, quantity, unit, received_quantity, stocked_quantity, inventory_item_id, stock_skip)'
       )
       .eq('user_id', user.id)
       .order('created_at', { ascending: false });
@@ -216,7 +228,7 @@ export default function OrdensCompraPage() {
       const noStage = await supabase
         .from('purchase_orders')
         .select(
-          'id, oc_number, title, vendor_name, notes, delivery_deadline, created_at, purchase_order_items!purchase_order_items_purchase_order_id_fkey(id, line_number, delivered, delivered_at, description, quantity, unit)'
+          'id, oc_number, title, vendor_name, notes, delivery_deadline, created_at, purchase_order_items!purchase_order_items_purchase_order_id_fkey(id, line_number, delivered, delivered_at, description, quantity, unit, received_quantity, stocked_quantity, inventory_item_id, stock_skip)'
         )
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
@@ -335,7 +347,7 @@ export default function OrdensCompraPage() {
   const deleteOrder = async (row: OrderRow) => {
     if (busyOrderId) return;
     const ok = window.confirm(
-      `Apagar a OC ${row.oc_number || row.title || row.id}? Essa ação não pode ser desfeita.`
+      `Apagar a OC ${row.oc_number || row.title || row.id}? Essa ação não pode ser desfeita. O que já entrou no estoque por esta OC continua no estoque.`
     );
     if (!ok) return;
 
@@ -386,6 +398,9 @@ export default function OrdensCompraPage() {
         delivered: boolean;
         delivered_at: string | null;
         received_quantity: number | null;
+        stocked_quantity: number | null;
+        inventory_item_id: string | null;
+        stock_skip: boolean | null;
       }>
     ) => {
       setOrders((prev) =>
@@ -403,6 +418,36 @@ export default function OrdensCompraPage() {
     []
   );
 
+  const openReceive = (orderId: string, item: NonNullable<OrderRow['purchase_order_items']>[number]) => {
+    const order = orders.find((o) => o.id === orderId);
+    setReceiveTarget({
+      orderId,
+      ocNumber: order?.oc_number ?? null,
+      line: {
+        id: item.id,
+        line_number: Number(item.line_number ?? 0),
+        description: item.description || '',
+        quantity: item.quantity ?? null,
+        unit: item.unit || 'un',
+        received_quantity: item.received_quantity ?? 0,
+        stocked_quantity: item.stocked_quantity ?? 0,
+        inventory_item_id: item.inventory_item_id ?? null,
+        stock_skip: item.stock_skip ?? false,
+      },
+    });
+  };
+
+  const applyReceive = (orderId: string, itemId: string, res: Extract<ReceivePoItemResult, { ok: true }>) => {
+    updateOrderItemInState(orderId, itemId, {
+      received_quantity: res.received_quantity,
+      stocked_quantity: res.stocked_quantity,
+      inventory_item_id: res.inventory_item_id,
+      stock_skip: res.stock_skip,
+      delivered: res.delivered,
+      delivered_at: res.delivered ? new Date().toISOString() : null,
+    });
+  };
+
   const quickToggleDelivered = async (
     orderId: string,
     item: NonNullable<OrderRow['purchase_order_items']>[number]
@@ -411,6 +456,18 @@ export default function OrdensCompraPage() {
     const next = !item.delivered;
     const nowIso = new Date().toISOString();
     const fullQty = item.quantity ?? 0;
+    const devLocal = ORDENS_COMPRA_DEV_LOCAL && typeof window !== 'undefined';
+    // Sem item do almoxarifado ligado: abre a janela para escolher (ou criar) o item e dar entrada.
+    if (!devLocal && next && !item.inventory_item_id && !item.stock_skip) {
+      openReceive(orderId, item);
+      return;
+    }
+    if (!devLocal && !next && item.inventory_item_id && !item.stock_skip && Number(item.stocked_quantity ?? 0) > 0) {
+      const ok = window.confirm(
+        `Desmarcar o recebimento vai RETIRAR ${formatQty(item.stocked_quantity)} ${item.unit || 'un'} do estoque (estorno). Continuar?`
+      );
+      if (!ok) return;
+    }
     setBusyItemId(item.id);
     try {
       if (ORDENS_COMPRA_DEV_LOCAL && typeof window !== 'undefined') {
@@ -431,37 +488,9 @@ export default function OrdensCompraPage() {
         return;
       }
 
-      const withReceived = await supabase
-        .from('purchase_order_items')
-        .update({
-          delivered: next,
-          delivered_at: next ? nowIso : null,
-          received_quantity: next ? fullQty : 0,
-        })
-        .eq('id', item.id);
-
-      let e = withReceived.error;
-      const receivedMissing =
-        !!e && /received_quantity/i.test(`${e.message || ''} ${e.details || ''} ${e.hint || ''}`);
-
-      if (receivedMissing) {
-        const fallback = await supabase
-          .from('purchase_order_items')
-          .update({
-            delivered: next,
-            delivered_at: next ? nowIso : null,
-          })
-          .eq('id', item.id);
-        e = fallback.error;
-      }
-
-      if (e) throw e;
-
-      updateOrderItemInState(orderId, item.id, {
-        delivered: next,
-        delivered_at: next ? nowIso : null,
-        received_quantity: next ? fullQty : 0,
-      });
+      const res = await receivePoItem(supabase, { lineId: item.id, received: next ? fullQty : 0 });
+      if (!res.ok) throw new Error(res.message);
+      applyReceive(orderId, item.id, res);
     } catch (e) {
       alert(`Erro ao atualizar item: ${e instanceof Error ? e.message : 'falha desconhecida'}`);
     } finally {
@@ -474,6 +503,10 @@ export default function OrdensCompraPage() {
     item: NonNullable<OrderRow['purchase_order_items']>[number]
   ) => {
     if (busyItemId || busyOrderId) return;
+    if (!(ORDENS_COMPRA_DEV_LOCAL && typeof window !== 'undefined')) {
+      openReceive(orderId, item);
+      return;
+    }
     const current = item.received_quantity ?? 0;
     const raw = window.prompt(`Quantidade recebida para o item:`, String(current));
     if (raw == null) return;
@@ -508,31 +541,6 @@ export default function OrdensCompraPage() {
         return;
       }
 
-      const withReceived = await supabase
-        .from('purchase_order_items')
-        .update({
-          received_quantity: received,
-          delivered: full,
-          delivered_at: full ? nowIso : null,
-        })
-        .eq('id', item.id);
-
-      if (withReceived.error) {
-        const rawErr = `${withReceived.error.message || ''} ${withReceived.error.details || ''} ${withReceived.error.hint || ''}`;
-        if (/received_quantity/i.test(rawErr)) {
-          alert(
-            'Seu banco ainda não tem a coluna received_quantity para recebimento parcial. Posso te passar o SQL para habilitar.'
-          );
-          return;
-        }
-        throw withReceived.error;
-      }
-
-      updateOrderItemInState(orderId, item.id, {
-        received_quantity: received,
-        delivered: full,
-        delivered_at: full ? nowIso : null,
-      });
     } catch (e) {
       alert(`Erro ao salvar recebimento parcial: ${e instanceof Error ? e.message : 'falha desconhecida'}`);
     } finally {
@@ -678,7 +686,7 @@ export default function OrdensCompraPage() {
         source_filename: sourceFilename,
       };
 
-      let { data: po, error: poErr } = await supabase
+      const { data: po, error: poErr } = await supabase
         .from('purchase_orders')
         .insert([baseRow])
         .select('id')
@@ -1280,6 +1288,18 @@ export default function OrdensCompraPage() {
             </div>
           </div>
         </div>
+      )}
+      {receiveTarget && (
+        <ReceivePoLineModal
+          line={receiveTarget.line}
+          ocNumber={receiveTarget.ocNumber}
+          onClose={() => setReceiveTarget(null)}
+          onDone={(res) => {
+            const t = receiveTarget;
+            setReceiveTarget(null);
+            applyReceive(t.orderId, t.line.id, res);
+          }}
+        />
       )}
     </div>
   );

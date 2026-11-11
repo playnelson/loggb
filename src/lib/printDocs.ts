@@ -481,3 +481,89 @@ Estou ciente de que a recusa injustificada ao uso do EPI fornecido constitui ato
 ${inUseHtml}
 <p class="foot">Registro de fornecimento de EPI conforme NR-6. Gerado pelo LoggB em ${esc(dateTimeBr(new Date()))}.</p>`;
 }
+
+/* ------------------------------------------------------- folha de contagem */
+
+export type CountSheetLine = {
+  description: string;
+  location?: string | null;
+  unit: string;
+  system_qty?: number | null;
+};
+
+/** Folha de contagem para anotar à mão (contagem cega esconde o saldo do sistema). */
+export function buildCountSheetHtml(
+  title: string,
+  lines: CountSheetLine[],
+  company: CompanyInfo,
+  opts: { blind: boolean }
+): string {
+  const sorted = [...lines].sort(
+    (a, b) =>
+      String(a.location || '').localeCompare(String(b.location || ''), 'pt-BR') ||
+      a.description.localeCompare(b.description, 'pt-BR')
+  );
+  const rows = sorted
+    .map(
+      (l, i) =>
+        `<tr><td class="c">${i + 1}</td><td>${esc(formatProductLabelDisplay(l.description))}</td><td>${esc(
+          l.location || '—'
+        )}</td><td class="c">${esc(l.unit || 'un')}</td>${
+          opts.blind ? '' : `<td class="n">${esc(formatQty(l.system_qty ?? 0))}</td>`
+        }<td class="sig"></td><td style="width:120px"></td></tr>`
+    )
+    .join('');
+  return `${companyHeader(company, `Folha de contagem<br><b>${esc(dateBr(new Date()))}</b>`)}
+<h1>${esc(title)}</h1>
+<p class="muted">${sorted.length} item(ns), em ordem de local.${
+    opts.blind ? ' Contagem cega: o saldo do sistema não aparece nesta folha.' : ''
+  } Anote a quantidade encontrada e lance no LoggB em Inventário.</p>
+<table><thead><tr><th class="c">#</th><th>Descrição</th><th>Local</th><th class="c">Un.</th>${
+    opts.blind ? '' : '<th class="n">Sistema</th>'
+  }<th class="sig">Contado</th><th>Obs.</th></tr></thead><tbody>${rows}</tbody></table>
+<div class="signs"><div>Nome legível<small>Conferente</small></div><div>${esc(
+    company.responsibleName.trim() || 'Nome legível'
+  )}<small>Responsável pelo almoxarifado</small></div></div>`;
+}
+
+export type QrLabelItem = {
+  id: string;
+  description: string;
+  tag?: string | null;
+  location?: string | null;
+  unit?: string | null;
+};
+
+/** Link gravado no QR: abre o item direto no almoxarifado (pede login se preciso). */
+export function itemQrUrl(origin: string, itemId: string): string {
+  return `${origin.replace(/\/+$/, '')}/inventory?item=${encodeURIComponent(itemId)}`;
+}
+
+/** Etiquetas com QR code (3 por linha em A4), uma por item. */
+export async function buildQrLabelsHtml(items: QrLabelItem[], origin: string): Promise<string> {
+  const QRCode = (await import('qrcode')).default;
+  const cells: string[] = [];
+  for (const it of items) {
+    const svg = await QRCode.toString(itemQrUrl(origin, it.id), {
+      type: 'svg',
+      margin: 0,
+      errorCorrectionLevel: 'M',
+    });
+    cells.push(`<div class="lbl"><div class="qr">${svg}</div><div class="txt">
+<div class="d">${esc(it.description)}</div>
+${it.tag ? `<div class="t">TAG ${esc(it.tag)}</div>` : ''}
+${it.location ? `<div class="l">${esc(it.location)}</div>` : ''}
+</div></div>`);
+  }
+  return `<style>
+.lbls{display:grid;grid-template-columns:repeat(3,1fr);gap:4mm}
+.lbl{border:1px dashed #94a3b8;border-radius:2mm;padding:3mm;display:flex;gap:3mm;align-items:center;break-inside:avoid;page-break-inside:avoid;min-height:28mm}
+.lbl .qr{width:24mm;height:24mm;flex:none}.lbl .qr svg{width:100%;height:100%}
+.lbl .txt{min-width:0;font-size:9pt;line-height:1.25}
+.lbl .d{font-weight:700;color:#0f172a;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.lbl .t{margin-top:1mm;font-weight:700;font-family:monospace;color:#334155}
+.lbl .l{margin-top:1mm;color:#64748b;font-size:8pt}
+</style>
+<p class="muted">${items.length} etiqueta(s). Recorte na linha tracejada. Ao ler o QR com o celular, o item abre no LoggB.</p>
+<div class="lbls">${cells.join('')}</div>`;
+}

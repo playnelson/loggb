@@ -7,6 +7,15 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { ORDENS_COMPRA_DEV_LOCAL, devLocalOrdersRead, devLocalOrdersWrite } from '@/lib/ordensCompraDevLocal';
+import ReceivePoLineModal from '@/components/ReceivePoLineModal';
+import {
+  receivePoItem,
+  pendingStockQty,
+  loadReceivableItems,
+  exactItemForDescription,
+  type ReceivePoItemResult,
+} from '@/lib/purchaseReceiving';
+import { formatQty, newBatchId } from '@/lib/movements';
 import {
   AlertCircle,
   ArrowLeft,
@@ -67,6 +76,14 @@ interface PoItem {
   received_quantity: number | null;
   delivered: boolean;
   delivered_at: string | null;
+  /** Quanto do recebido já entrou no estoque. */
+  stocked_quantity?: number | null;
+  /** Item do almoxarifado ligado a esta linha. */
+  inventory_item_id?: string | null;
+  /** Linha que não entra no estoque (serviço, frete…). */
+  stock_skip?: boolean | null;
+  /** Descrição do item ligado (só exibição). */
+  inventory_item_label?: string | null;
 }
 
 function formatDateBR(iso: string | null): string {
@@ -102,6 +119,7 @@ export default function OrdemCompraDetailPage() {
     delivery_deadline: '',
   });
   const [draftItems, setDraftItems] = useState<PoItem[]>([]);
+  const [receiveLine, setReceiveLine] = useState<PoItem | null>(null);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -197,7 +215,9 @@ export default function OrdemCompraDetailPage() {
 
     const withReceived = await supabase
       .from('purchase_order_items')
-      .select('id, line_number, description, quantity, unit, received_quantity, delivered, delivered_at')
+      .select(
+        'id, line_number, description, quantity, unit, received_quantity, delivered, delivered_at, stocked_quantity, inventory_item_id, stock_skip, items(description)'
+      )
       .eq('purchase_order_id', id)
       .order('line_number', { ascending: true });
 
@@ -238,6 +258,11 @@ export default function OrdemCompraDetailPage() {
               receivedRaw != null ? receivedRaw : delivered ? qty ?? 0 : 0,
             delivered,
             delivered_at: (r.delivered_at as string | null) ?? null,
+            stocked_quantity: r.stocked_quantity != null ? Number(r.stocked_quantity) : null,
+            inventory_item_id: (r.inventory_item_id as string | null) ?? null,
+            stock_skip: Boolean(r.stock_skip),
+            inventory_item_label:
+              ((Array.isArray(r.items) ? r.items[0] : r.items) as { description?: string } | null)?.description ?? null,
           };
         })
       );
@@ -285,49 +310,59 @@ export default function OrdemCompraDetailPage() {
       return;
     }
 
-    const withReceived = await supabase
-      .from('purchase_order_items')
-      .update({
-        delivered: next,
-        delivered_at: next ? nowIso : null,
-        received_quantity: next ? fullQty : 0,
-      })
-      .eq('id', item.id);
-
-    let e = withReceived.error;
-    const receivedMissing =
-      !!e && /received_quantity/i.test(`${e.message || ''} ${e.details || ''} ${e.hint || ''}`);
-    if (receivedMissing) {
-      const fallback = await supabase
-        .from('purchase_order_items')
-        .update({
-          delivered: next,
-          delivered_at: next ? nowIso : null,
-        })
-        .eq('id', item.id);
-      e = fallback.error;
-    }
-
-    setBusyId(null);
-    if (e) {
-      alert(`Erro ao atualizar: ${e.message}`);
+    // Marcar como recebido sem item ligado: abre a janela para escolher o item do almoxarifado.
+    if (next && !item.inventory_item_id && !item.stock_skip) {
+      setBusyId(null);
+      setReceiveLine(item);
       return;
     }
+    if (!next && item.inventory_item_id && !item.stock_skip && Number(item.stocked_quantity ?? 0) > 0) {
+      const ok = window.confirm(
+        `Desmarcar o recebimento vai RETIRAR ${formatQty(item.stocked_quantity)} ${item.unit} do estoque (estorno). Continuar?`
+      );
+      if (!ok) {
+        setBusyId(null);
+        return;
+      }
+    }
+    const res = await receivePoItem(supabase, { lineId: item.id, received: next ? fullQty : 0 });
+    setBusyId(null);
+    if (!res.ok) {
+      alert(`Erro ao atualizar: ${res.message}`);
+      return;
+    }
+    applyReceiveResult(item.id, res);
+  };
+
+  /** Atualiza a linha na tela com o resultado gravado no banco. */
+  const applyReceiveResult = (lineId: string, res: Extract<ReceivePoItemResult, { ok: true }>) => {
+    const nowIso = new Date().toISOString();
     setItems((prev) =>
       prev.map((r) =>
-        r.id === item.id
+        r.id === lineId
           ? {
               ...r,
-              delivered: next,
-              delivered_at: next ? nowIso : null,
-              received_quantity: next ? fullQty : 0,
+              received_quantity: res.received_quantity,
+              stocked_quantity: res.stocked_quantity,
+              inventory_item_id: res.inventory_item_id,
+              stock_skip: res.stock_skip,
+              delivered: res.delivered,
+              delivered_at: res.delivered ? r.delivered_at || nowIso : null,
+              inventory_item_label:
+                res.inventory_item_id && res.inventory_item_id !== r.inventory_item_id ? null : r.inventory_item_label,
             }
           : r
       )
     );
+    // Recarrega para trazer o nome do item ligado.
+    if (res.inventory_item_id) void load();
   };
 
   const promptPartialReceipt = async (item: PoItem) => {
+    if (!(ORDENS_COMPRA_DEV_LOCAL && typeof window !== 'undefined')) {
+      setReceiveLine(item);
+      return;
+    }
     const current = item.received_quantity ?? 0;
     const raw = window.prompt(
       `Quantidade recebida para item ${item.line_number}:`,
@@ -369,39 +404,7 @@ export default function OrdemCompraDetailPage() {
       return;
     }
 
-    const withReceived = await supabase
-      .from('purchase_order_items')
-      .update({
-        received_quantity: received,
-        delivered: full,
-        delivered_at: full ? nowIso : null,
-      })
-      .eq('id', item.id);
-
-    if (withReceived.error) {
-      const rawErr = `${withReceived.error.message || ''} ${withReceived.error.details || ''} ${withReceived.error.hint || ''}`;
-      if (/received_quantity/i.test(rawErr)) {
-        alert(
-          'Seu banco ainda não tem a coluna received_quantity para recebimento parcial. Posso te passar o SQL para habilitar.'
-        );
-        return;
-      }
-      alert(`Erro ao salvar recebimento parcial: ${withReceived.error.message}`);
-      return;
-    }
-
-    setItems((prev) =>
-      prev.map((r) =>
-        r.id === item.id
-          ? {
-              ...r,
-              received_quantity: received,
-              delivered: full,
-              delivered_at: full ? nowIso : null,
-            }
-          : r
-      )
-    );
+    setReceiveLine(item);
   };
 
   const markAllAsDelivered = async () => {
@@ -436,47 +439,47 @@ export default function OrdemCompraDetailPage() {
       return;
     }
 
-    let e: { message?: string; details?: string; hint?: string } | null = null;
-    for (const r of items.filter((x) => !x.delivered)) {
-      const one = await supabase
-        .from('purchase_order_items')
-        .update({
-          delivered: true,
-          delivered_at: nowIso,
-          received_quantity: r.quantity ?? 0,
-        })
-        .eq('id', r.id);
-      if (one.error) {
-        e = one.error;
-        const rawErr = `${one.error.message || ''} ${one.error.details || ''} ${one.error.hint || ''}`;
-        if (/received_quantity/i.test(rawErr)) {
-          const fallback = await supabase
-            .from('purchase_order_items')
-            .update({
-              delivered: true,
-              delivered_at: nowIso,
-            })
-            .eq('id', r.id);
-          if (fallback.error) e = fallback.error;
-        }
+    // Linhas sem item ligado: liga automaticamente se existir item com a MESMA descrição;
+    // as demais ficam recebidas com entrada no estoque pendente.
+    const { data: { user } } = await supabase.auth.getUser();
+    let catalog: Awaited<ReturnType<typeof loadReceivableItems>> = [];
+    if (user) {
+      try {
+        catalog = await loadReceivableItems(supabase, user.id);
+      } catch {
+        catalog = [];
       }
-      if (e) break;
+    }
+    const batchId = newBatchId();
+    let stockedLines = 0;
+    let pendingLines = 0;
+    let failure: string | null = null;
+    for (const r of items.filter((x) => !x.delivered)) {
+      const auto = !r.inventory_item_id && !r.stock_skip ? exactItemForDescription(r.description, catalog) : null;
+      const res = await receivePoItem(supabase, {
+        lineId: r.id,
+        received: Math.max(Number(r.quantity ?? 0), Number(r.received_quantity ?? 0)),
+        itemId: auto?.id ?? null,
+        batchId,
+      });
+      if (!res.ok) {
+        failure = `Linha ${r.line_number} (${r.description}): ${res.message}`;
+        break;
+      }
+      if (res.stock_delta !== 0) stockedLines += 1;
+      if (!res.inventory_item_id && !res.stock_skip) pendingLines += 1;
     }
 
     setBulkBusy(false);
-    if (e) {
-      alert(`Erro ao marcar todos: ${e.message}`);
-      return;
-    }
+    await load();
+    const summary =
+      `${stockedLines} linha(s) deram entrada no estoque.` +
+      (pendingLines > 0
+        ? ` ${pendingLines} linha(s) sem item do almoxarifado ficaram com entrada pendente — use "Receber" nelas para ligar o item.`
+        : '');
+    alert(failure ? `Parou com erro na ${failure}
 
-    setItems((prev) =>
-      prev.map((r) => ({
-        ...r,
-        delivered: true,
-        delivered_at: r.delivered_at || nowIso,
-        received_quantity: r.quantity ?? 0,
-      }))
-    );
+${summary}` : summary);
   };
 
   const startEdit = () => {
@@ -621,6 +624,11 @@ export default function OrdemCompraDetailPage() {
 
       if (normalizedItems.length > 0) {
         const payload = normalizedItems.map((it) => ({
+          // Mesmo id e campos de estoque: editar a OC não pode desligar o item nem "esquecer" o que já entrou.
+          id: it.id,
+          inventory_item_id: it.inventory_item_id ?? null,
+          stocked_quantity: it.stocked_quantity ?? 0,
+          stock_skip: Boolean(it.stock_skip),
           purchase_order_id: id,
           line_number: it.line_number,
           description: it.description,
@@ -706,7 +714,8 @@ export default function OrdemCompraDetailPage() {
         <div className="flex items-start gap-2">
           <AlertCircle size={14} className="mt-0.5 shrink-0" />
           <p>
-            <strong>Recurso em construção:</strong> o módulo de ordens de compra ainda está em evolução e pode sofrer ajustes.
+            Ao receber um item ligado ao almoxarifado, a quantidade <strong>entra no estoque</strong> automaticamente
+            (motivo Entrada, documento OC). Recebimentos feitos antes desta versão não são lançados de novo.
           </p>
         </div>
       </div>
@@ -910,15 +919,32 @@ export default function OrdemCompraDetailPage() {
                           </span>
                         )}
                       </div>
+                      <div className="mt-1 flex flex-wrap gap-1.5">
+                        {it.stock_skip ? (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">
+                            Fora do estoque
+                          </span>
+                        ) : it.inventory_item_id ? (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                            Estoque: {it.inventory_item_label || 'item ligado'}
+                            {Number(it.stocked_quantity ?? 0) > 0 ? ` · entrou ${formatQty(it.stocked_quantity)}` : ''}
+                          </span>
+                        ) : null}
+                        {pendingStockQty(it) > 0 ? (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                            Entrada pendente: {formatQty(pendingStockQty(it))} {it.unit}
+                          </span>
+                        ) : null}
+                      </div>
                     </div>
                     <button
                       type="button"
                       disabled={bulkBusy || busyId === it.id}
                       onClick={() => void promptPartialReceipt(it)}
                       className="text-[11px] font-bold px-2 py-1 rounded border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                      title="Registrar recebimento parcial"
+                      title="Registrar recebimento (total ou parcial) e entrada no estoque"
                     >
-                      Parcial
+                      Receber
                     </button>
                   </li>
                 ))}
@@ -993,6 +1019,18 @@ export default function OrdemCompraDetailPage() {
               </div>
             )}
           </div>
+          {receiveLine && (
+            <ReceivePoLineModal
+              line={receiveLine}
+              ocNumber={header.oc_number}
+              onClose={() => setReceiveLine(null)}
+              onDone={(res) => {
+                const lineId = receiveLine.id;
+                setReceiveLine(null);
+                applyReceiveResult(lineId, res);
+              }}
+            />
+          )}
         </>
       ) : null}
     </div>

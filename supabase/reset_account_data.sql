@@ -26,25 +26,27 @@ begin
   -- (purchase_order_items sai junto com purchase_orders via ON DELETE CASCADE)
   for t in
     select * from (values
-      (1,  'purchase_orders',           'user_id'),       -- antes de employees (FK RESTRICT) e kanban_columns
-      (2,  'purchase_requests',         'user_id'),
-      (3,  'equipment_rentals',         'user_id'),
-      (4,  'rental_suppliers',          'user_id'),
-      (5,  'movements',                 'performed_by'),  -- antes de items/employees (FK sem cascade)
-      (6,  'site_possession',           'user_id'),
-      (7,  'possession',                'user_id'),
-      (8,  'work_sites',                'user_id'),
-      (9,  'items',                     'user_id'),
-      (10, 'employees',                 'user_id'),
-      (11, 'item_categories',           'user_id'),
-      (12, 'kanban_columns',            'user_id'),
-      (13, 'mural_notes',               'user_id'),
-      (14, 'dashboard_reminders',       'user_id'),
-      (15, 'finance_expenses',          'user_id'),
-      (16, 'finance_fuel_logs',         'user_id'),
-      (17, 'finance_assets',            'user_id'),
-      (18, 'finance_accounts',          'user_id'),
-      (19, 'finance_account_templates', 'user_id')
+      (1,  'purchase_orders',         'user_id'),             -- antes de employees (FK RESTRICT) e kanban_columns
+      (2,  'purchase_requests',       'user_id'),
+      (3,  'equipment_rentals',       'user_id'),
+      (4,  'rental_suppliers',        'user_id'),
+      (5,  'inventory_count_lines',   'user_id'),             -- contagens antes de items
+      (6,  'inventory_counts',        'user_id'),
+      (7,  'movements',               'performed_by'),        -- antes de items/employees (FK sem cascade)
+      (8,  'site_possession',         'user_id'),
+      (9,  'possession',              'user_id'),
+      (10, 'work_sites',              'user_id'),
+      (11, 'items',                   'user_id'),
+      (12, 'employees',               'user_id'),
+      (13, 'item_categories',         'user_id'),
+      (14, 'kanban_columns',          'user_id'),
+      (15, 'mural_notes',             'user_id'),
+      (16, 'dashboard_reminders',     'user_id'),
+      (17, 'finance_expenses',        'user_id'),
+      (18, 'finance_fuel_logs',       'user_id'),
+      (19, 'finance_assets',          'user_id'),
+      (20, 'finance_accounts',        'user_id'),
+      (21, 'finance_account_templates','user_id')
     ) as x(ord, tbl, owner_col)
     order by ord
   loop

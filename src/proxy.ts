@@ -75,7 +75,10 @@ export async function proxy(request: NextRequest) {
   const isLoginPage = request.nextUrl.pathname.startsWith('/login');
 
   if (!user && !isLoginPage) {
-    return NextResponse.redirect(new URL('/login', request.url));
+    const loginUrl = new URL('/login', request.url);
+    const back = `${request.nextUrl.pathname}${request.nextUrl.search}`;
+    if (back && back !== '/') loginUrl.searchParams.set('next', back);
+    return NextResponse.redirect(loginUrl);
   }
 
   if (user && isLoginPage) {

@@ -4,9 +4,10 @@ export const dynamic = 'force-dynamic';
 
 import { useState, useEffect, Suspense, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { formatProductLabelDisplay, normalizeProductLabelForSave } from '@/lib/productDisplayText';
-import { Plus, AlertCircle, X, FileUp, Users, History, Edit, Trash2, Loader2, ArrowUpRight, ArrowDownLeft, Tags, ShoppingCart, User, Minus, Tag, Download, MapPin, FilterX, Printer } from 'lucide-react';
+import { Plus, AlertCircle, X, FileUp, Users, History, Edit, Trash2, Loader2, ArrowUpRight, ArrowDownLeft, Tags, ShoppingCart, User, Minus, Tag, Download, MapPin, FilterX, Printer, QrCode } from 'lucide-react';
 import ImportSpreadsheet from '@/components/ImportSpreadsheet';
 import QuickMovementModal from '@/components/QuickMovementModal';
 import { itemCodeFromDescription } from '@/lib/itemCode';
@@ -21,7 +22,7 @@ import {
   newBatchId,
   receiptNumber,
 } from '@/lib/movements';
-import { openPrintable, buildReceiptHtml, loadCompanyInfo } from '@/lib/printDocs';
+import { openPrintable, buildReceiptHtml, loadCompanyInfo, buildQrLabelsHtml } from '@/lib/printDocs';
 import { fetchAllTenantItems, isLikelyMissingColumn } from '@/lib/tenantItems';
 import { downloadInventoryImportTemplate } from '@/lib/inventoryImportTemplate';
 import { downloadInventoryWorkbookFromTemplate } from '@/lib/inventoryExportTemplate';
@@ -167,6 +168,10 @@ const emptyItemForm = () => ({
 });
 
 function InventoryContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  /** Item aberto pelo QR da etiqueta (?item=<id>): a lista mostra só ele. */
+  const focusItemId = searchParams.get('item');
   const [products, setProducts] = useState<Product[]>([]);
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
   const [loading, setLoading] = useState(true);
@@ -833,6 +838,7 @@ function InventoryContent() {
 
   const filteredProducts = useMemo(() => {
     const q = normalizeSearchText(filterDescription);
+    if (focusItemId) return products.filter((p) => p.id === focusItemId);
     return products.filter((p) => {
       if (filterArchived === 'active' ? p.archived_at : !p.archived_at) return false;
       if (
@@ -883,10 +889,12 @@ function InventoryContent() {
     filterCategory,
     filterCart,
     cart,
+    focusItemId,
   ]);
 
   // Renderização progressiva: mostra 30 itens filtrados e acrescenta mais 30 ao chegar no fim da lista.
   const filterKey = [
+    focusItemId || '',
     filterArchived,
     filterDescription,
     filterConsumable,
@@ -920,6 +928,22 @@ function InventoryContent() {
 
   const selectFilterClass =
     'w-full min-w-0 max-w-full text-[11px] font-bold text-primary bg-white border border-slate-200 rounded-md px-1.5 py-1.5 outline-none focus:ring-2 focus:ring-secondary/40';
+
+  const handlePrintQrLabels = () => {
+    const list = filteredProducts.filter((p) => !p.archived_at);
+    if (list.length === 0) {
+      alert('Nenhum item ativo na lista filtrada.');
+      return;
+    }
+    if (list.length > 300 && !window.confirm(`Gerar ${list.length} etiquetas? Use os filtros para imprimir menos.`)) return;
+    const origin = window.location.origin;
+    void openPrintable('Etiquetas QR', () =>
+      buildQrLabelsHtml(
+        list.map((p) => ({ id: p.id, description: formatProductLabelDisplay(p.description), tag: p.tag, location: p.location })),
+        origin
+      )
+    );
+  };
 
   const handleDownloadInventory = async () => {
     if (isExportingInventory) return;
@@ -1219,6 +1243,16 @@ function InventoryContent() {
           </button>
           <button
             type="button"
+            onClick={handlePrintQrLabels}
+            disabled={loading || filteredProducts.length === 0}
+            className="flex w-full md:w-auto items-center justify-center gap-2 bg-white text-primary border border-slate-200 px-3 py-3 md:px-4 md:py-2 rounded-lg hover:bg-slate-50 transition-all font-medium text-sm disabled:opacity-50 min-h-[48px]"
+            title="Imprime etiquetas com QR code dos itens da lista filtrada; ao ler, o item abre no LoggB"
+          >
+            <QrCode size={18} className="text-secondary shrink-0" />
+            <span className="truncate">Etiquetas QR</span>
+          </button>
+          <button
+            type="button"
             onClick={openCategoryManager}
             className="flex w-full md:w-auto items-center justify-center gap-2 bg-white text-primary border border-slate-200 px-3 py-3 md:px-4 md:py-2 rounded-lg hover:bg-slate-50 transition-all font-medium text-sm min-h-[48px]"
             title="Criar, editar e excluir categorias"
@@ -1373,6 +1407,26 @@ function InventoryContent() {
           </div>
         </div>
       )}
+
+      {focusItemId ? (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-4 py-3 rounded-xl border border-secondary/30 bg-secondary/5 text-sm">
+          <span className="font-bold text-primary flex items-center gap-2">
+            <QrCode size={18} className="text-secondary shrink-0" />
+            {loading
+              ? 'Abrindo item da etiqueta…'
+              : filteredProducts.length
+                ? 'Mostrando o item da etiqueta QR.'
+                : 'O item desta etiqueta não foi encontrado nesta conta.'}
+          </span>
+          <button
+            type="button"
+            onClick={() => router.replace('/inventory')}
+            className="self-start sm:self-auto px-3 py-2 rounded-lg bg-white border border-slate-200 font-bold text-secondary"
+          >
+            Ver todos os itens
+          </button>
+        </div>
+      ) : null}
 
       {/* Inventory Table */}
       <div className="bg-white rounded-xl border border-border shadow-sm overflow-hidden">

@@ -12,7 +12,8 @@ export type MovementReason =
   | 'ajuste'
   | 'descarte'
   | 'saldo_inicial'
-  | 'importacao';
+  | 'importacao'
+  | 'inventario';
 
 export const MOVEMENT_REASON_LABEL: Record<MovementReason, string> = {
   entrada: 'Entrada',
@@ -22,6 +23,7 @@ export const MOVEMENT_REASON_LABEL: Record<MovementReason, string> = {
   descarte: 'Descarte',
   saldo_inicial: 'Saldo inicial',
   importacao: 'Importação',
+  inventario: 'Inventário',
 };
 
 export const MOVEMENT_REASONS = Object.keys(MOVEMENT_REASON_LABEL) as MovementReason[];
