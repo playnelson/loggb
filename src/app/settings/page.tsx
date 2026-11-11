@@ -66,7 +66,7 @@ export default function SettingsPage() {
       if (!user) throw new Error('Usuário não autenticado.');
 
       // Apaga TODOS os módulos (estoque, colaboradores, histórico, ordens de compra, obras,
-      // kanban, mural, lembretes, aluguéis, financeiro…) numa única transação no banco.
+      // contagens, mural, aluguéis) numa única transação no banco.
       // Ver supabase/reset_account_data.sql.
       const { error: resetError } = await supabase.rpc('reset_my_account_data');
       if (resetError) {
@@ -350,7 +350,7 @@ export default function SettingsPage() {
                   <p className="font-bold text-red-900">Zerar Todos os Dados</p>
                   <p className="text-xs text-red-700">
                     Isso apagará permanentemente todos os dados da sua conta em todos os módulos: materiais,
-                    funcionários, históricos, ordens de compra, obras, kanban, mural, lembretes e aluguéis.
+                    funcionários, históricos, ordens de compra, canteiros/sedes, contagens de inventário, mural e aluguéis.
                   </p>
                 </div>
                 <button 

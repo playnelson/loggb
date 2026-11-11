@@ -180,7 +180,11 @@ export async function POST(request: Request) {
 
     for (const t of ACCOUNT_TABLES_RESTORE_ORDER) {
       // O dono passa a ser SEMPRE o usuário logado (permite migrar para outra conta).
-      const rows = asObjectArray(data[t.table] ?? []).map((row) => ({ ...row, [t.ownerColumn]: user.id }));
+      const rows = asObjectArray(data[t.table] ?? []).map((row) => {
+        const out: JsonObject = { ...row, [t.ownerColumn]: user.id };
+        for (const col of t.removedColumns ?? []) delete out[col];
+        return out;
+      });
       if (rows.length === 0) {
         importedCounts[t.table] = 0;
         continue;
