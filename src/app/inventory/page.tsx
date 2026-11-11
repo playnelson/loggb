@@ -853,7 +853,7 @@ function InventoryContent() {
       if (filterConsumable === 'nao' && p.consumable) return false;
 
       const posTotal = possessionTotalForProduct(p);
-      const physTotal = p.quantity_current + posTotal;
+      const physTotal = p.quantity_current + posTotal + sitePossessionTotal(p);
       const belowMin = p.quantity_min > 0 && p.quantity_current < p.quantity_min;
 
       if (filterEstoque === 'zero' && p.quantity_current !== 0) return false;
@@ -1149,7 +1149,7 @@ function InventoryContent() {
       const currentItem = products.find((p) => p.id === line.itemId);
       const isConsumableNow = currentItem ? Boolean(currentItem.consumable) : line.consumable;
       // Cada linha é gravada numa única transação (histórico + carteira/local + estoque).
-      // Envio para canteiro/sede não baixa o almoxarifado — só aumenta o saldo no local.
+      // Envio para canteiro/sede baixa o almoxarifado e soma no saldo do local.
       const res = await registerMovement(supabase, {
         item_id: line.itemId,
         employee_id: cartDestination === 'employee' ? cartEmployeeId : null,
@@ -1157,7 +1157,7 @@ function InventoryContent() {
         quantity: line.quantity,
         type: 'OUT',
         tag: line.tag || null,
-        stock_delta: toSite ? 0 : -line.quantity,
+        stock_delta: -line.quantity,
         possession_delta: !toSite && !isConsumableNow ? line.quantity : 0,
         site_delta: toSite ? line.quantity : 0,
         document: cartDocument,
@@ -1561,7 +1561,7 @@ function InventoryContent() {
                 <th className="px-4 pt-3 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Consumível?</th>
                 <th className="px-4 pt-3 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Estoque</th>
                 <th className="px-4 pt-3 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Em Posse</th>
-                <th className="px-4 pt-3 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Total</th>
+                <th className="px-4 pt-3 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center" title="Almoxarifado + com colaboradores + em canteiros/sedes">Total</th>
                 <th className="px-4 pt-3 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Mínimo</th>
                 <th className="px-4 pt-3 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Categoria</th>
                 <th className="px-4 pt-3 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Carrinho</th>
@@ -1690,7 +1690,7 @@ function InventoryContent() {
                   const isLowStock = p.quantity_min > 0 && p.quantity_current <= p.quantity_min;
                   const totalInPossession = possessionTotalForProduct(p);
                   const totalAtSites = sitePossessionTotal(p);
-                  const totalQuantity = p.quantity_current + totalInPossession;
+                  const totalQuantity = p.quantity_current + totalInPossession + totalAtSites;
                   const popoverPosseKey = `posse-${p.id}`;
                   const popoverSitesKey = `sites-${p.id}`;
                   
@@ -1930,7 +1930,7 @@ function InventoryContent() {
               const isLowStock = p.quantity_min > 0 && p.quantity_current <= p.quantity_min;
               const totalInPossession = possessionTotalForProduct(p);
               const totalAtSites = sitePossessionTotal(p);
-              const totalQuantity = p.quantity_current + totalInPossession;
+              const totalQuantity = p.quantity_current + totalInPossession + totalAtSites;
               return (
                 <div
                   key={p.id}
@@ -2562,8 +2562,8 @@ function InventoryContent() {
                 </div>
                 {cartDestination === 'site' && (
                   <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 leading-relaxed">
-                    Envio para canteiro ou sede <span className="font-bold">não reduz</span> o saldo do almoxarifado.
-                    O item continua no estoque com aviso indicando em quais locais foi distribuído.
+                    Envio para canteiro ou sede <span className="font-bold">baixa</span> o saldo do almoxarifado e passa a
+                    constar no local. Quando voltar, registre a devolução para o item retornar ao estoque.
                   </p>
                 )}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

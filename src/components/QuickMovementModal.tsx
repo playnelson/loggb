@@ -238,7 +238,7 @@ export default function QuickMovementModal({
       }
     }
     if (!Number.isFinite(effectiveQty) || effectiveQty <= 0) return 'Quantidade deve ser maior que zero.';
-    if (mode === 'OUT' && counterparty !== 'site' && effectiveQty > item.quantity_current) {
+    if (mode === 'OUT' && effectiveQty > item.quantity_current) {
       return 'Quantidade maior do que o saldo atual.';
     }
     if (isUnique && !movementTag) return 'Este item único está sem TAG no cadastro. Edite o item e informe a TAG para continuar.';
@@ -333,7 +333,7 @@ export default function QuickMovementModal({
 
     // Movimentação + carteira/local + estoque numa única transação.
     // - Carteira: só itens não consumíveis com colaborador.
-    // - Canteiro/sede não altera o saldo do almoxarifado (só o saldo no local).
+    // - Canteiro/sede: envio baixa o almoxarifado e soma no local; devolução faz o inverso.
     const signed = mode === 'OUT' ? effectiveQty : -effectiveQty; // visto do lado do colaborador/local
     const res = await registerMovement(supabase, {
       item_id: item.id,
@@ -342,7 +342,7 @@ export default function QuickMovementModal({
       employee_id: employeeForMove,
       work_site_id: siteForMove,
       tag: isUnique ? movementTag : null,
-      stock_delta: isSiteCounterparty ? 0 : -signed,
+      stock_delta: -signed,
       possession_delta: !item.consumable && employeeForMove ? signed : 0,
       site_delta: isSiteCounterparty ? signed : 0,
       document: moveDocument,
@@ -566,7 +566,7 @@ export default function QuickMovementModal({
                   )}
                   {mode === 'OUT' && (
                     <div className="text-[10px] text-amber-800 font-medium bg-amber-50 border border-amber-100 rounded-lg px-2 py-1.5 leading-relaxed">
-                      O saldo do almoxarifado permanece; o envio aparece como aviso no inventário.
+                      Sai do saldo do almoxarifado e passa a constar no local (devolução ao almoxarifado faz o inverso).
                     </div>
                   )}
                 </div>
