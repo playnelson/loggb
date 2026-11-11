@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useEffect, useRef, useState, type ComponentType } from 'react';
 import {
   Package,
   Users,
@@ -9,144 +10,276 @@ import {
   Settings,
   History,
   MapPin,
-  PanelLeftClose,
-  PanelLeftOpen,
   Menu,
   X,
   MoreHorizontal,
   ClipboardList,
   ClipboardCheck,
   ReceiptText,
+  ChevronDown,
+  Boxes,
+  ShoppingCart,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useRouter, usePathname } from 'next/navigation';
 
-export function Sidebar({
-  collapsed,
-  mobileOpen,
-  onCloseRequest,
-}: {
-  collapsed: boolean;
-  mobileOpen: boolean;
-  onCloseRequest?: () => void;
-}) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const menuItems = [
-    { name: 'Início', icon: <LayoutDashboard size={20} />, href: '/' },
-    { name: 'Almoxarifado', icon: <Package size={20} />, href: '/inventory' },
-    { name: 'Inventário (contagem)', icon: <ClipboardCheck size={20} />, href: '/inventario' },
-    { name: 'Gestão de aluguéis', icon: <ReceiptText size={20} />, href: '/rentals' },
-    { name: 'Ordens de compra', icon: <ClipboardList size={20} />, href: '/ordens-compra' },
-    { name: 'Colaboradores', icon: <Users size={20} />, href: '/staff' },
-    { name: 'Sedes e canteiros', icon: <MapPin size={20} />, href: '/sites' },
-    { name: 'Histórico', icon: <History size={20} />, href: '/history' },
-    { name: 'Configurações', icon: <Settings size={20} />, href: '/settings' },
-  ];
+type IconType = ComponentType<{ size?: number; className?: string; strokeWidth?: number }>;
+type NavLinkItem = { name: string; href: string; icon: IconType; hint?: string };
+type NavGroup = { name: string; icon: IconType; items: NavLinkItem[] };
+type NavEntry = NavLinkItem | NavGroup;
 
-  const handleSignOut = async () => {
+/** Menu em cascata: links soltos e grupos que abrem para baixo. */
+const NAV: NavEntry[] = [
+  { name: 'Início', href: '/', icon: LayoutDashboard },
+  {
+    name: 'Estoque',
+    icon: Boxes,
+    items: [
+      { name: 'Almoxarifado', href: '/inventory', icon: Package, hint: 'Itens, saldos, retiradas e etiquetas' },
+      { name: 'Inventário (contagem)', href: '/inventario', icon: ClipboardCheck, hint: 'Contar e ajustar o estoque' },
+      { name: 'Histórico', href: '/history', icon: History, hint: 'Todas as movimentações e recibos' },
+    ],
+  },
+  {
+    name: 'Compras',
+    icon: ShoppingCart,
+    items: [
+      { name: 'Ordens de compra', href: '/ordens-compra', icon: ClipboardList, hint: 'Pedidos e recebimento' },
+      { name: 'Gestão de aluguéis', href: '/rentals', icon: ReceiptText, hint: 'Equipamentos alugados' },
+    ],
+  },
+  {
+    name: 'Pessoas e locais',
+    icon: Users,
+    items: [
+      { name: 'Colaboradores', href: '/staff', icon: Users, hint: 'Equipe, carteira e ficha de EPI' },
+      { name: 'Sedes e canteiros', href: '/sites', icon: MapPin, hint: 'Locais e o que está em cada um' },
+    ],
+  },
+  { name: 'Configurações', href: '/settings', icon: Settings },
+];
+
+function isGroup(e: NavEntry): e is NavGroup {
+  return 'items' in e;
+}
+
+function isActivePath(pathname: string | null, href: string) {
+  if (!pathname) return false;
+  return href === '/' ? pathname === '/' : pathname === href || pathname.startsWith(`${href}/`);
+}
+
+function useSignOut() {
+  const router = useRouter();
+  return async () => {
     await supabase.auth.signOut();
     router.push('/login');
     router.refresh();
   };
-
-  return (
-    <aside
-      id="app-sidebar"
-      className={`h-screen flex flex-col fixed left-0 top-0 pt-16 z-50 transition-transform duration-200 ease-out md:transition-[width] md:duration-200 border-r border-white/30 shadow-xl backdrop-blur-xl w-64 max-w-[85vw] md:z-auto ${
-        mobileOpen ? 'translate-x-0' : '-translate-x-full'
-      } md:translate-x-0 ${collapsed ? 'md:w-20' : 'md:w-64'} bg-[linear-gradient(200deg,rgba(15,23,42,0.96)_0%,rgba(15,23,42,0.88)_58%,rgba(15,23,42,0.78)_100%)] text-white`}
-    >
-      <nav className="flex-1 px-4 space-y-2 py-6 overflow-y-auto">
-        {menuItems.map((item) => {
-          const isActive = pathname === item.href;
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              title={collapsed ? item.name : undefined}
-              onClick={() => onCloseRequest?.()}
-              className={`flex items-center px-4 py-3.5 rounded-xl transition-all min-h-[48px] ${
-                isActive 
-                  ? 'bg-secondary text-white shadow-md shadow-secondary/25' 
-                  : 'hover:bg-white/10 text-slate-300 hover:text-white border border-transparent hover:border-white/10'
-              } ${collapsed ? 'md:justify-center gap-3 md:gap-0' : 'gap-3'}`}
-            >
-              {item.icon}
-              <span className={`font-medium ${collapsed ? 'md:sr-only' : ''}`}>{item.name}</span>
-            </Link>
-          );
-        })}
-        <button
-          type="button"
-          onClick={() => {
-            void handleSignOut();
-            onCloseRequest?.();
-          }}
-          title={collapsed ? 'Sair' : undefined}
-          className={`w-full flex items-center px-4 py-3.5 rounded-xl hover:bg-red-500/10 text-red-300 hover:text-red-200 border border-transparent hover:border-red-400/20 transition-all mt-8 min-h-[48px] ${
-            collapsed ? 'md:justify-center gap-3 md:gap-0' : 'gap-3'
-          }`}
-        >
-          <LogOut size={20} />
-          <span className={`font-medium ${collapsed ? 'md:sr-only' : ''}`}>Sair</span>
-        </button>
-      </nav>
-      <div className={`p-4 border-t border-white/10 shrink-0 ${collapsed ? 'md:text-center' : ''}`}>
-        <p className="text-xs text-slate-300/80">
-          {collapsed ? (
-            <>
-              <span className="md:hidden">© 2026 LOGG-B System</span>
-              <span className="hidden md:inline">LOGG-B</span>
-            </>
-          ) : (
-            '© 2026 LOGG-B System'
-          )}
-        </p>
-      </div>
-    </aside>
-  );
 }
 
+/** Barra superior com o menu em cascata (computador) e o botão ☰ (celular/tablet). */
 export function Header({
-  collapsed,
   mobileNavOpen,
   onMenuButtonClick,
 }: {
-  collapsed: boolean;
   mobileNavOpen: boolean;
   onMenuButtonClick: () => void;
 }) {
+  const pathname = usePathname();
+  const signOut = useSignOut();
+  const [openGroup, setOpenGroup] = useState<string | null>(null);
+  const navRef = useRef<HTMLElement>(null);
+
+  // Fecha o grupo aberto ao clicar fora ou apertar Esc.
+  useEffect(() => {
+    if (!openGroup) return;
+    const onDown = (e: MouseEvent) => {
+      if (navRef.current && !navRef.current.contains(e.target as Node)) setOpenGroup(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpenGroup(null);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [openGroup]);
+
   return (
-    <header className="h-16 fixed top-0 left-0 right-0 z-[60] flex items-center justify-between px-4 sm:px-6 md:px-8 border-b border-white/45 backdrop-blur-xl bg-[linear-gradient(180deg,rgba(255,255,255,0.86)_0%,rgba(248,250,252,0.7)_100%)]">
-      <div className="flex items-center gap-1 sm:gap-2 min-w-0">
-        <button
-          type="button"
-          onClick={onMenuButtonClick}
-          className="mr-1 sm:mr-2 p-2.5 rounded-xl border border-slate-200/90 text-slate-500 hover:text-primary hover:bg-white/80 transition-all shadow-sm shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center"
-          aria-expanded={mobileNavOpen}
-          aria-controls="app-sidebar"
-          title={
-            mobileNavOpen
-              ? 'Fechar menu'
-              : collapsed
-                ? 'Expandir menu lateral'
-                : 'Recolher menu lateral'
-          }
-        >
-          <span className="md:hidden">{mobileNavOpen ? <X size={20} /> : <Menu size={20} />}</span>
-          <span className="hidden md:inline">
-            {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
-          </span>
-        </button>
-        <span className="text-xl sm:text-2xl font-bold tracking-tighter text-primary truncate">
+    <header className="h-16 fixed top-0 left-0 right-0 z-[60] flex items-center gap-3 px-4 sm:px-6 lg:px-8 border-b border-slate-200/80 backdrop-blur-xl bg-[linear-gradient(180deg,rgba(255,255,255,0.92)_0%,rgba(248,250,252,0.82)_100%)]">
+      <button
+        type="button"
+        onClick={onMenuButtonClick}
+        className="lg:hidden p-2.5 rounded-xl border border-slate-200/90 text-slate-600 hover:text-primary hover:bg-white/80 transition-all shadow-sm shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center"
+        aria-expanded={mobileNavOpen}
+        aria-controls="app-menu-panel"
+        title={mobileNavOpen ? 'Fechar menu' : 'Abrir menu'}
+      >
+        {mobileNavOpen ? <X size={20} /> : <Menu size={20} />}
+      </button>
+
+      <Link href="/" className="flex items-center gap-2 shrink-0 min-w-0" onClick={() => setOpenGroup(null)}>
+        <span className="text-xl sm:text-2xl font-bold tracking-tighter text-primary">
           LOGG<span className="text-secondary">B</span>
         </span>
-        <span className="bg-secondary/15 text-secondary text-[9px] sm:text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ml-1 sm:ml-2 border border-secondary/25 shrink-0 hidden min-[380px]:inline">
+        <span className="bg-secondary/15 text-secondary text-[9px] sm:text-[10px] uppercase font-bold px-2 py-0.5 rounded-full border border-secondary/25 hidden min-[380px]:inline xl:inline">
           Almoxarifado
         </span>
-      </div>
+      </Link>
+
+      <nav ref={navRef} className="hidden lg:flex items-center gap-1 ml-4 flex-1 min-w-0" aria-label="Menu principal">
+        {NAV.map((entry) => {
+          if (!isGroup(entry)) {
+            const active = isActivePath(pathname, entry.href);
+            const Icon = entry.icon;
+            return (
+              <Link
+                key={entry.href}
+                href={entry.href}
+                onClick={() => setOpenGroup(null)}
+                className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-colors ${
+                  active ? 'bg-primary text-white' : 'text-slate-600 hover:text-primary hover:bg-slate-100'
+                }`}
+              >
+                <Icon size={17} />
+                {entry.name}
+              </Link>
+            );
+          }
+          const groupActive = entry.items.some((i) => isActivePath(pathname, i.href));
+          const open = openGroup === entry.name;
+          const Icon = entry.icon;
+          return (
+            <div key={entry.name} className="relative">
+              <button
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded={open}
+                onClick={() => setOpenGroup(open ? null : entry.name)}
+                className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-colors ${
+                  groupActive
+                    ? 'bg-primary text-white'
+                    : open
+                      ? 'bg-slate-100 text-primary'
+                      : 'text-slate-600 hover:text-primary hover:bg-slate-100'
+                }`}
+              >
+                <Icon size={17} />
+                {entry.name}
+                <ChevronDown size={15} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
+              </button>
+              {open ? (
+                <div
+                  role="menu"
+                  className="absolute left-0 top-full mt-2 w-72 rounded-xl border border-slate-200 bg-white shadow-xl p-1.5 animate-in fade-in slide-in-from-top-1 duration-150"
+                >
+                  {entry.items.map((item) => {
+                    const active = isActivePath(pathname, item.href);
+                    const ItemIcon = item.icon;
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        role="menuitem"
+                        onClick={() => setOpenGroup(null)}
+                        className={`flex items-start gap-3 rounded-lg px-3 py-2.5 transition-colors ${
+                          active ? 'bg-secondary/15' : 'hover:bg-slate-50'
+                        }`}
+                      >
+                        <ItemIcon size={18} className={`mt-0.5 shrink-0 ${active ? 'text-secondary' : 'text-slate-400'}`} />
+                        <span className="min-w-0">
+                          <span className="block text-sm font-bold text-primary">{item.name}</span>
+                          {item.hint ? <span className="block text-[11px] text-slate-500">{item.hint}</span> : null}
+                        </span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </nav>
+
+      <button
+        type="button"
+        onClick={() => void signOut()}
+        className="hidden lg:inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold text-red-600 hover:bg-red-50 ml-auto shrink-0"
+      >
+        <LogOut size={17} />
+        Sair
+      </button>
     </header>
+  );
+}
+
+/** Painel que desce do topo no celular/tablet, com os grupos em cascata. */
+export function MobileMenuPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const pathname = usePathname();
+  const signOut = useSignOut();
+  if (!open) return null;
+
+  const linkClass = (active: boolean) =>
+    `flex items-center gap-3 rounded-xl px-3 py-3 min-h-[48px] font-bold text-sm transition-colors ${
+      active ? 'bg-secondary/15 text-primary' : 'text-slate-700 hover:bg-slate-50'
+    }`;
+
+  return (
+    <>
+      <button
+        type="button"
+        className="fixed inset-0 top-16 z-40 bg-primary/35 backdrop-blur-[2px] lg:hidden"
+        aria-label="Fechar menu"
+        onClick={onClose}
+      />
+      <div
+        id="app-menu-panel"
+        className="fixed top-16 left-0 right-0 z-50 lg:hidden max-h-[calc(100dvh-4rem)] overflow-y-auto bg-white border-b border-slate-200 shadow-xl animate-in fade-in slide-in-from-top-2 duration-150"
+      >
+        <nav className="p-3 grid gap-1 sm:grid-cols-2 sm:gap-x-4" aria-label="Menu principal">
+          {NAV.map((entry) => {
+            if (!isGroup(entry)) {
+              const Icon = entry.icon;
+              return (
+                <Link key={entry.href} href={entry.href} onClick={onClose} className={linkClass(isActivePath(pathname, entry.href))}>
+                  <Icon size={19} className="text-slate-400" />
+                  {entry.name}
+                </Link>
+              );
+            }
+            return (
+              <div key={entry.name} className="sm:row-span-1">
+                <div className="px-3 pt-3 pb-1 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                  {entry.name}
+                </div>
+                {entry.items.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <Link key={item.href} href={item.href} onClick={onClose} className={`${linkClass(isActivePath(pathname, item.href))} pl-5`}>
+                      <Icon size={19} className="text-slate-400" />
+                      {item.name}
+                    </Link>
+                  );
+                })}
+              </div>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => {
+              onClose();
+              void signOut();
+            }}
+            className="flex items-center gap-3 rounded-xl px-3 py-3 min-h-[48px] font-bold text-sm text-red-600 hover:bg-red-50 mt-1"
+          >
+            <LogOut size={19} />
+            Sair
+          </button>
+        </nav>
+      </div>
+    </>
   );
 }
 
@@ -162,7 +295,7 @@ export function MobileBottomNav({ onOpenFullMenu }: { onOpenFullMenu: () => void
   return (
     <nav
       className="fixed bottom-0 left-0 right-0 z-30 md:hidden border-t border-border/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.97)_0%,rgba(248,250,252,0.98)_100%)] backdrop-blur-xl pb-[max(0.5rem,env(safe-area-inset-bottom))] shadow-[0_-8px_24px_-12px_rgba(15,23,42,0.12)]"
-      aria-label="Navegação principal"
+      aria-label="Atalhos"
     >
       <div className="flex items-stretch justify-around gap-1 px-1 pt-1">
         {bottomNavItems.map((item) => {
