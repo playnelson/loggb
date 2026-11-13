@@ -489,9 +489,11 @@ function NewAuthorization({
       return data as FuelLog;
     };
     let ok = false;
+    let ran = false;
     if (andPrint) {
       // A aba de impressão abre no clique (senão o navegador bloqueia) e o documento sai depois de salvar.
       await openPrintable('Autorização de abastecimento', async () => {
+        ran = true;
         const r = await insert();
         if ('error' in r) {
           setError(r.error);
@@ -500,7 +502,13 @@ function NewAuthorization({
         ok = true;
         return buildFuelAuthorizationHtml(printData(r));
       });
-    } else {
+    }
+    if (andPrint && !ran) {
+      // Pop-up bloqueado: salva assim mesmo; dá para imprimir depois pelo botão da lista.
+      const r = await insert();
+      if ('error' in r) setError(r.error);
+      else ok = true;
+    } else if (!andPrint) {
       const r = await insert();
       if ('error' in r) setError(r.error);
       else ok = true;

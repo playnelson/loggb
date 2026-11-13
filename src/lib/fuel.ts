@@ -89,7 +89,8 @@ export function parseNumBr(v: unknown): number | null {
   if (typeof v === 'number') return Number.isFinite(v) ? v : null;
   let s = String(v ?? '').trim().replace(/\s/g, '').replace(/^R\$/i, '');
   if (!s) return null;
-  if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
+  // "23.323,50" ou "23.323" (ponto = milhar); "23.5" continua decimal.
+  if (s.includes(',') || /^\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, '').replace(',', '.');
   const n = Number(s);
   return Number.isFinite(n) ? n : null;
 }

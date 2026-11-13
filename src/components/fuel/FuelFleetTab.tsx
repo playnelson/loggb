@@ -8,6 +8,7 @@ import {
   METER_LABEL,
   downloadFleetTemplate,
   parseFleetFile,
+  parseNumBr,
   type FleetImportRow,
   type FuelSource,
   type FuelVehicle,
@@ -377,7 +378,7 @@ function SourcesSection({ sources, reload }: { sources: FuelSource[]; reload: ()
     e.preventDefault();
     setSaving(true);
     setError('');
-    const cap = Number(form.capacity.replace(/\./g, '').replace(',', '.'));
+    const cap = parseNumBr(form.capacity) ?? 0;
     const row = {
       name: form.name.trim().toUpperCase(),
       kind: form.kind,
