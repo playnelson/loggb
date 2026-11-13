@@ -162,7 +162,7 @@ export function AreaPicker({
         Áreas do estoque que gerencia
       </legend>
       <p className="text-[11px] text-slate-500 mb-2">
-        Nas áreas marcadas a pessoa dá entrada, entrega, devolve, edita itens e anexa termos. Nas outras ela só consulta.
+        A pessoa só vê e mexe nos itens das áreas marcadas (entrada, entrega, devolução, cadastro e edição); o resto do estoque fica escondido para ela. Sem nenhuma área marcada, ela vê o estoque todo, só para consulta.
       </p>
       <label className="flex items-center gap-2 text-sm font-bold text-primary">
         <input type="checkbox" checked={all} onChange={(e) => onAllChange(e.target.checked)} />

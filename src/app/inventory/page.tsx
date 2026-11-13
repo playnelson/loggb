@@ -4,6 +4,7 @@ export const dynamic = 'force-dynamic';
 
 import { useState, useEffect, Suspense, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
+import WorkspaceBar from '@/components/WorkspaceBar';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { formatProductLabelDisplay, normalizeProductLabelForSave } from '@/lib/productDisplayText';
@@ -1181,6 +1182,9 @@ function InventoryContent() {
         <div>
           <h1 className="text-xl sm:text-[22px] font-bold tracking-tight text-primary">Almoxarifado</h1>
           <p className="text-slate-500 text-sm">Gestão de materiais, EPIs e ferramentas por descrição e categoria.</p>
+          <div className="mt-2">
+            <WorkspaceBar />
+          </div>
         </div>
         <div className="flex flex-col gap-2 w-full md:flex-row md:flex-nowrap md:w-auto md:gap-2">
           <button
@@ -2568,6 +2572,7 @@ function InventoryContent() {
                     <User size={16} />
                     Colaborador
                   </button>
+                  {workSites.length > 0 || cartDestination === 'site' ? (
                   <button
                     type="button"
                     onClick={() => setCartDestination('site')}
@@ -2578,6 +2583,7 @@ function InventoryContent() {
                     <MapPin size={16} />
                     Canteiro / sede
                   </button>
+                  ) : null}
                 </div>
                 {cartDestination === 'site' && (
                   <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 leading-relaxed">

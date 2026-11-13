@@ -9,7 +9,6 @@ import {
   LogOut,
   Settings,
   History,
-  MapPin,
   Menu,
   X,
   MoreHorizontal,
@@ -62,8 +61,7 @@ const NAV: NavEntry[] = [
     icon: Users,
     items: [
       { name: 'Colaboradores', href: '/staff', icon: Users, hint: 'Equipe, carteira e ficha de EPI' },
-      { name: 'Sedes e canteiros', href: '/sites', icon: MapPin, hint: 'Locais e o que está em cada um' },
-    ],
+      ],
   },
   { name: 'Aprovações', href: '/aprovacoes', icon: ShieldCheck },
   { name: 'Workspaces', href: '/workspaces', icon: Layers },

@@ -157,7 +157,7 @@ export default function PeopleTab({
                         ))}
                       </span>
                     ) : (
-                      <span className="text-xs text-slate-400">Nenhuma (só consulta o estoque)</span>
+                      <span className="text-xs text-slate-400">Nenhuma (vê tudo, só consulta)</span>
                     )}
                   </td>
                   <td className="px-3 py-2 hidden md:table-cell text-xs text-slate-600">

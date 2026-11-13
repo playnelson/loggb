@@ -477,6 +477,7 @@ export default function QuickMovementModal({
                     <User size={16} />
                     Colaborador
                   </button>
+                  {workSites.length > 0 || counterparty === 'site' ? (
                   <button
                     type="button"
                     disabled={restrictUniqueReturnToPossessionHolders}
@@ -493,6 +494,7 @@ export default function QuickMovementModal({
                     <MapPin size={16} />
                     Canteiro / sede
                   </button>
+                  ) : null}
                 </div>
                 {restrictUniqueReturnToPossessionHolders && possessionHolders.length > 0 && (
                   <p className="text-[10px] text-slate-500 font-bold leading-relaxed">

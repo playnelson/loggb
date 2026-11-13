@@ -140,12 +140,12 @@ export default function WorkspaceSwitcher() {
               Gerenciar workspaces
             </Link>
             <Link
-              href="/workspaces?nova=1"
+              href="/workspaces"
               onClick={() => setOpen(false)}
               className="flex items-center gap-2 px-3 py-2 text-sm font-semibold text-primary hover:bg-slate-100"
             >
               <Plus size={16} className="text-slate-400" />
-              Nova organização
+              Novo workspace
             </Link>
           </div>
         </div>
