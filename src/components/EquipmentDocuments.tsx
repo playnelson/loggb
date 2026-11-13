@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { Download, ExternalLink, FileText, Image as ImageIcon, Loader2, Paperclip, Trash2, Upload, X } from 'lucide-react';
+import { Download, ExternalLink, FileText, Image as ImageIcon, Loader2, Paperclip, Printer, Trash2, Upload, X } from 'lucide-react';
+import { openPrintable, buildReceiptHtml, loadCompanyInfo } from '@/lib/printDocs';
 import { supabase } from '@/lib/supabase';
 import { formatDateTimeBR, useWorkspace } from '@/lib/workspace';
 import { useCanApproveDeletion } from '@/lib/deletion';
@@ -253,6 +254,26 @@ export function EquipmentDocsModal({
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  /** Sem cautela anexada: gera o termo da última entrega deste item para assinar. */
+  const hasEntregaDoc = docs.some((d) => d.kind === 'entrega');
+  const printTermo = async () => {
+    if (!itemId) return;
+    const { data, error: mErr } = await supabase
+      .from('movements')
+      .select('id')
+      .eq('employee_id', employeeId)
+      .eq('item_id', itemId)
+      .eq('type', 'OUT')
+      .order('created_at', { ascending: false })
+      .limit(1);
+    const id = (data as { id: string }[] | null)?.[0]?.id;
+    if (mErr || !id) {
+      setError(mErr?.message || 'Não achei a entrega deste item para gerar o termo.');
+      return;
+    }
+    void openPrintable(`Termo - ${employeeName}`, () => buildReceiptHtml(supabase, { movementId: id }, loadCompanyInfo()));
+  };
+
   const itemOptions = useMemo(() => {
     const map = new Map<string, string>();
     for (const p of possessionItems ?? []) map.set(p.item_id, p.description);
@@ -315,6 +336,20 @@ export function EquipmentDocsModal({
 
         <div className="p-5 space-y-4">
           {error ? <div className="text-sm font-semibold text-red-700 bg-red-50 border border-red-200 p-3">{error}</div> : null}
+
+          {itemId && !loading && !hasEntregaDoc ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              <span>Sem cautela assinada anexada. Imprima o termo, colha a assinatura e anexe abaixo.</span>
+              <button
+                type="button"
+                onClick={() => void printTermo()}
+                className="inline-flex items-center gap-1.5 px-3 py-2 bg-primary text-white font-bold text-xs rounded"
+              >
+                <Printer size={14} />
+                Imprimir termo
+              </button>
+            </div>
+          ) : null}
 
           {loading ? (
             <div className="py-8 flex justify-center text-slate-400">

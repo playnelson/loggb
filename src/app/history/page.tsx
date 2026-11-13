@@ -14,7 +14,6 @@ import {
   receiptNumber,
   type MovementReason,
 } from '@/lib/movements';
-import { openPrintable, buildReceiptHtml, loadCompanyInfo } from '@/lib/printDocs';
 import { EQUIPMENT_DOC_COLUMNS, openEquipmentDoc, type EquipmentDoc } from '@/lib/equipmentDocs';
 import {
   Paperclip,
@@ -27,7 +26,6 @@ import {
   Calendar,
   Loader2,
   Package,
-  Printer,
 } from 'lucide-react';
 
 interface Movement {
@@ -212,14 +210,6 @@ export default function HistoryPage() {
     });
   }, [movements, searchLower]);
 
-  /** Recibo: a retirada inteira (lote) ou só esta linha, se for antiga/sem lote. */
-  const printReceipt = (m: Movement) => {
-    const number = receiptNumber(m.batch_id || m.id);
-    void openPrintable(`Recibo ${number}`, () =>
-      buildReceiptHtml(supabase, m.batch_id ? { batchId: m.batch_id } : { movementId: m.id }, loadCompanyInfo())
-    );
-  };
-
   const visibleMovements = filteredMovements.slice(0, renderLimit);
 
   const csvCell = (v: unknown): string => {
@@ -384,7 +374,7 @@ export default function HistoryPage() {
                 <th className="px-4 py-2.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Material</th>
                 <th className="px-4 py-2.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Colaborador / local</th>
                 <th className="px-4 py-2.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Qtd.</th>
-                <th className="px-4 py-2.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Recibo</th>
+                <th className="px-4 py-2.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Cautela</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -473,17 +463,6 @@ export default function HistoryPage() {
                         <span className="ml-1 text-[10px] font-bold text-slate-400 lowercase">{move.items?.unit}</span>
                       </td>
                       <td className="px-4 py-2.5 text-center whitespace-nowrap">
-                        {move.employee_id || move.work_site_id ? (
-                          <button
-                            type="button"
-                            onClick={() => printReceipt(move)}
-                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-slate-200 text-[11px] font-bold text-slate-600 hover:bg-white hover:text-primary"
-                            title={move.batch_id ? 'Recibo da retirada inteira' : 'Recibo desta movimentação'}
-                          >
-                            <Printer size={12} />
-                            <span className="font-mono">{receiptNumber(move.batch_id || move.id)}</span>
-                          </button>
-                        ) : null}
                         {(docsByMovement.get(move.id) ?? []).map((doc) => (
                           <button
                             key={doc.id}
@@ -496,9 +475,7 @@ export default function HistoryPage() {
                             {doc.kind === 'entrega' ? 'Cautela' : doc.kind === 'devolucao' ? 'Termo dev.' : 'Documento'}
                           </button>
                         ))}
-                        {move.employee_id || move.work_site_id ? null : (
-                          <span className="text-slate-300">—</span>
-                        )}
+                        {docsByMovement.get(move.id)?.length ? null : <span className="text-slate-300">—</span>}
                       </td>
                     </tr>
                   );

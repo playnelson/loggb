@@ -110,26 +110,28 @@ function one<T>(v: T | T[] | null | undefined): T | null {
 }
 
 const DOC_CSS = `
-  *{box-sizing:border-box}
+  *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
   body{font-family:Arial,Helvetica,sans-serif;color:#263238;margin:0;padding:24px;font-size:12px;background:#fff}
   .brand img{display:block;max-height:84px;max-width:240px;object-fit:contain}
   .brand .co{font-weight:700;font-size:16px;color:#2E74B5}
   .ct{width:100%;border-collapse:collapse;margin:0}
-  .ct td,.ct th{border:1px solid #7b8ba1;padding:5px 7px;font-size:11px;vertical-align:middle}
+  .ct td,.ct th{border:1px solid #595959;padding:4px 7px;font-size:11px;vertical-align:middle;color:#000}
+  .ct th{background:#F2F2F2;color:#000;font-size:10.5px;font-weight:700;text-align:center;text-transform:uppercase}
   .ct td.ct-logo{width:160px;text-align:center}
   .ct-logo img{display:inline-block;max-height:64px;max-width:150px;object-fit:contain}
   .ct-logo .co{font-weight:700;font-size:13px;color:#1F4E79}
-  .ct td.ct-title{background:#DEEAF6;text-align:center;color:#1F4E79;font-weight:700;font-size:18px;text-transform:uppercase;line-height:1.25}
+  .ct td.ct-title{background:#F3F6FA;text-align:center;color:#2F5597;font-weight:700;font-size:18px;text-transform:uppercase;line-height:1.25}
   .ct td.ct-title small{display:block;font-size:12px;font-weight:600}
   .ct td.ct-sub{text-align:center;font-size:10px;text-transform:uppercase;letter-spacing:.3px}
   .ct-meta td{font-size:10px;text-transform:uppercase}
-  .sec{background:#2F5597;color:#fff;font-weight:700;font-size:11px;text-transform:uppercase;padding:5px 8px;margin-top:12px}
-  .ct .lbl{font-weight:700;text-transform:uppercase}
+  .sec{background:#2F5597;color:#fff;font-weight:700;font-size:11px;text-transform:uppercase;padding:4px 8px;margin-top:8px;border:1px solid #2F5597}
+  .ct .lbl{font-weight:700;text-transform:uppercase;color:#000}
   .ct .acc{display:block;color:#455a64;font-size:10px;margin-top:2px}
-  .ct-term{border:1px solid #7b8ba1;border-top:0;padding:8px 10px;font-size:11px;line-height:1.5;text-align:justify}
+  .ct-term{border:1px solid #595959;color:#000;border-top:0;padding:8px 10px;font-size:11px;line-height:1.5;text-align:justify}
   .ct-term ol{margin:6px 0 0 16px;padding:0}
   .ct-term li{margin-bottom:3px}
   .ct-sign td{height:58px;vertical-align:top;width:50%}
+  .ct-sign td .lbl{display:block;background:#F2F2F2;margin:-4px -7px 4px;padding:3px 7px;border-bottom:1px solid #595959}
   .ct-sign .ln{border-bottom:1px solid #263238;height:26px;margin-top:4px}
   .box{display:inline-block;width:10px;height:10px;border:1px solid #263238;margin:0 3px -1px 6px}
   .pagefoot{margin-top:28px;border-top:1px solid #2E74B5;padding-top:5px;font-size:9px;color:#455a64;text-align:center}
