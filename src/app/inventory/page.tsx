@@ -1797,7 +1797,24 @@ function InventoryContent() {
                         </div>
                       </td>
                       <td className="px-4 py-2.5 text-center">
-                        {totalInPossession > 0 ? (
+                        {totalInPossession > 0 && (p.possession ?? []).filter((pos) => Number(pos.quantity) > 0).length <= 2 ? (
+                          // Até 2 pessoas: mostra o nome direto (itens únicos sempre caem aqui).
+                          <div className="flex flex-col items-center gap-1">
+                            {(p.possession ?? [])
+                              .filter((pos) => Number(pos.quantity) > 0)
+                              .map((pos) => (
+                                <span
+                                  key={pos.id}
+                                  className="inline-flex items-center gap-1 max-w-[190px] bg-slate-100 px-2.5 py-1 rounded-full text-[11px] font-bold text-primary"
+                                  title={possessionEmployeeName(pos.employees)}
+                                >
+                                  <Users size={11} className="text-secondary shrink-0" />
+                                  <span className="truncate">{possessionEmployeeName(pos.employees)}</span>
+                                  {Number(pos.quantity) !== 1 ? <span className="text-slate-500 shrink-0">×{formatQty(pos.quantity)}</span> : null}
+                                </span>
+                              ))}
+                          </div>
+                        ) : totalInPossession > 0 ? (
                           <div className="relative inline-block">
                             <button 
                               onClick={() => setActivePopover(activePopover === popoverPosseKey ? null : popoverPosseKey)}
