@@ -47,6 +47,35 @@ export function saveCompanyInfo(info: CompanyInfo): void {
   }
 }
 
+/* ------------------------------------------------------------- timbrado */
+
+/**
+ * Layout no modelo do papel timbrado (logo no alto à esquerda, linha azul no rodapé com os
+ * dados da empresa). A logo é a da organização (Workspaces › editar organização).
+ */
+let PRINT_BRAND: { logo: string | null; orgName: string } = { logo: null, orgName: '' };
+
+export function setPrintBranding(brand: { logo: string | null; orgName: string }): void {
+  PRINT_BRAND = brand;
+}
+
+/** Só imagens embutidas (data URL) entram no documento. */
+function safeLogo(src: string | null): string | null {
+  return src && /^data:image\/(png|jpe?g|webp|gif|svg\+xml);base64,/i.test(src) ? src : null;
+}
+
+function pageFooter(): string {
+  const c = loadCompanyInfo();
+  const name = c.companyName.trim() || PRINT_BRAND.orgName.trim();
+  const parts = [
+    name ? `<b>${esc(name)}</b>` : '',
+    c.companyCnpj.trim() ? `CNPJ: ${esc(c.companyCnpj.trim())}` : '',
+    esc(c.branchOrDept.trim()),
+  ].filter(Boolean);
+  if (parts.length === 0) return '';
+  return `<footer class="pagefoot">${parts.join(' &nbsp;·&nbsp; ')}</footer>`;
+}
+
 /* ---------------------------------------------------------------- utilitários */
 
 function esc(value: unknown): string {
@@ -83,19 +112,22 @@ function one<T>(v: T | T[] | null | undefined): T | null {
 const DOC_CSS = `
   *{box-sizing:border-box}
   body{font-family:Arial,Helvetica,sans-serif;color:#263238;margin:0;padding:24px;font-size:12px;background:#fff}
+  .brand img{display:block;max-height:84px;max-width:240px;object-fit:contain}
+  .brand .co{font-weight:700;font-size:16px;color:#2E74B5}
+  .pagefoot{margin-top:28px;border-top:1px solid #2E74B5;padding-top:5px;font-size:9px;color:#455a64;text-align:center}
   .doc{max-width:780px;margin:0 auto}
   .toolbar{max-width:780px;margin:0 auto 16px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;
     background:#eceff1;border:1px solid #cbd5e1;border-radius:8px;padding:10px}
-  .toolbar button{font:inherit;font-weight:700;padding:8px 14px;border-radius:3px;border:1px solid #2e7d5b;
-    background:#2e7d5b;color:#fff;cursor:pointer}
-  .toolbar button.sec{background:#fff;color:#2e7d5b}
+  .toolbar button{font:inherit;font-weight:700;padding:8px 14px;border-radius:3px;border:1px solid #2E74B5;
+    background:#2E74B5;color:#fff;cursor:pointer}
+  .toolbar button.sec{background:#fff;color:#2E74B5}
   .toolbar span{color:#455a64;font-size:11px}
-  header{display:flex;justify-content:space-between;gap:16px;border-bottom:2px solid #2e7d5b;padding-bottom:8px;margin-bottom:12px}
+  header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding-bottom:10px;margin-bottom:14px}
   header .co{font-weight:700;font-size:14px}
   header .sub{color:#455a64;font-size:11px}
   header .no{text-align:right;font-size:11px;color:#37474f;white-space:nowrap}
   header .no b{font-size:14px;color:#263238}
-  h1{font-size:15px;text-align:center;margin:8px 0 12px;letter-spacing:.5px;text-transform:uppercase}
+  h1{font-size:15px;text-align:center;margin:8px 0 12px;letter-spacing:.5px;text-transform:uppercase;color:#1F4E79}
   h2{font-size:12px;margin:16px 0 6px;text-transform:uppercase;color:#37474f}
   .grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;border:1px solid #cbd5e1;border-radius:6px;padding:8px 10px}
   .grid div span{color:#607d8b;font-size:10px;text-transform:uppercase;display:block}
@@ -103,7 +135,7 @@ const DOC_CSS = `
   .full{grid-column:1 / -1}
   table{width:100%;border-collapse:collapse;margin-top:6px}
   th,td{border:1px solid #94a3b8;padding:5px 6px;text-align:left;vertical-align:top}
-  th{background:#e2e8f0;font-size:10px;text-transform:uppercase}
+  th{background:#DEEAF6;color:#1F4E79;font-size:10px;text-transform:uppercase}
   td.n,th.n{text-align:right;white-space:nowrap}
   td.c,th.c{text-align:center;white-space:nowrap}
   td.sig{width:150px}
@@ -116,9 +148,10 @@ const DOC_CSS = `
   .muted{color:#607d8b}
   .foot{margin-top:18px;font-size:9px;color:#607d8b;text-align:center}
   @media print{
-    body{padding:0}
+    body{padding:0 0 14mm}
     .toolbar{display:none}
-    @page{size:A4;margin:12mm}
+    .pagefoot{position:fixed;left:0;right:0;bottom:0;margin:0;background:#fff}
+    @page{size:A4;margin:12mm 12mm 14mm}
   }
 `;
 
@@ -129,7 +162,7 @@ export function wrapDocument(title: string, body: string): string {
 <div class="toolbar"><button onclick="window.print()">Imprimir / salvar PDF</button>
 <button class="sec" onclick="window.close()">Fechar</button>
 <span>Para PDF, escolha “Salvar como PDF” no destino da impressão.</span></div>
-<div class="doc">${body}</div>
+<div class="doc">${body}${pageFooter()}</div>
 <script>window.addEventListener('load',function(){setTimeout(function(){window.print()},300)});</script>
 </body></html>`;
 }
@@ -179,12 +212,15 @@ export async function openPrintable(
 }
 
 function companyHeader(company: CompanyInfo, rightHtml: string): string {
-  const name = company.companyName.trim() || 'Empresa (preencha em Colaboradores → Fichas)';
+  const name = company.companyName.trim() || PRINT_BRAND.orgName.trim() || 'Empresa (preencha em Colaboradores → Fichas)';
   const sub = [company.companyCnpj.trim() ? `CNPJ ${esc(company.companyCnpj.trim())}` : '', esc(company.branchOrDept.trim())]
     .filter(Boolean)
     .join(' · ');
-  return `<header><div><div class="co">${esc(name)}</div>${sub ? `<div class="sub">${sub}</div>` : ''}</div>
-<div class="no">${rightHtml}</div></header>`;
+  const logo = safeLogo(PRINT_BRAND.logo);
+  const left = logo
+    ? `<div class="brand"><img src="${logo}" alt="${esc(PRINT_BRAND.orgName || name)}"></div>`
+    : `<div class="brand"><div class="co">${esc(name)}</div>${sub ? `<div class="sub">${sub}</div>` : ''}</div>`;
+  return `<header>${left}<div class="no">${rightHtml}</div></header>`;
 }
 
 /* -------------------------------------------------------------------- recibo */

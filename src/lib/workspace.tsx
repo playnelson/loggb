@@ -10,6 +10,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { supabase } from '@/lib/supabase';
+import { setPrintBranding } from '@/lib/printDocs';
 import { accessIsReadOnly, accessManagesCategory, type MyAccess, type Permission } from '@/lib/permissions';
 
 export type WorkspaceKind = 'canteiro' | 'cidade' | 'sede' | 'outro';
@@ -284,6 +285,12 @@ export function WorkspaceProvider({ children, enabled }: { children: ReactNode; 
         : currentOrganization?.role !== 'gestor',
     };
   }, [status, organizations, workspaces, currentId, reload, switchWorkspace, access]);
+
+  // Documentos impressos (fichas, recibos) levam a logo e o nome da organização atual.
+  const printOrg = value.currentOrganization;
+  useEffect(() => {
+    setPrintBranding({ logo: printOrg?.logo_data ?? null, orgName: printOrg?.name ?? '' });
+  }, [printOrg]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

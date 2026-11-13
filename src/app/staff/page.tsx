@@ -60,6 +60,11 @@ type EpiFichaFormState = {
 
 const EPI_DISCARD_TAG = 'DESCARTE';
 
+/** EPI pela categoria, sem depender de caixa/plural ("EPI", "EPIs", "Epi"). */
+function isEpiCat(category: string | null | undefined): boolean {
+  return String(category ?? '').trim().toUpperCase().startsWith('EPI');
+}
+
 const emptyEmployeeForm = () => ({
   full_name: '',
   role: '',
@@ -73,7 +78,7 @@ type EpiConsumableBalanceRow = { item_id: string; description: string; unit: str
 function isEpiConsumableItem(items: Possession['items'] | null | undefined): boolean {
   // EPI consumível é calculado por saldo de movimentos (OUT - IN).
   // Se o item mudou para não consumível, deve sair desse cálculo e ficar só pela posse.
-  return !!items && items.category === 'EPI' && !!items.consumable;
+  return !!items && isEpiCat(items.category) && !!items.consumable;
 }
 
 function movementIsEpiDiscard(m: { type?: string; tag?: string | null }): boolean {
@@ -101,7 +106,10 @@ function mergeEpiWalletLines(
   }> = [];
   const skipAggForItemsAlreadyInPossession = new Set<string>();
   for (const p of possession || []) {
-    if (!p.items || p.quantity <= 0 || p.items.category !== 'EPI') continue;
+    if (!p.items || p.quantity <= 0 || !isEpiCat(p.items.category)) continue;
+    // EPI consumível: o saldo vem só do histórico (entregas − devoluções − descartes).
+    // Linha de posse antiga (ex.: importação) não pode congelar o saldo.
+    if (p.items.consumable) continue;
     out.push({
       key: `p-${p.item_id}`,
       item_id: p.item_id,
@@ -475,7 +483,7 @@ export default function StaffPage() {
       category: 'EPI',
     }));
     const otherRows = (employee.possession || [])
-      .filter((p) => p.quantity > 0 && !!p.items && !p.items.consumable && p.items.category !== 'EPI')
+      .filter((p) => p.quantity > 0 && !!p.items && !p.items.consumable && !isEpiCat(p.items.category))
       .map((p) => ({
         description: p.items.description,
         unit: p.items.unit,
@@ -621,7 +629,7 @@ export default function StaffPage() {
 
     const rows: FichaPossessionRow[] =
       epiFichaEmployee.possession
-        ?.filter((p) => p.quantity > 0 && p.items && !p.items.consumable && p.items.category !== 'EPI')
+        ?.filter((p) => p.quantity > 0 && p.items && !p.items.consumable && !isEpiCat(p.items.category))
         .map((p) => ({
           description: p.items!.description,
           unit: p.items!.unit,
@@ -715,7 +723,7 @@ export default function StaffPage() {
   const walletDemaisMateriaisLines = useMemo(
     () =>
       (walletEmployee?.possession || []).filter(
-        (p) => p.quantity > 0 && !!p.items && !p.items.consumable && p.items.category !== 'EPI'
+        (p) => p.quantity > 0 && !!p.items && !p.items.consumable && !isEpiCat(p.items.category)
       ),
     [walletEmployee]
   );
@@ -1083,9 +1091,9 @@ export default function StaffPage() {
                               <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Demais materiais</span>
                             </div>
                             <div className="flex flex-wrap gap-1.5">
-                              {e.possession?.filter(p => p.quantity > 0 && !!p.items && !p.items.consumable && p.items.category !== 'EPI').length ? (
+                              {e.possession?.filter(p => p.quantity > 0 && !!p.items && !p.items.consumable && !isEpiCat(p.items.category)).length ? (
                                 e.possession
-                                  .filter(p => p.quantity > 0 && !!p.items && !p.items.consumable && p.items.category !== 'EPI')
+                                  .filter(p => p.quantity > 0 && !!p.items && !p.items.consumable && !isEpiCat(p.items.category))
                                   .map((p, idx) => (
                                     <div key={idx} className="flex items-center gap-2 bg-blue-50 border border-blue-100 px-2 py-1 rounded text-[10px] font-bold text-blue-700 group/p">
                                       <span className="truncate max-w-[150px]">{formatProductLabelDisplay(p.items?.description)}</span>
@@ -1318,11 +1326,11 @@ export default function StaffPage() {
                       </div>
                       <div className="flex flex-col gap-2">
                         {e.possession?.filter(
-                          (p) => p.quantity > 0 && !!p.items && !p.items.consumable && p.items.category !== 'EPI'
+                          (p) => p.quantity > 0 && !!p.items && !p.items.consumable && !isEpiCat(p.items.category)
                         ).length ? (
                           e.possession
                             .filter(
-                              (p) => p.quantity > 0 && !!p.items && !p.items.consumable && p.items.category !== 'EPI'
+                              (p) => p.quantity > 0 && !!p.items && !p.items.consumable && !isEpiCat(p.items.category)
                             )
                             .map((p, idx) => (
                               <div
