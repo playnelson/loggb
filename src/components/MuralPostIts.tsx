@@ -56,7 +56,6 @@ export function MuralPostIts() {
     const { data, error } = await supabase
       .from('mural_notes')
       .select('id, body, color, sort_order, created_at')
-      .eq('user_id', user.id)
       .order('sort_order', { ascending: true })
       .order('created_at', { ascending: true });
 
@@ -120,8 +119,7 @@ export function MuralPostIts() {
     const { error } = await supabase
       .from('mural_notes')
       .update({ body, updated_at: new Date().toISOString() })
-      .eq('id', id)
-      .eq('user_id', user.id);
+      .eq('id', id);
     if (error) alert(`Erro ao salvar: ${error.message}`);
     else setNotes((prev) => prev.map((n) => (n.id === id ? { ...n, body } : n)));
   };
@@ -130,7 +128,7 @@ export function MuralPostIts() {
     if (!confirm('Remover este post-it?')) return;
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-    const { error } = await supabase.from('mural_notes').delete().eq('id', id).eq('user_id', user.id);
+    const { error } = await supabase.from('mural_notes').delete().eq('id', id);
     if (error) alert(`Erro ao remover: ${error.message}`);
     else setNotes((prev) => prev.filter((n) => n.id !== id));
   };

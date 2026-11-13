@@ -58,7 +58,6 @@ export default function SitesPage() {
     const { data: siteData, error: siteErr } = await supabase
       .from('work_sites')
       .select('id, user_id, name, kind, responsible_employee_id, notes, active, created_at, updated_at')
-      .eq('user_id', user.id)
       .order('name', { ascending: true });
 
     if (siteErr) {
@@ -77,7 +76,6 @@ export default function SitesPage() {
     const { data: empData, error: empErr } = await supabase
       .from('employees')
       .select('id, full_name, status')
-      .eq('user_id', user.id)
       .order('full_name', { ascending: true });
     if (empErr) {
       console.error(empErr);
@@ -145,7 +143,7 @@ export default function SitesPage() {
       updated_at: new Date().toISOString(),
     };
     if (editing) {
-      const { error: upErr } = await supabase.from('work_sites').update(row).eq('id', editing.id).eq('user_id', user.id);
+      const { error: upErr } = await supabase.from('work_sites').update(row).eq('id', editing.id);
       if (upErr) {
         setError(upErr.message);
         setSaving(false);

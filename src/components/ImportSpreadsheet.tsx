@@ -231,7 +231,6 @@ export default function ImportSpreadsheet({
               .from('employees')
               .select('id')
               .eq('cpf', person.cpf)
-              .eq('user_id', user.id)
               .maybeSingle();
             if (data) empId = data.id;
           }
@@ -241,7 +240,6 @@ export default function ImportSpreadsheet({
               .from('employees')
               .select('id')
               .ilike('full_name', person.normalizedName)
-              .eq('user_id', user.id)
               .maybeSingle();
             if (data) empId = data.id;
           }
@@ -256,7 +254,7 @@ export default function ImportSpreadsheet({
           };
 
           if (empId) {
-            await supabase.from('employees').update(empData).eq('id', empId).eq('user_id', user.id);
+            await supabase.from('employees').update(empData).eq('id', empId);
             employeeMap.set(key, empId);
           } else {
             const { data } = await supabase.from('employees').insert(empData).select('id').single();
@@ -314,7 +312,6 @@ export default function ImportSpreadsheet({
               .from('items')
               .select('id, quantity_current')
               .eq('code', code)
-              .eq('user_id', user.id)
               .maybeSingle();
             if (byDesc) {
               existingId = String(byDesc.id);
@@ -326,7 +323,6 @@ export default function ImportSpreadsheet({
                 .from('items')
                 .select('id, quantity_current')
                 .ilike('description', escaped)
-                .eq('user_id', user.id)
                 .limit(1);
               if (byLike && byLike[0]) {
                 existingId = String(byLike[0].id);
@@ -339,7 +335,6 @@ export default function ImportSpreadsheet({
               .from('items')
               .select('id, quantity_current')
               .eq('code', itm.sheetCode)
-              .eq('user_id', user.id)
               .maybeSingle();
             if (byCode) {
               existingId = String(byCode.id);
@@ -363,7 +358,7 @@ export default function ImportSpreadsheet({
 
           let itemId: string | null = null;
           if (existingId) {
-            const { error: upErr } = await supabase.from('items').update(itemData).eq('id', existingId).eq('user_id', user.id);
+            const { error: upErr } = await supabase.from('items').update(itemData).eq('id', existingId);
             if (upErr) throw new Error(`Item "${itm.description}": ${upErr.message}`);
             itemId = existingId;
           } else {

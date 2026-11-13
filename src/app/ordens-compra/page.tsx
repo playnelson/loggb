@@ -212,7 +212,6 @@ export default function OrdensCompraPage() {
       .select(
         'id, oc_number, title, vendor_name, notes, delivery_deadline, stage, created_at, purchase_order_items!purchase_order_items_purchase_order_id_fkey(id, line_number, delivered, delivered_at, description, quantity, unit, received_quantity, stocked_quantity, inventory_item_id, stock_skip)'
       )
-      .eq('user_id', user.id)
       .order('created_at', { ascending: false });
 
     const stageMissing =
@@ -230,7 +229,6 @@ export default function OrdensCompraPage() {
         .select(
           'id, oc_number, title, vendor_name, notes, delivery_deadline, created_at, purchase_order_items!purchase_order_items_purchase_order_id_fkey(id, line_number, delivered, delivered_at, description, quantity, unit, received_quantity, stocked_quantity, inventory_item_id, stock_skip)'
         )
-        .eq('user_id', user.id)
         .order('created_at', { ascending: false });
       data = noStage.data;
       error = noStage.error;
@@ -324,8 +322,7 @@ export default function OrdensCompraPage() {
       const { error } = await supabase
         .from('purchase_orders')
         .update({ stage: stageValue })
-        .eq('id', row.id)
-        .eq('user_id', user.id);
+        .eq('id', row.id);
       if (error) {
         const raw = `${error.message || ''} ${error.details || ''} ${error.hint || ''}`.trim();
         if (/stage/i.test(raw)) {
@@ -369,8 +366,7 @@ export default function OrdensCompraPage() {
       const { error } = await supabase
         .from('purchase_orders')
         .delete()
-        .eq('id', row.id)
-        .eq('user_id', user.id);
+        .eq('id', row.id);
       if (error) throw error;
 
       await fetchOrders();

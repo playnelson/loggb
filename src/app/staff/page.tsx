@@ -314,7 +314,6 @@ export default function StaffPage() {
           )
         )
       `)
-      .eq('user_id', user.id)
       .order('full_name', { ascending: true });
 
     if (error) {
@@ -776,7 +775,6 @@ export default function StaffPage() {
           .from('employees')
           .update(payload)
           .eq('id', editingEmployee.id)
-          .eq('user_id', user.id)
       : await supabase.from('employees').insert([{ ...payload, user_id: user.id }]);
 
     if (error) {

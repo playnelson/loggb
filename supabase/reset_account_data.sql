@@ -1,3 +1,6 @@
+-- SUBSTITUÍDO: a versão atual de reset_my_account_data está em etapa5_organizacoes_workspaces.sql
+-- (zera só o workspace atual). Não rode este arquivo depois da etapa 5.
+
 -- "Zerar conta": apaga TODOS os dados do usuário logado, em todos os módulos,
 -- numa única transação (ou apaga tudo, ou nada).
 -- Roda com as permissões do próprio usuário (RLS), então só alcança dados dele.

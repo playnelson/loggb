@@ -113,7 +113,6 @@ export default function QuickMovementModal({
     const { data } = await supabase
       .from('employees')
       .select('id, full_name')
-      .eq('user_id', user.id)
       .eq('status', 'Ativo')
       .order('full_name');
     setEmployees((data || []).map((employee: Employee) => ({ ...employee, full_name: formatEmployeeName(employee.full_name) })));
@@ -128,7 +127,6 @@ export default function QuickMovementModal({
     const { data, error } = await supabase
       .from('work_sites')
       .select('id, name, kind')
-      .eq('user_id', user.id)
       .eq('active', true)
       .order('name', { ascending: true });
     if (error) {

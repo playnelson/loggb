@@ -62,7 +62,6 @@ export async function fetchTenantItems(
     let query = supabase
       .from('items')
       .select(sel)
-      .eq('user_id', userId)
       .order('description', { ascending: true })
       .order('id', { ascending: true });
     if (!includeArchived) query = query.is('archived_at', null);

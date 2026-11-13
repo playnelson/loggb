@@ -332,7 +332,6 @@ function InventoryContent() {
     const { data, error } = await supabase
       .from('employees')
       .select('id, full_name, status')
-      .eq('user_id', user.id)
       .order('full_name', { ascending: true });
     if (error) {
       console.error('Error fetching employees:', error);
@@ -354,7 +353,6 @@ function InventoryContent() {
     const { data, error } = await supabase
       .from('work_sites')
       .select('id, name, kind')
-      .eq('user_id', user.id)
       .eq('active', true)
       .order('name', { ascending: true });
     if (error) {
@@ -478,8 +476,7 @@ function InventoryContent() {
     await supabase
       .from('items')
       .update({ category: nextName })
-      .eq('category', prevName)
-      .eq('user_id', user.id);
+      .eq('category', prevName);
 
     setEditingCategory(null);
     setEditingCategoryName('');
@@ -589,7 +586,7 @@ function InventoryContent() {
 
     if (movCount === 0 && rentCount === 0) {
       if (!confirm(`Excluir "${name}"? O item não tem nenhuma movimentação, então será apagado de vez.`)) return;
-      const { error } = await supabase.from('items').delete().eq('id', p.id).eq('user_id', user.id);
+      const { error } = await supabase.from('items').delete().eq('id', p.id);
       if (error) alert('Erro ao excluir: ' + error.message);
       else void fetchProducts();
       return;
@@ -608,8 +605,7 @@ function InventoryContent() {
     const { error } = await supabase
       .from('items')
       .update({ archived_at: new Date().toISOString() })
-      .eq('id', p.id)
-      .eq('user_id', user.id);
+      .eq('id', p.id);
     if (error) alert('Erro ao arquivar: ' + error.message);
     else {
       setCart((prev) => prev.filter((l) => l.itemId !== p.id));
@@ -626,8 +622,7 @@ function InventoryContent() {
     const { error } = await supabase
       .from('items')
       .update({ archived_at: null })
-      .eq('id', p.id)
-      .eq('user_id', user.id);
+      .eq('id', p.id);
     if (error) alert('Erro ao reativar: ' + error.message);
     else void fetchProducts();
   };
@@ -679,7 +674,7 @@ function InventoryContent() {
     const tagVal = formData.tag.trim() || null;
 
     let patch: Record<string, unknown> = { ...basePatch, tag: tagVal };
-    let error = (await supabase.from('items').update(patch).eq('id', editingItem.id).eq('user_id', user.id)).error;
+    let error = (await supabase.from('items').update(patch).eq('id', editingItem.id)).error;
 
     if (
       error?.message &&
@@ -696,7 +691,7 @@ function InventoryContent() {
       delete legacy.calibration_due_date;
       delete legacy.expiration_date;
       patch = legacy;
-      error = (await supabase.from('items').update(patch).eq('id', editingItem.id).eq('user_id', user.id)).error;
+      error = (await supabase.from('items').update(patch).eq('id', editingItem.id)).error;
     }
 
     if (error) {
@@ -771,7 +766,6 @@ function InventoryContent() {
         const { data: existing } = await supabase
           .from('items')
           .select('id, archived_at')
-          .eq('user_id', user.id)
           .eq('code', code)
           .maybeSingle();
         if (existing?.archived_at) {
@@ -779,8 +773,7 @@ function InventoryContent() {
             const { error: restoreErr } = await supabase
               .from('items')
               .update({ archived_at: null })
-              .eq('id', existing.id)
-              .eq('user_id', user.id);
+              .eq('id', existing.id);
             if (restoreErr) alert('Erro ao reativar: ' + restoreErr.message);
             else {
               setIsModalOpen(false);

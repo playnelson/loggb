@@ -135,13 +135,11 @@ export default function RentalsPage() {
       let res = await supabase
         .from('items')
         .select('id, description, unit, is_rented, quantity_current')
-        .eq('user_id', user.id)
         .order('description', { ascending: true });
       if (res.error?.message && isLikelyMissingColumn(res.error.message, 'is_rented')) {
         const legacy = await supabase
           .from('items')
           .select('id, description, unit, quantity_current')
-          .eq('user_id', user.id)
           .order('description', { ascending: true });
         if (!legacy.error && legacy.data) {
           return {
@@ -159,19 +157,16 @@ export default function RentalsPage() {
       supabase
         .from('employees')
         .select('id, full_name, status, possession(item_id, quantity)')
-        .eq('user_id', user.id)
         .order('full_name', { ascending: true }),
       supabase
         .from('rental_suppliers')
         .select('id, name, contact_name, phone')
-        .eq('user_id', user.id)
         .order('name', { ascending: true }),
       supabase
         .from('equipment_rentals')
         .select(
           'id, item_id, supplier, supplier_id, contract_ref, status, employee_id, quantity, start_date, expected_return_date, monthly_cost, notes, items(id, description, unit), employees(id, full_name), rental_suppliers(id, name)'
         )
-        .eq('user_id', user.id)
         .order('created_at', { ascending: false }),
     ]);
 
@@ -422,8 +417,7 @@ export default function RentalsPage() {
       const { error: err } = await supabase
         .from('equipment_rentals')
         .update(payload)
-        .eq('id', editing.id)
-        .eq('user_id', user.id);
+        .eq('id', editing.id);
       upErr = err;
     } else {
       const { error: err } = await supabase.from('equipment_rentals').insert([payload]);
@@ -436,7 +430,7 @@ export default function RentalsPage() {
       return;
     }
 
-    await supabase.from('items').update({ is_rented: true }).eq('id', form.item_id).eq('user_id', user.id);
+    await supabase.from('items').update({ is_rented: true }).eq('id', form.item_id);
 
     setSaving(false);
     setModalOpen(false);
@@ -453,8 +447,7 @@ export default function RentalsPage() {
     const { error: err } = await supabase
       .from('equipment_rentals')
       .update({ status: 'encerrado', updated_at: new Date().toISOString() })
-      .eq('id', row.id)
-      .eq('user_id', user.id);
+      .eq('id', row.id);
     if (err) {
       alert(err.message || 'Falha ao encerrar aluguel.');
       return;

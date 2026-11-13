@@ -19,18 +19,21 @@ import {
   ChevronDown,
   Boxes,
   ShoppingCart,
+  Layers,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useRouter, usePathname } from 'next/navigation';
+import WorkspaceSwitcher from '@/components/WorkspaceSwitcher';
 
 type IconType = ComponentType<{ size?: number; className?: string; strokeWidth?: number }>;
-type NavLinkItem = { name: string; href: string; icon: IconType; hint?: string };
+/** compact: em telas médias mostra só o ícone; o nome aparece só em telas bem largas (2xl). */
+type NavLinkItem = { name: string; href: string; icon: IconType; hint?: string; compact?: boolean };
 type NavGroup = { name: string; icon: IconType; items: NavLinkItem[] };
 type NavEntry = NavLinkItem | NavGroup;
 
 /** Menu em cascata: links soltos e grupos que abrem para baixo. */
 const NAV: NavEntry[] = [
-  { name: 'Início', href: '/', icon: LayoutDashboard },
+  { name: 'Início', href: '/', icon: LayoutDashboard, compact: true },
   {
     name: 'Estoque',
     icon: Boxes,
@@ -49,14 +52,15 @@ const NAV: NavEntry[] = [
     ],
   },
   {
-    name: 'Pessoas e locais',
+    name: 'Cadastros',
     icon: Users,
     items: [
       { name: 'Colaboradores', href: '/staff', icon: Users, hint: 'Equipe, carteira e ficha de EPI' },
       { name: 'Sedes e canteiros', href: '/sites', icon: MapPin, hint: 'Locais e o que está em cada um' },
     ],
   },
-  { name: 'Configurações', href: '/settings', icon: Settings },
+  { name: 'Workspaces', href: '/workspaces', icon: Layers },
+  { name: 'Configurações', href: '/settings', icon: Settings, compact: true },
 ];
 
 function isGroup(e: NavEntry): e is NavGroup {
@@ -124,12 +128,11 @@ export function Header({
         <span className="text-xl sm:text-2xl font-bold tracking-tighter text-primary">
           LOGG<span className="text-secondary">B</span>
         </span>
-        <span className="bg-secondary/15 text-secondary text-[9px] sm:text-[10px] uppercase font-bold px-2 py-0.5 rounded-full border border-secondary/25 hidden min-[380px]:inline xl:inline">
-          Almoxarifado
-        </span>
       </Link>
 
-      <nav ref={navRef} className="hidden lg:flex items-center gap-1 ml-4 flex-1 min-w-0" aria-label="Menu principal">
+      <WorkspaceSwitcher />
+
+      <nav ref={navRef} className="hidden lg:flex items-center gap-0.5 xl:gap-1 ml-1 flex-1 min-w-0" aria-label="Menu principal">
         {NAV.map((entry) => {
           if (!isGroup(entry)) {
             const active = isActivePath(pathname, entry.href);
@@ -139,12 +142,13 @@ export function Header({
                 key={entry.href}
                 href={entry.href}
                 onClick={() => setOpenGroup(null)}
-                className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-colors ${
+                title={entry.name}
+                className={`inline-flex items-center gap-2 px-2.5 xl:px-3 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-colors ${
                   active ? 'bg-primary text-white' : 'text-slate-600 hover:text-primary hover:bg-slate-100'
                 }`}
               >
                 <Icon size={17} />
-                {entry.name}
+                <span className={entry.compact ? 'hidden 2xl:inline' : undefined}>{entry.name}</span>
               </Link>
             );
           }
@@ -158,7 +162,7 @@ export function Header({
                 aria-haspopup="menu"
                 aria-expanded={open}
                 onClick={() => setOpenGroup(open ? null : entry.name)}
-                className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-colors ${
+                className={`inline-flex items-center gap-2 px-2.5 xl:px-3 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-colors ${
                   groupActive
                     ? 'bg-primary text-white'
                     : open
@@ -206,10 +210,11 @@ export function Header({
       <button
         type="button"
         onClick={() => void signOut()}
+        title="Sair"
         className="hidden lg:inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold text-red-600 hover:bg-red-50 ml-auto shrink-0"
       >
         <LogOut size={17} />
-        Sair
+        <span className="hidden xl:inline">Sair</span>
       </button>
     </header>
   );

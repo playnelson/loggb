@@ -185,7 +185,6 @@ export default function OrdemCompraDetailPage() {
         'id, oc_number, title, vendor_name, vendor_contact_name, delivery_deadline, source_filename, notes, created_at'
       )
       .eq('id', id)
-      .eq('user_id', user.id)
       .maybeSingle();
 
     if (e1 || !po) {
@@ -612,8 +611,7 @@ ${summary}` : summary);
           vendor_contact_name: draftHeader.vendor_contact_line.trim() || null,
           delivery_deadline: draftHeader.delivery_deadline || null,
         })
-        .eq('id', id)
-        .eq('user_id', auth.user.id);
+        .eq('id', id);
       if (upErr) throw upErr;
 
       const { error: delErr } = await supabase

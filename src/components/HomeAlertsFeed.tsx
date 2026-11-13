@@ -65,7 +65,6 @@ export function HomeAlertsFeed() {
       let itemRes = await supabase
         .from('items')
         .select('id, description, calibration_due_date, expiration_date')
-        .eq('user_id', user.id)
         .is('archived_at', null);
 
       if (
@@ -117,7 +116,6 @@ export function HomeAlertsFeed() {
       const rentalsRes = await supabase
         .from('equipment_rentals')
         .select('id, supplier, contract_ref, expected_return_date, status, items(description), employees(full_name)')
-        .eq('user_id', user.id)
         .eq('status', 'ativo')
         .not('expected_return_date', 'is', null);
 

@@ -88,7 +88,8 @@ export async function GET() {
 
     for (const t of ACCOUNT_TABLES_RESTORE_ORDER) {
       const { rows, error } = await selectAll((from, to) => {
-        let q = supabase.from(t.table).select('*').eq(t.ownerColumn, user.id);
+        // O banco (RLS) já devolve só as linhas do workspace atual.
+        let q = supabase.from(t.table).select('*');
         for (const col of t.orderBy ?? ['id']) q = q.order(col, { ascending: true });
         return q.range(from, to);
       });
@@ -106,7 +107,7 @@ export async function GET() {
       data[t.table] = rows;
     }
 
-    // Itens das ordens de compra (não têm user_id próprio; pertencem à ordem).
+    // Itens das ordens de compra (pertencem à ordem).
     const orderIds = (data.purchase_orders ?? [])
       .map((row) => (typeof row.id === 'string' ? row.id : null))
       .filter((id): id is string => Boolean(id));
@@ -179,9 +180,11 @@ export async function POST(request: Request) {
     }
 
     for (const t of ACCOUNT_TABLES_RESTORE_ORDER) {
-      // O dono passa a ser SEMPRE o usuário logado (permite migrar para outra conta).
+      // O autor passa a ser o usuário logado, e o workspace é SEMPRE o atual
+      // (o banco preenche workspace_id). Permite levar um backup para outro workspace.
       const rows = asObjectArray(data[t.table] ?? []).map((row) => {
         const out: JsonObject = { ...row, [t.ownerColumn]: user.id };
+        delete out.workspace_id;
         for (const col of t.removedColumns ?? []) delete out[col];
         return out;
       });
@@ -204,7 +207,11 @@ export async function POST(request: Request) {
       importedCounts[t.table] = rows.length;
     }
 
-    const poItems = asObjectArray(data.purchase_order_items ?? []);
+    const poItems = asObjectArray(data.purchase_order_items ?? []).map((row) => {
+      const out: JsonObject = { ...row };
+      delete out.workspace_id;
+      return out;
+    });
     if (poItems.length > 0) {
       const res = await upsertRows(supabase, { table: 'purchase_order_items' }, poItems);
       if (res.error && !isTableMissingError(res.error)) {

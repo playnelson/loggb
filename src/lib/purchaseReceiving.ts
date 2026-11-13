@@ -91,7 +91,6 @@ export async function loadReceivableItems(supabase: SupabaseClient, userId: stri
     const { data, error } = await supabase
       .from('items')
       .select('id, code, description, unit, category, quantity_current')
-      .eq('user_id', userId)
       .is('archived_at', null)
       .order('description', { ascending: true })
       .order('id', { ascending: true })
@@ -179,7 +178,6 @@ export async function createItemForPoLine(
     const { data: existing } = await supabase
       .from('items')
       .select('id, archived_at')
-      .eq('user_id', userId)
       .eq('code', code)
       .maybeSingle();
     if (existing?.archived_at) {

@@ -19,9 +19,13 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { useInstallPrompt } from '@/hooks/useInstallPrompt';
+import { useWorkspace } from '@/lib/workspace';
 
 export default function SettingsPage() {
   const router = useRouter();
+  const { currentWorkspace, currentOrganization, isOrgAdmin } = useWorkspace();
+  const wsName = currentWorkspace ? `"${currentWorkspace.name}"` : 'atual';
+  const canReset = currentOrganization ? isOrgAdmin(currentOrganization.id) : true;
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [confirmStage, setConfirmStage] = useState(1);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -88,7 +92,7 @@ export default function SettingsPage() {
       }, 2000);
 
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Falha ao zerar dados da conta.');
+      setError(err instanceof Error ? err.message : 'Falha ao zerar os dados do workspace.');
       setIsDeleting(false);
     }
   };
@@ -211,7 +215,7 @@ export default function SettingsPage() {
             <SettingsIcon className="text-secondary" />
             Configurações
           </h1>
-          <p className="text-slate-500 mt-1">Gerencie suas preferências e dados da conta.</p>
+          <p className="text-slate-500 mt-1">Gerencie suas preferências e os dados do workspace atual.</p>
         </div>
       </div>
 
@@ -263,8 +267,8 @@ export default function SettingsPage() {
             </div>
             <div className="p-6 space-y-4">
               <p className="text-xs text-blue-900/90 leading-relaxed">
-                Baixe um arquivo completo dos seus dados para manter backup e restaurar em outra conta. Na restauração,
-                você pode substituir os dados atuais ou mesclar com os já existentes.
+                Baixe um arquivo com todos os dados do workspace {wsName} para guardar ou levar para outro workspace.
+                A restauração grava sempre no workspace em que você está, substituindo ou mesclando com os dados atuais.
               </p>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -311,7 +315,7 @@ export default function SettingsPage() {
                   className="mt-0.5"
                 />
                 <span>
-                  Substituir meus dados atuais durante a restauração (recomendado para migração para outra conta).
+                  Substituir os dados atuais deste workspace durante a restauração (recomendado ao levar para um workspace novo).
                 </span>
               </label>
 
@@ -347,20 +351,23 @@ export default function SettingsPage() {
             <div className="p-6">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div className="space-y-1">
-                  <p className="font-bold text-red-900">Zerar Todos os Dados</p>
+                  <p className="font-bold text-red-900">Zerar dados do workspace {wsName}</p>
                   <p className="text-xs text-red-700">
-                    Isso apagará permanentemente todos os dados da sua conta em todos os módulos: materiais,
+                    Isso apagará permanentemente os dados deste workspace em todos os módulos: materiais,
                     funcionários, históricos, ordens de compra, canteiros/sedes, contagens de inventário, mural e aluguéis.
+                    Os outros workspaces não são afetados.
+                    {!canReset ? ' Só o dono ou um administrador da organização pode fazer isso.' : ''}
                   </p>
                 </div>
                 <button 
+                  disabled={!canReset}
                   onClick={() => {
                     setIsModalOpen(true);
                     setConfirmStage(1);
                   }}
-                  className="px-6 py-2 bg-red-600 text-white rounded-lg font-bold hover:bg-red-700 transition-all shadow-lg shadow-red-200 whitespace-nowrap"
+                  className="px-6 py-2 bg-red-600 text-white rounded-lg font-bold hover:bg-red-700 transition-all shadow-lg shadow-red-200 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Zerar Conta
+                  Zerar workspace
                 </button>
               </div>
             </div>
@@ -390,7 +397,7 @@ export default function SettingsPage() {
                     <>
                       <h3 className="text-2xl font-black text-primary uppercase tracking-tight">Você tem certeza?</h3>
                       <p className="text-slate-500 text-sm">
-                        Esta ação apagará **TODOS** os seus registros no sistema LoggB. Não existe opção de desfazer!
+                        Esta ação apagará TODOS os registros do workspace {wsName}. Não existe opção de desfazer!
                       </p>
                     </>
                   ) : (

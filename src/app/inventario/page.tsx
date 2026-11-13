@@ -90,7 +90,6 @@ export default function InventarioPage() {
         supabase
           .from('inventory_counts')
           .select('id, title, status, blind, filter_category, filter_location, created_at, closed_at, adjusted_lines')
-          .eq('user_id', user.id)
           .order('created_at', { ascending: false })
           .limit(100),
         supabase.from('item_categories').select('name').order('name', { ascending: true }),

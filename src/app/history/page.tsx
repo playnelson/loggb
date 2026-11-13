@@ -124,7 +124,6 @@ export default function HistoryPage() {
         .select(
           'id, created_at, quantity, type, reason, tag, note, document, batch_id, ca_number, employee_id, work_site_id, items(description, unit), employees(full_name), work_sites(name, kind)'
         )
-        .eq('performed_by', user.id)
         .order('created_at', { ascending: false })
         .order('id', { ascending: false });
       if (reasonFilter !== 'ALL') q = q.eq('reason', reasonFilter);

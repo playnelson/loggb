@@ -65,7 +65,6 @@ export async function fetchAlmoxDashboardSnapshot(
     supabase
       .from('items')
       .select('id, description, quantity_current, quantity_min, unit, category')
-      .eq('user_id', userId)
       .is('archived_at', null)
       .order('id', { ascending: true })
       .range(from, to)

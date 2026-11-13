@@ -1,13 +1,13 @@
 /**
- * Todas as tabelas com dono (dados da conta), numa lista única, na ordem de
+ * Todas as tabelas de dados do workspace, numa lista única, na ordem de
  * restauração (referenciado antes de quem referencia).
- * Usada pelo backup/restauração. O "Zerar conta" apaga as mesmas tabelas em
- * supabase/reset_account_data.sql — ao criar uma tabela nova com user_id,
- * acrescente-a nos DOIS lugares.
+ * Usada pelo backup/restauração (sempre do workspace atual). O "Zerar dados" apaga
+ * as mesmas tabelas em supabase/etapa5_organizacoes_workspaces.sql — ao criar uma
+ * tabela nova com workspace_id, acrescente-a nos DOIS lugares.
  */
 export type AccountTable = {
   table: string;
-  /** Coluna que identifica o dono da linha. */
+  /** Coluna de autor da linha (quem criou / quem fez). */
   ownerColumn: 'user_id' | 'performed_by';
   /** Chave usada no upsert da restauração (padrão: id). */
   onConflict?: string;
