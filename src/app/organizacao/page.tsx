@@ -17,7 +17,7 @@ type Tab = 'pessoas' | 'areas' | 'cargos' | 'convites';
 
 const TABS: { key: Tab; label: string; icon: typeof Users }[] = [
   { key: 'pessoas', label: 'Pessoas', icon: Users },
-  { key: 'areas', label: 'Áreas do estoque', icon: Boxes },
+  { key: 'areas', label: 'Almoxarifados', icon: Boxes },
   { key: 'cargos', label: 'Cargos', icon: ShieldCheck },
   { key: 'convites', label: 'Convites', icon: Mail },
 ];
@@ -124,7 +124,7 @@ export default function OrganizacaoPage() {
       <div className="bg-white border border-slate-200 p-6 max-w-xl">
         <h1 className="text-lg font-bold text-primary">Organização</h1>
         <p className="text-sm text-slate-600 mt-1">
-          Só o ADM da organização acessa esta página. Se você precisa de outro cargo ou de outra área, fale com o ADM.
+          Só o ADM da organização acessa esta página. Se você precisa de outro cargo ou de outro almoxarifado, fale com o ADM.
         </p>
       </div>
     );
@@ -146,7 +146,7 @@ export default function OrganizacaoPage() {
             Organização
           </h1>
           <p className="text-xs text-slate-500">
-            {org.name} · quem participa, o que cada um pode fazer e qual parte do estoque cada um gerencia
+            {org.name} · quem participa, o que cada um pode fazer e qual almoxarifado cada um gerencia
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -193,7 +193,7 @@ export default function OrganizacaoPage() {
 
       {missing ? (
         <div className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded p-4">
-          O banco ainda não tem cargos e áreas. Aplique a <strong>etapa 9</strong> (supabase/etapa9_cargos_areas.sql) no Supabase.
+          O banco ainda não tem cargos e almoxarifados. Aplique a <strong>etapa 9</strong> (supabase/etapa9_cargos_areas.sql) no Supabase.
         </div>
       ) : error ? (
         <div className="text-sm font-bold text-red-700 bg-red-50 border border-red-200 rounded p-3">{error}</div>

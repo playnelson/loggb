@@ -75,7 +75,7 @@ export default function ConvitePage() {
   // Sem a etapa 9 no banco, o convite de "gestor" era só consulta.
   const readOnly = info ? (typeof info.read_only === 'boolean' ? info.read_only : info.role === 'gestor') : false;
   const areasText = info?.all_areas
-    ? 'Todas as áreas do estoque'
+    ? 'Todos os almoxarifados'
     : info?.areas && info.areas.length
       ? info.areas.join(', ')
       : 'Nenhuma (consulta o estoque)';
@@ -118,7 +118,7 @@ export default function ConvitePage() {
                   <p className="text-sm">
                     Você vai entrar como <strong>{info.cargo_name || 'membro da equipe'}</strong> e usar o workspace junto com a
                     equipe: a mesma lista de colaboradores, o mesmo estoque e as mesmas compras. No estoque, você movimenta
-                    os itens das áreas abaixo e consulta o resto.
+                    os itens dos almoxarifados abaixo.
                   </p>
                 </div>
               ) : (
@@ -134,7 +134,7 @@ export default function ConvitePage() {
               <dl className="text-sm space-y-2">
                 {!readOnly && info.cargo_name ? (
                   <div>
-                    <dt className="text-xs font-bold uppercase text-slate-400">Áreas do estoque que você gerencia</dt>
+                    <dt className="text-xs font-bold uppercase text-slate-400">Almoxarifados que você gerencia</dt>
                     <dd className="font-medium text-primary">{areasText}</dd>
                   </div>
                 ) : null}

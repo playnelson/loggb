@@ -37,8 +37,8 @@ export default function AreasTab({
   const remove = async (a: StockAreaRow) => {
     const n = areaMembers.get(a.id)?.length ?? 0;
     const msg = n
-      ? `Apagar a área "${a.name}"? ${n} pessoa(s) deixam de gerenciar esses itens.`
-      : `Apagar a área "${a.name}"?`;
+      ? `Apagar o almoxarifado "${a.name}"? ${n} pessoa(s) deixam de gerenciar esses itens.`
+      : `Apagar o almoxarifado "${a.name}"?`;
     if (!window.confirm(msg)) return;
     const { error: delErr } = await supabase.from('stock_areas').delete().eq('id', a.id);
     setError(delErr ? delErr.message : null);
@@ -49,8 +49,9 @@ export default function AreasTab({
     <div className="space-y-3">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <p className="text-xs text-slate-600 max-w-2xl">
-          Cada área junta categorias de itens (ex.: <strong>EPIs</strong> = categoria EPI). Quem está na área dá entrada,
-          entrega, devolve e edita esses itens. Uma área pode ter várias pessoas.
+          Cada almoxarifado junta categorias de itens (ex.: <strong>EPIs</strong> = categoria EPI) e tem seus responsáveis.
+          Eles dão entrada, entregam, devolvem e editam esses itens; os outros almoxarifados ficam escondidos para eles.
+          Um almoxarifado pode ter várias pessoas. O ADM vê e gerencia todos.
         </p>
         <button
           type="button"
@@ -58,7 +59,7 @@ export default function AreasTab({
           className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-bold text-white bg-secondary rounded hover:opacity-95 shrink-0"
         >
           <Plus size={16} />
-          Nova área
+          Novo almoxarifado
         </button>
       </div>
 
@@ -66,7 +67,7 @@ export default function AreasTab({
 
       {areas.length === 0 ? (
         <div className="bg-white border border-slate-200 p-6 text-center text-sm text-slate-500">
-          Nenhuma área criada. Comece por <strong>EPIs</strong>, <strong>Ferramentas</strong> e <strong>Equipamentos</strong>.
+          Nenhum almoxarifado criado. Comece por <strong>EPIs</strong>, <strong>Ferramentas</strong> e <strong>Equipamentos</strong>.
         </div>
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
@@ -92,7 +93,7 @@ export default function AreasTab({
                       type="button"
                       onClick={() => void remove(a)}
                       className="inline-flex items-center gap-1 px-2 py-1 text-xs font-bold text-red-600 border border-red-200 rounded hover:bg-red-50"
-                      aria-label={`Apagar a área ${a.name}`}
+                      aria-label={`Apagar o almoxarifado ${a.name}`}
                     >
                       <Trash2 size={12} />
                     </button>
@@ -128,15 +129,15 @@ export default function AreasTab({
         <div className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded p-3 flex gap-2">
           <AlertTriangle size={16} className="shrink-0 mt-0.5" />
           <span>
-            Categorias sem área: <strong>{uncovered.map((c) => c.name).join(', ')}</strong>. Esses itens só podem ser
-            movimentados por ADM ou por quem tem &quot;todas as áreas&quot;.
+            Categorias sem almoxarifado: <strong>{uncovered.map((c) => c.name).join(', ')}</strong>. Esses itens só podem ser
+            movimentados por ADM ou por quem tem &quot;todos os almoxarifados&quot;.
           </span>
         </div>
       ) : null}
 
       {generalPeople.length > 0 ? (
         <p className="text-[11px] text-slate-500">
-          Gerenciam todas as áreas: {generalPeople.map((p) => `${p.email}${p.is_adm ? ' (ADM)' : ''}`).join(', ')}.
+          Gerenciam todos os almoxarifados: {generalPeople.map((p) => `${p.email}${p.is_adm ? ' (ADM)' : ''}`).join(', ')}.
         </p>
       ) : null}
 
@@ -198,7 +199,7 @@ function AreaModal({
     e.preventDefault();
     const n = name.trim();
     if (!n) {
-      setError('Dê um nome para a área.');
+      setError('Dê um nome para o almoxarifado.');
       return;
     }
     if (cats.length === 0) {
@@ -215,7 +216,7 @@ function AreaModal({
         .eq('id', areaId);
       if (upErr) {
         setSaving(false);
-        setError(/duplicate|unique/i.test(upErr.message) ? 'Já existe uma área com esse nome.' : upErr.message);
+        setError(/duplicate|unique/i.test(upErr.message) ? 'Já existe um almoxarifado com esse nome.' : upErr.message);
         return;
       }
     } else {
@@ -226,7 +227,7 @@ function AreaModal({
         .single();
       if (insErr || !data) {
         setSaving(false);
-        setError(insErr && /duplicate|unique/i.test(insErr.message) ? 'Já existe uma área com esse nome.' : insErr?.message || 'Não foi possível criar a área.');
+        setError(insErr && /duplicate|unique/i.test(insErr.message) ? 'Já existe um almoxarifado com esse nome.' : insErr?.message || 'Não foi possível criar o almoxarifado.');
         return;
       }
       areaId = String(data.id);
@@ -257,11 +258,11 @@ function AreaModal({
   };
 
   return (
-    <OrgModal title={area ? `Área: ${area.name}` : 'Nova área do estoque'} onClose={onClose} wide>
+    <OrgModal title={area ? `Almoxarifado: ${area.name}` : 'Novo almoxarifado'} onClose={onClose} wide>
       <form onSubmit={submit} className="p-4 space-y-4">
         <ErrorBox message={error} />
         <div>
-          <FieldLabel htmlFor="a-name">Nome da área</FieldLabel>
+          <FieldLabel htmlFor="a-name">Nome do almoxarifado</FieldLabel>
           <input
             id="a-name"
             value={name}
@@ -275,7 +276,7 @@ function AreaModal({
 
         <fieldset>
           <legend className="block text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-1">
-            Categorias de itens desta área
+            Categorias de itens deste almoxarifado
           </legend>
           <div className="max-h-56 overflow-y-auto rounded border border-slate-200 divide-y divide-slate-100">
             {categories.map((c) => {
@@ -324,7 +325,7 @@ function AreaModal({
         </fieldset>
 
         <fieldset>
-          <legend className="block text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-1">Quem gerencia esta área</legend>
+          <legend className="block text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-1">Responsáveis por este almoxarifado</legend>
           {people.length === 0 ? (
             <p className="text-xs text-slate-500">
               Ainda não há outras pessoas na organização. Convide pela aba <strong>Convites</strong>.
@@ -342,18 +343,18 @@ function AreaModal({
                     }
                   />
                   <span className="font-medium text-primary break-all">{p.email}</span>
-                  {p.all_areas ? <span className="text-[11px] text-slate-400">já gerencia todas as áreas</span> : null}
+                  {p.all_areas ? <span className="text-[11px] text-slate-400">já gerencia todos</span> : null}
                 </label>
               ))}
             </div>
           )}
-          <p className="text-[11px] text-slate-400 mt-1">Os ADMs gerenciam todas as áreas automaticamente.</p>
+          <p className="text-[11px] text-slate-400 mt-1">Os ADMs gerenciam todos os almoxarifados automaticamente.</p>
         </fieldset>
 
         <ModalActions
           onCancel={onClose}
           saving={saving}
-          submitLabel={area ? 'Salvar área' : 'Criar área'}
+          submitLabel={area ? 'Salvar almoxarifado' : 'Criar almoxarifado'}
           icon={saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
         />
       </form>

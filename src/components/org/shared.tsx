@@ -159,19 +159,19 @@ export function AreaPicker({
   return (
     <fieldset>
       <legend className="block text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-1">
-        Áreas do estoque que gerencia
+        Almoxarifados que gerencia
       </legend>
       <p className="text-[11px] text-slate-500 mb-2">
-        A pessoa só vê e mexe nos itens das áreas marcadas (entrada, entrega, devolução, cadastro e edição); o resto do estoque fica escondido para ela. Sem nenhuma área marcada, ela vê o estoque todo, só para consulta.
+        A pessoa só vê e mexe nos itens dos almoxarifados marcados (entrada, entrega, devolução, cadastro e edição); os outros ficam escondidos para ela. Sem nenhum marcado, ela vê tudo, só para consulta.
       </p>
       <label className="flex items-center gap-2 text-sm font-bold text-primary">
         <input type="checkbox" checked={all} onChange={(e) => onAllChange(e.target.checked)} />
-        Todas as áreas (almoxarife geral)
+        Todos os almoxarifados (almoxarife geral)
       </label>
       {!all ? (
         areas.length === 0 ? (
           <p className="mt-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded p-2">
-            Ainda não há áreas. Crie as áreas na aba <strong>Áreas do estoque</strong> (ex.: EPIs, Ferramentas).
+            Ainda não há almoxarifados. Crie na aba <strong>Almoxarifados</strong> (ex.: EPIs, Ferramentas).
           </p>
         ) : (
           <div className="mt-2 max-h-48 overflow-y-auto rounded border border-slate-200 divide-y divide-slate-100">

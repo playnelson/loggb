@@ -38,8 +38,7 @@ export default function RolesTab({
     <div className="space-y-3">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <p className="text-xs text-slate-600 max-w-2xl">
-          O cargo diz o que a pessoa pode fazer. O estoque é liberado pelas <strong>áreas</strong>; os itens fora das áreas da
-          pessoa ficam só para consulta. O <strong>ADM</strong> pode tudo e não precisa de cargo.
+          O cargo diz o que a pessoa pode fazer. Os itens são liberados pelos <strong>almoxarifados</strong> (aba Almoxarifados): a pessoa só vê os almoxarifados dela. O <strong>ADM</strong> pode tudo e não precisa de cargo.
         </p>
         <button
           type="button"
@@ -216,7 +215,7 @@ function RoleModal({
               </label>
             ))}
           </div>
-          <p className="text-[11px] text-slate-400 mt-1">Sem nada marcado e sem áreas, a pessoa fica só consultando.</p>
+          <p className="text-[11px] text-slate-400 mt-1">Sem nada marcado e sem almoxarifado, a pessoa fica só consultando.</p>
         </fieldset>
         <ModalActions
           onCancel={onClose}

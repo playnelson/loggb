@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 
 import { useState, useEffect, Suspense, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
-import WorkspaceBar from '@/components/WorkspaceBar';
+import AlmoxarifadoTabs, { itemInAlmox, useAlmoxSelection, useAlmoxarifados } from '@/components/AlmoxarifadoTabs';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { formatProductLabelDisplay, normalizeProductLabelForSave } from '@/lib/productDisplayText';
@@ -177,6 +177,10 @@ function InventoryContent() {
   /** Item aberto pelo QR da etiqueta (?item=<id>): a lista mostra só ele. */
   const focusItemId = searchParams.get('item');
   const { can, canManageCategory, managesAnyArea } = useWorkspace();
+  /** Almoxarifados (por categoria) que a pessoa enxerga e o escolhido nas abas. */
+  const almox = useAlmoxarifados();
+  const [almoxSel, setAlmoxSel] = useAlmoxSelection(almox.list);
+  const almoxArea = almox.list.find((a) => a.id === almoxSel) ?? null;
   const approver = useCanApproveDeletion();
   const canCategories = can('cadastros');
   /** Excluir: quem aprova exclui na hora; os outros pedem (página Aprovações). */
@@ -813,10 +817,20 @@ function InventoryContent() {
   const activeProductsCount = useMemo(() => products.filter((p) => !p.archived_at).length, [products]);
   const archivedProductsCount = products.length - activeProductsCount;
 
+  /** Itens ativos em cada aba de almoxarifado. */
+  const almoxCounts = useMemo(() => {
+    const active = products.filter((p) => !p.archived_at);
+    const out: Record<string, number> = { todos: active.length };
+    for (const a of almox.list) out[a.id] = active.filter((p) => itemInAlmox(p.category, a.id, almox.list)).length;
+    out.outros = active.filter((p) => itemInAlmox(p.category, 'outros', almox.list)).length;
+    return out;
+  }, [products, almox.list]);
+
   const filteredProducts = useMemo(() => {
     const q = normalizeSearchText(filterDescription);
     if (focusItemId) return products.filter((p) => p.id === focusItemId);
     return products.filter((p) => {
+      if (!itemInAlmox(p.category, almoxSel, almox.list)) return false;
       if (filterArchived === 'active' ? p.archived_at : !p.archived_at) return false;
       if (
         q &&
@@ -867,10 +881,13 @@ function InventoryContent() {
     filterCart,
     cart,
     focusItemId,
+    almoxSel,
+    almox.list,
   ]);
 
   // Renderização progressiva: mostra 30 itens filtrados e acrescenta mais 30 ao chegar no fim da lista.
   const filterKey = [
+    almoxSel,
     focusItemId || '',
     filterArchived,
     filterDescription,
@@ -1182,9 +1199,6 @@ function InventoryContent() {
         <div>
           <h1 className="text-xl sm:text-[22px] font-bold tracking-tight text-primary">Almoxarifado</h1>
           <p className="text-slate-500 text-sm">Gestão de materiais, EPIs e ferramentas por descrição e categoria.</p>
-          <div className="mt-2">
-            <WorkspaceBar />
-          </div>
         </div>
         <div className="flex flex-col gap-2 w-full md:flex-row md:flex-nowrap md:w-auto md:gap-2">
           <button
@@ -1267,7 +1281,10 @@ function InventoryContent() {
             onClick={() => {
               setEditingItem(null);
               const blank = emptyItemForm();
-              if (!canManageCategory(blank.category)) {
+              // Almoxarifado escolhido nas abas: o item novo já nasce numa categoria dele.
+              const ofAlmox = almoxArea ? categoryOptions.find((c) => itemInAlmox(c, almoxArea.id, almox.list) && canManageCategory(c)) : undefined;
+              if (ofAlmox) blank.category = ofAlmox;
+              else if (!canManageCategory(blank.category)) {
                 const mine = categoryOptions.find((c) => canManageCategory(c));
                 if (mine) blank.category = mine;
               }
@@ -1282,6 +1299,16 @@ function InventoryContent() {
           </>
           ) : null}
         </div>
+      </div>
+
+      <div className="-mt-3 px-1">
+        <AlmoxarifadoTabs
+          list={almox.list}
+          seesAll={almox.seesAll}
+          value={almoxSel}
+          onChange={setAlmoxSel}
+          counts={almoxCounts}
+        />
       </div>
 
       {isImportModalOpen && (
@@ -1818,7 +1845,7 @@ function InventoryContent() {
                           <div className="flex justify-end items-center gap-1">
                             <span
                               className="text-[10px] font-bold uppercase text-slate-400 mr-1"
-                              title="Este item é de uma área do estoque que você não gerencia. Peça ao ADM para incluir você na área."
+                              title="Este item é de um almoxarifado que você não gerencia. Peça ao ADM para incluir você nele."
                             >
                               Só consulta
                             </span>
@@ -2051,7 +2078,7 @@ function InventoryContent() {
                   {!canManageCategory(p.category) ? (
                   <div className="grid grid-cols-1 gap-2">
                     <p className="text-[11px] text-slate-500 text-center">
-                      Só consulta: este item é de uma área do estoque que você não gerencia.
+                      Só consulta: este item é de um almoxarifado que você não gerencia.
                     </p>
                     <button
                       type="button"
@@ -2356,7 +2383,7 @@ function InventoryContent() {
                     onChange={(e) => setFormData({...formData, category: e.target.value})}
                   >
                     {categoryOptions
-                      .filter((c) => c === formData.category || canManageCategory(c))
+                      .filter((c) => c === formData.category || (canManageCategory(c) && (!almoxArea || editingItem || itemInAlmox(c, almoxArea.id, almox.list))))
                       .map((c) => (
                         <option key={c} value={c}>{c}</option>
                       ))}

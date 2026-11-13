@@ -104,7 +104,7 @@ export default function PeopleTab({
             <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-slate-500 border-b border-slate-200">
               <th className="px-3 py-2">Pessoa</th>
               <th className="px-3 py-2">Cargo</th>
-              <th className="px-3 py-2">Áreas do estoque</th>
+              <th className="px-3 py-2">Almoxarifados</th>
               <th className="px-3 py-2 hidden md:table-cell">Workspaces</th>
               <th className="px-3 py-2 hidden lg:table-cell">Prazo</th>
               <th className="px-3 py-2 text-right">Ações</th>
@@ -149,7 +149,7 @@ export default function PeopleTab({
                   </td>
                   <td className="px-3 py-2">
                     {p.is_adm || p.all_areas ? (
-                      <span className="text-xs font-bold text-secondary">Todas as áreas</span>
+                      <span className="text-xs font-bold text-secondary">Todos</span>
                     ) : p.area_ids.length ? (
                       <span className="flex flex-wrap gap-1">
                         {p.area_ids.map((id) => (
@@ -157,7 +157,7 @@ export default function PeopleTab({
                         ))}
                       </span>
                     ) : (
-                      <span className="text-xs text-slate-400">Nenhuma (vê tudo, só consulta)</span>
+                      <span className="text-xs text-slate-400">Nenhum (vê tudo, só consulta)</span>
                     )}
                   </td>
                   <td className="px-3 py-2 hidden md:table-cell text-xs text-slate-600">
@@ -206,7 +206,7 @@ export default function PeopleTab({
       </div>
       <p className="text-[11px] text-slate-500">
         Para colocar alguém novo, use a aba <strong>Convites</strong>: a pessoa recebe um link e já entra ligada à ficha do
-        funcionário, com o cargo e as áreas escolhidos. Quem criou a organização é sempre ADM.
+        funcionário, com o cargo e os almoxarifados escolhidos. Quem criou a organização é sempre ADM.
       </p>
 
       {editing ? (
@@ -368,7 +368,7 @@ function PersonModal({
               <input type="radio" name="tipo" className="mt-1" checked={!isAdm} onChange={() => setIsAdm(false)} />
               <span>
                 <span className="block text-sm font-bold text-primary">Cargo</span>
-                <span className="block text-[11px] text-slate-500">Faz o que o cargo libera, nas áreas marcadas.</span>
+                <span className="block text-[11px] text-slate-500">Faz o que o cargo libera, nos almoxarifados marcados.</span>
               </span>
             </label>
             <label
@@ -383,7 +383,7 @@ function PersonModal({
                   ADM
                 </span>
                 <span className="block text-[11px] text-slate-500">
-                  Pode tudo: pessoas, cargos, áreas, workspaces e todas as áreas do estoque.
+                  Pode tudo: pessoas, cargos e todos os almoxarifados.
                 </span>
               </span>
             </label>

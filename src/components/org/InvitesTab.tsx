@@ -148,7 +148,7 @@ export default function InvitesTab({
         <p className="text-xs text-slate-600 max-w-2xl">
           O convite vale para <strong>1 pessoa</strong>, fica ligado à <strong>ficha de um funcionário</strong> e tem um link e
           uma <strong>chave</strong> (ex.: K7QM-3XPA). A pessoa cria a conta no LoggB, cola a chave na tela de boas-vindas e já
-          começa com o cargo, as áreas e os workspaces que você escolher. Depois dá para mudar tudo na aba Pessoas.
+          começa com o cargo e os almoxarifados que você escolher. Depois dá para mudar tudo na aba Pessoas.
         </p>
         <button
           type="button"
@@ -184,7 +184,7 @@ export default function InvitesTab({
                   ) : null}
                   <Chip tone="green">{cargoName(inv)}</Chip>
                   {inv.all_areas ? (
-                    <Chip>Todas as áreas</Chip>
+                    <Chip>Todos os almoxarifados</Chip>
                   ) : (
                     inv.area_ids.map((id) => <Chip key={id}>{areaById.get(id)?.name ?? 'Área removida'}</Chip>)
                   )}

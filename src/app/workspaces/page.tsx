@@ -538,7 +538,7 @@ function WorkspacesContent() {
               {admin ? (
                 <div className="mt-4 border-t border-slate-100 pt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <p className="text-xs text-slate-600">
-                    Pessoas, cargos, áreas do estoque e convites ficam na página <strong>Organização</strong>.
+                    Pessoas, cargos, almoxarifados e convites ficam na página <strong>Organização</strong>.
                   </p>
                   {currentOrganization?.id === org.id ? (
                     <Link

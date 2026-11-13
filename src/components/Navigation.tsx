@@ -19,7 +19,6 @@ import {
   ChevronRight,
   Boxes,
   ShoppingCart,
-  Layers,
   Eye,
   Building2,
   ShieldCheck,
@@ -64,7 +63,6 @@ const NAV: NavEntry[] = [
       ],
   },
   { name: 'Aprovações', href: '/aprovacoes', icon: ShieldCheck },
-  { name: 'Workspaces', href: '/workspaces', icon: Layers },
   { name: 'Configurações', href: '/settings', icon: Settings },
 ];
 
@@ -73,17 +71,16 @@ const NAV_READ_ONLY: NavEntry[] = [
   { name: 'Estoque', href: '/gestor', icon: Package },
   { name: 'Colaboradores', href: '/gestor/colaboradores', icon: Users },
   { name: 'Histórico', href: '/history', icon: History },
-  { name: 'Workspaces', href: '/workspaces', icon: Layers },
 ];
 
-/** Só para ADM: pessoas, cargos, áreas do estoque e convites. */
+/** Só para ADM: pessoas, cargos, almoxarifados e convites. */
 const NAV_ORG: NavLinkItem = { name: 'Organização', href: '/organizacao', icon: Building2 };
 
 function useNavEntries(): NavEntry[] {
   const { readOnly, isAdm } = useWorkspace();
   if (readOnly) return NAV_READ_ONLY;
   if (!isAdm) return NAV;
-  const i = NAV.findIndex((e) => !isGroup(e) && e.href === '/workspaces');
+  const i = NAV.findIndex((e) => !isGroup(e) && e.href === '/settings');
   return [...NAV.slice(0, i), NAV_ORG, ...NAV.slice(i)];
 }
 
