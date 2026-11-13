@@ -11,6 +11,7 @@ import {
   Check,
   Folder,
   HardHat,
+  KeyRound,
   Layers,
   Loader2,
   LogIn,
@@ -32,6 +33,7 @@ import {
 } from '@/lib/workspace';
 import { LogoPicker, OrgLogo, OrganizationSetupForm } from '@/components/OrganizationSetup';
 import Link from 'next/link';
+import JoinWithInvite from '@/components/JoinWithInvite';
 
 const inputClass = 'mt-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-secondary';
 const labelClass = 'text-xs font-bold uppercase text-slate-400';
@@ -276,6 +278,7 @@ function WorkspacesContent() {
   const { status, organizations, workspaces, currentWorkspace, currentOrganization, reload, switchWorkspace, isOrgAdmin, access } =
     useWorkspace();
   const [modal, setModal] = useState<ModalState>(null);
+  const [joinOpen, setJoinOpen] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
@@ -342,14 +345,24 @@ function WorkspacesContent() {
             Cada workspace é um canteiro, cidade ou sede, com estoque, equipe e histórico próprios.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setModal({ type: 'new-org' })}
-          className="flex items-center justify-center gap-2 border border-slate-200 bg-white text-primary px-4 py-2 rounded-lg font-bold hover:bg-slate-50"
-        >
-          <Plus size={18} />
-          Nova organização
-        </button>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <button
+            type="button"
+            onClick={() => setJoinOpen(true)}
+            className="flex items-center justify-center gap-2 border border-slate-200 bg-white text-primary px-4 py-2 rounded-lg font-bold hover:bg-slate-50"
+          >
+            <KeyRound size={18} />
+            Entrar com convite
+          </button>
+          <button
+            type="button"
+            onClick={() => setModal({ type: 'new-org' })}
+            className="flex items-center justify-center gap-2 border border-slate-200 bg-white text-primary px-4 py-2 rounded-lg font-bold hover:bg-slate-50"
+          >
+            <Plus size={18} />
+            Nova organização
+          </button>
+        </div>
       </div>
 
       {error ? (
@@ -543,6 +556,12 @@ function WorkspacesContent() {
           </section>
         );
       })}
+
+      {joinOpen ? (
+        <Modal title="Entrar em outra organização" onClose={() => setJoinOpen(false)}>
+          <JoinWithInvite compact />
+        </Modal>
+      ) : null}
 
       {modal?.type === 'new-org' ? (
         <Modal title="Nova organização" onClose={() => setModal(null)}>

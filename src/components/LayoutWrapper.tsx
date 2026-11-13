@@ -7,6 +7,7 @@ import { Layers, Loader2 } from 'lucide-react';
 import { Header, MobileMenuPanel, MobileBottomNav, PageTrail } from '@/components/Navigation';
 import AppFooter from '@/components/AppFooter';
 import { OrganizationSetupForm } from '@/components/OrganizationSetup';
+import JoinWithInvite from '@/components/JoinWithInvite';
 import { WorkspaceProvider, isReadOnlyPath, useWorkspace } from '@/lib/workspace';
 
 /**
@@ -39,7 +40,7 @@ function WorkspaceGate({ children }: { children: React.ReactNode }) {
 
   if (status === 'onboarding') {
     return (
-      <div className="max-w-xl mx-auto py-6 sm:py-10">
+      <div className="max-w-xl mx-auto py-6 sm:py-10 space-y-4">
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden border-t-[3px] border-t-secondary">
           <div className="p-6 border-b border-slate-100 bg-slate-50">
             <h1 className="text-xl font-bold text-primary flex items-center gap-2">
@@ -47,10 +48,19 @@ function WorkspaceGate({ children }: { children: React.ReactNode }) {
               Bem-vindo ao LoggB
             </h1>
             <p className="text-sm text-slate-500 mt-1">
-              Para começar, crie a sua organização (empresa) e o primeiro workspace (canteiro, cidade ou sede).
+              Vai trabalhar na equipe de uma empresa que já usa o LoggB? Use o convite que o ADM enviou.
             </p>
-            <p className="text-xs text-slate-400 mt-2">
-              Recebeu um convite de outra empresa? Abra o link do convite de novo para entrar.
+          </div>
+          <div className="p-6">
+            <JoinWithInvite />
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="p-6 border-b border-slate-100 bg-slate-50">
+            <h2 className="text-base font-bold text-primary">Ou crie a sua própria organização</h2>
+            <p className="text-sm text-slate-500 mt-1">
+              Só se você é o responsável pela empresa: crie a organização e o primeiro workspace (canteiro, cidade ou sede).
             </p>
           </div>
           <div className="p-6">

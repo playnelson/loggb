@@ -1,10 +1,11 @@
 'use client';
 
 import { useMemo, useState, type FormEvent } from 'react';
-import { Check, Copy, Link2, Loader2, MessageCircle, Trash2, UserPlus } from 'lucide-react';
+import { Check, Copy, KeyRound, Link2, Loader2, MessageCircle, Trash2, UserPlus } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { formatDateTimeBR, type Workspace } from '@/lib/workspace';
 import type { OrgRoleRow, StockAreaRow } from '@/lib/permissions';
+import { formatInviteCode } from '@/lib/inviteCode';
 import {
   AreaPicker,
   CargoSelect,
@@ -20,6 +21,8 @@ import {
 export type InviteRow = {
   id: string;
   token: string;
+  /** Chave curta (etapa 11). */
+  code: string;
   role: string;
   cargo_id: string | null;
   all_areas: boolean;
@@ -35,7 +38,7 @@ export type InviteRow = {
 };
 
 export const INVITE_COLUMNS =
-  'id, token, role, cargo_id, all_areas, area_ids, label, workspace_scope, invite_expires_at, access_expires_at, max_uses, uses, revoked_at, created_at';
+  'id, token, code, role, cargo_id, all_areas, area_ids, label, workspace_scope, invite_expires_at, access_expires_at, max_uses, uses, revoked_at, created_at';
 
 const DURATIONS: { value: string; label: string; days: number | null }[] = [
   { value: '1', label: '1 dia', days: 1 },
@@ -59,13 +62,13 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
-function CopyLinkButton({ token }: { token: string }) {
+function CopyButton({ text, label }: { text: string; label: string }) {
   const [done, setDone] = useState(false);
   return (
     <button
       type="button"
       onClick={async () => {
-        if (await copyText(inviteLink(token))) {
+        if (await copyText(text)) {
           setDone(true);
           setTimeout(() => setDone(false), 1800);
         }
@@ -73,7 +76,7 @@ function CopyLinkButton({ token }: { token: string }) {
       className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-primary border border-slate-300 rounded hover:bg-slate-50"
     >
       {done ? <Check size={14} className="text-green-600" /> : <Copy size={14} />}
-      {done ? 'Copiado' : 'Copiar link'}
+      {done ? 'Copiado' : label}
     </button>
   );
 }
@@ -131,8 +134,9 @@ export default function InvitesTab({
     <div className="space-y-3">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <p className="text-xs text-slate-600 max-w-2xl">
-          O convite é um link para <strong>1 pessoa</strong>. Ela entra (ou cria a conta) e já começa com o cargo, as áreas e os
-          workspaces que você escolher. Depois dá para mudar tudo na aba Pessoas.
+          O convite vale para <strong>1 pessoa</strong> e tem um link e uma <strong>chave</strong> (ex.: K7QM-3XPA). A pessoa
+          cria a conta no LoggB, cola a chave na tela de boas-vindas e já começa com o cargo, as áreas e os workspaces que você
+          escolher. Depois dá para mudar tudo na aba Pessoas.
         </p>
         <button
           type="button"
@@ -161,6 +165,11 @@ export default function InvitesTab({
               <li key={inv.id} className="px-3 py-2.5 space-y-1.5">
                 <span className="flex flex-wrap items-center gap-2 min-w-0">
                   <span className="text-sm font-bold text-primary truncate">{inv.label || 'Convite sem nome'}</span>
+                  {inv.code ? (
+                    <code className="px-1.5 py-0.5 rounded bg-primary text-white text-xs font-bold tracking-widest">
+                      {formatInviteCode(inv.code)}
+                    </code>
+                  ) : null}
                   <Chip tone="green">{cargoName(inv)}</Chip>
                   {inv.all_areas ? (
                     <Chip>Todas as áreas</Chip>
@@ -174,7 +183,8 @@ export default function InvitesTab({
                   {formatDateTimeBR(inv.invite_expires_at)}
                 </span>
                 <span className="flex flex-wrap gap-2">
-                  <CopyLinkButton token={inv.token} />
+                  {inv.code ? <CopyButton text={formatInviteCode(inv.code)} label="Copiar chave" /> : null}
+                  <CopyButton text={inviteLink(inv.token)} label="Copiar link" />
                   <button
                     type="button"
                     onClick={() => void revokeInvite(inv)}
@@ -293,16 +303,34 @@ function InviteModal({
   };
 
   const link = created ? inviteLink(created.token) : '';
-  const whatsappText = created ? `Convite para usar o LoggB com a equipe de ${orgName} (${cargoName}): ${link}` : '';
+  const code = created?.code ? formatInviteCode(created.code) : '';
+  const whatsappText = created
+    ? `Convite para usar o LoggB com a equipe de ${orgName} (${cargoName}).\n\n` +
+      `Abra o link: ${link}\n\n` +
+      (code ? `Ou crie a conta em ${window.location.origin} e, na tela de boas-vindas, cole a chave: ${code}` : '')
+    : '';
 
   return (
     <OrgModal title={created ? 'Convite criado' : 'Convidar pessoa'} onClose={onClose} wide>
       {created ? (
         <div className="p-4 space-y-4">
           <p className="text-sm text-slate-600">
-            Envie este link para a pessoa. Ela entra (ou cria a conta) como <strong>{cargoName}</strong>. O link funciona para{' '}
-            <strong>1 pessoa</strong> e vale até {formatDateTimeBR(created.invite_expires_at)}.
+            A pessoa entra como <strong>{cargoName}</strong>. Envie a <strong>chave</strong> ou o <strong>link</strong>: com a
+            chave, ela cria a conta no LoggB e cola a chave na tela de boas-vindas. Funciona para <strong>1 pessoa</strong> e
+            vale até {formatDateTimeBR(created.invite_expires_at)}.
           </p>
+          {code ? (
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3 p-4 bg-slate-50 border border-slate-200 rounded">
+              <span className="flex items-center gap-2 min-w-0">
+                <KeyRound size={18} className="text-secondary shrink-0" />
+                <span className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Chave</span>
+                <code className="text-2xl font-extrabold tracking-[0.2em] text-primary">{code}</code>
+              </span>
+              <span className="sm:ml-auto">
+                <CopyButton text={code} label="Copiar chave" />
+              </span>
+            </div>
+          ) : null}
           <div className="flex items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded">
             <Link2 size={16} className="text-slate-400 shrink-0" />
             <code className="text-xs text-primary break-all flex-1">{link}</code>
@@ -371,7 +399,7 @@ function InviteModal({
           <ModalActions
             onCancel={onClose}
             saving={saving}
-            submitLabel="Gerar link"
+            submitLabel="Gerar convite"
             icon={saving ? <Loader2 size={16} className="animate-spin" /> : <Link2 size={16} />}
           />
         </form>
