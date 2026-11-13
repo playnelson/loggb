@@ -56,10 +56,22 @@ function checkFields(email: string, password: string): string | null {
 
 export default function LoginPage() {
   const [fromInvite, setFromInvite] = useState(false);
+  const [confirmed, setConfirmed] = useState(false);
   useEffect(() => {
     // Lê o endereço só no navegador (evita diferença entre servidor e navegador).
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setFromInvite(isInviteNext());
+    const isConfirm = new URLSearchParams(window.location.search).get('confirmado') === '1';
+    setConfirmed(isConfirm);
+    if (!isConfirm) return;
+    // Veio do link de confirmação do e-mail: se a sessão já abriu, segue direto (ex.: convite).
+    const t = setTimeout(() => {
+      void (async () => {
+        const { data } = await supabase.auth.getSession();
+        if (data.session) window.location.replace(safeNextPath());
+      })();
+    }, 1500);
+    return () => clearTimeout(t);
   }, []);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -107,9 +119,14 @@ export default function LoginPage() {
     const maxAttempts = 3;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const next = safeNextPath();
       const { data, error } = await supabase.auth.signUp({
         email: email.trim(),
         password,
+        options: {
+          // O link do e-mail volta para o LoggB, que avisa "e-mail confirmado" e segue (ex.: convite).
+          emailRedirectTo: `${window.location.origin}/login?confirmado=1${next !== '/' ? `&next=${encodeURIComponent(next)}` : ''}`,
+        },
       });
 
       if (!error) {
@@ -183,7 +200,13 @@ export default function LoginPage() {
             </p>
             <p className="text-slate-500 mt-1 text-sm">Estoque e Suprimentos</p>
           </div>
-          {fromInvite ? (
+          {confirmed ? (
+            <div className="mb-4 rounded border border-green-200 border-l-[3px] border-l-green-600 bg-green-50 p-3 text-sm text-green-900">
+              <b>E-mail confirmado!</b> Sua conta no LoggB está ativa. Entre com o seu e-mail e senha
+              {fromInvite ? ' para abrir o convite.' : '.'}
+            </div>
+          ) : null}
+          {fromInvite && !confirmed ? (
             <div className="mb-4 rounded border border-amber-200 border-l-[3px] border-l-amber-500 bg-amber-50 p-3 text-sm text-amber-900">
               Você recebeu um convite. Entre com sua conta ou crie uma (e-mail e senha) para abrir o convite.
             </div>
