@@ -114,6 +114,24 @@ const DOC_CSS = `
   body{font-family:Arial,Helvetica,sans-serif;color:#263238;margin:0;padding:24px;font-size:12px;background:#fff}
   .brand img{display:block;max-height:84px;max-width:240px;object-fit:contain}
   .brand .co{font-weight:700;font-size:16px;color:#2E74B5}
+  .ct{width:100%;border-collapse:collapse;margin:0}
+  .ct td,.ct th{border:1px solid #7b8ba1;padding:5px 7px;font-size:11px;vertical-align:middle}
+  .ct td.ct-logo{width:160px;text-align:center}
+  .ct-logo img{display:inline-block;max-height:64px;max-width:150px;object-fit:contain}
+  .ct-logo .co{font-weight:700;font-size:13px;color:#1F4E79}
+  .ct td.ct-title{background:#DEEAF6;text-align:center;color:#1F4E79;font-weight:700;font-size:18px;text-transform:uppercase;line-height:1.25}
+  .ct td.ct-title small{display:block;font-size:12px;font-weight:600}
+  .ct td.ct-sub{text-align:center;font-size:10px;text-transform:uppercase;letter-spacing:.3px}
+  .ct-meta td{font-size:10px;text-transform:uppercase}
+  .sec{background:#2F5597;color:#fff;font-weight:700;font-size:11px;text-transform:uppercase;padding:5px 8px;margin-top:12px}
+  .ct .lbl{font-weight:700;text-transform:uppercase}
+  .ct .acc{display:block;color:#455a64;font-size:10px;margin-top:2px}
+  .ct-term{border:1px solid #7b8ba1;border-top:0;padding:8px 10px;font-size:11px;line-height:1.5;text-align:justify}
+  .ct-term ol{margin:6px 0 0 16px;padding:0}
+  .ct-term li{margin-bottom:3px}
+  .ct-sign td{height:58px;vertical-align:top;width:50%}
+  .ct-sign .ln{border-bottom:1px solid #263238;height:26px;margin-top:4px}
+  .box{display:inline-block;width:10px;height:10px;border:1px solid #263238;margin:0 3px -1px 6px}
   .pagefoot{margin-top:28px;border-top:1px solid #2E74B5;padding-top:5px;font-size:9px;color:#455a64;text-align:center}
   .doc{max-width:780px;margin:0 auto}
   .toolbar{max-width:780px;margin:0 auto 16px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;
@@ -238,14 +256,21 @@ type ReceiptRow = {
   ca_number?: string | null;
   employee_id?: string | null;
   work_site_id?: string | null;
-  items?: { description?: string; unit?: string; category?: string; ca_number?: string | null } | null;
+  items?: {
+    description?: string;
+    unit?: string;
+    category?: string;
+    ca_number?: string | null;
+    consumable?: boolean | null;
+    accessories?: string[] | null;
+  } | null;
   employees?: { full_name?: string; cpf?: string | null; role?: string | null; department?: string | null } | null;
   work_sites?: { name?: string; kind?: string } | null;
 };
 
 const RECEIPT_SELECT =
   'id, created_at, quantity, type, reason, tag, note, document, batch_id, ca_number, employee_id, work_site_id, ' +
-  'items(description, unit, category, ca_number), employees(full_name, cpf, role, department), work_sites(name, kind)';
+  'items(description, unit, category, ca_number, consumable, accessories), employees(full_name, cpf, role, department), work_sites(name, kind)';
 
 function receiptTitle(reason: MovementReason, toSite: boolean): string {
   if (reason === 'saida') return toSite ? 'Guia de envio de material' : 'Recibo de retirada de material';
@@ -300,16 +325,37 @@ export async function buildReceiptHtml(
   const hasCa = rows.some((r) => (r.ca_number || one(r.items)?.ca_number || '').trim());
   const hasTag = rows.some((r) => (r.tag || '').trim() && movementReasonOf(r) !== 'descarte');
 
+  const companyName = company.companyName.trim() || PRINT_BRAND.orgName.trim() || 'a empresa';
+  const logo = safeLogo(PRINT_BRAND.logo);
+  const logoCell = logo
+    ? `<img src="${logo}" alt="${esc(companyName)}">`
+    : `<div class="co">${esc(companyName)}</div>`;
+  // Entrega a colaborador com algo que volta (não consumível) = termo de responsabilidade (modelo das cautelas).
+  const durable = rows.filter((r) => !one(r.items)?.consumable);
+  const isTermo = reason === 'saida' && !!emp && durable.length > 0;
+  const heading = isTermo ? 'Termo de responsabilidade' : title;
+  const subHeading = isTermo ? 'Entrega de materiais e equipamentos' : '';
+  const control = toSite ? 'Controle de materiais em obra' : emp ? 'Gestão patrimonial – controle de equipamentos e materiais' : 'Controle de estoque';
+
+  const header = `<table class="ct"><tr><td class="ct-logo">${logoCell}</td>
+<td class="ct-title">${esc(heading)}${subHeading ? `<small>${esc(subHeading)}</small>` : ''}</td></tr>
+<tr><td colspan="2" class="ct-sub">${esc(control)}</td></tr></table>
+<table class="ct ct-meta"><tr><td>Recibo nº: <b>${esc(number)}</b></td><td>Data: <b>${esc(dateTimeBr(first.created_at))}</b></td>${
+    docs.length ? `<td>Documento: <b>${esc(docs.join(', '))}</b></td>` : ''
+  }</tr></table>`;
+
+  let n = 0;
+  const secTitle = (t: string) => `<div class="sec">${++n}. ${esc(t)}</div>`;
+
   let party = '';
   if (emp) {
-    party = `<div><span>Colaborador</span><b>${esc(formatEmployeeName(emp.full_name))}</b></div>
-<div><span>CPF</span><b>${esc(formatCpf(emp.cpf) || '—')}</b></div>
-<div><span>Função</span><b>${esc(emp.role || '—')}</b></div>
-<div><span>Setor</span><b>${esc(emp.department || '—')}</b></div>`;
+    party = `${secTitle('Identificação do colaborador')}
+<table class="ct"><tr><td style="width:65%"><span class="lbl">Nome:</span> ${esc(formatEmployeeName(emp.full_name))}</td>
+<td><span class="lbl">CPF:</span> ${esc(formatCpf(emp.cpf) || '—')}</td></tr>
+<tr><td><span class="lbl">Função:</span> ${esc(emp.role || '—')}</td><td><span class="lbl">Setor:</span> ${esc(emp.department || '—')}</td></tr></table>`;
   } else if (site) {
-    party = `<div class="full"><span>${site.kind === 'sede' ? 'Sede' : 'Canteiro'}</span><b>${esc(site.name)}</b></div>`;
-  } else {
-    party = `<div class="full"><span>Destino</span><b>Almoxarifado</b></div>`;
+    party = `${secTitle(site.kind === 'sede' ? 'Sede' : 'Canteiro / local')}
+<table class="ct"><tr><td><span class="lbl">Local:</span> ${esc(site.name)}</td></tr></table>`;
   }
 
   const lines = rows
@@ -317,40 +363,71 @@ export async function buildReceiptHtml(
       const it = one(r.items);
       const ca = (r.ca_number || it?.ca_number || '').trim();
       const tag = movementReasonOf(r) === 'descarte' ? '' : (r.tag || '').trim();
-      return `<tr><td class="c">${i + 1}</td><td>${esc(formatProductLabelDisplay(it?.description || '—'))}</td>${
-        hasTag ? `<td>${esc(tag || '—')}</td>` : ''
-      }${hasCa ? `<td class="c">${esc(ca || '—')}</td>` : ''}<td class="n">${esc(formatQty(r.quantity))}</td><td class="c">${esc(
-        it?.unit || 'un'
-      )}</td></tr>`;
+      const acc = (it?.accessories ?? []).filter(Boolean);
+      return `<tr><td class="c">${i + 1}</td><td>${esc(formatProductLabelDisplay(it?.description || '—'))}${
+        acc.length ? `<span class="acc">Acompanha: ${esc(acc.map((a) => formatProductLabelDisplay(a)).join(', '))}</span>` : ''
+      }</td>${hasTag ? `<td>${esc(tag || '—')}</td>` : ''}${hasCa ? `<td class="c">${esc(ca || '—')}</td>` : ''}<td class="n">${esc(
+        formatQty(r.quantity)
+      )}</td><td class="c">${esc(it?.unit || 'un')}</td></tr>`;
     })
     .join('');
-
-  const sign = (name: string, role: string, sub?: string) =>
-    `${esc(name)}<small>${esc(role)}${sub ? ` · ${esc(sub)}` : ''}</small>`;
-  const partyName = emp ? formatEmployeeName(emp.full_name) : 'Nome legível';
-  const partySub = emp ? (emp.cpf ? `CPF ${formatCpf(emp.cpf)}` : '') : toSite ? `responsável em ${site?.name ?? 'local'}` : '';
-  const staffName = company.responsibleName.trim() || 'Nome legível';
-  const [leftSign, rightSign] =
-    reason === 'devolucao'
-      ? [sign(partyName, 'Quem devolveu', partySub), sign(staffName, 'Recebido pelo almoxarifado')]
-      : reason === 'descarte'
-        ? [sign(partyName, 'Colaborador', partySub), sign(staffName, 'Almoxarifado')]
-        : [sign(partyName, 'Recebedor', partySub), sign(staffName, 'Entregue por (almoxarifado)')];
-
-  return `${companyHeader(company, `Recibo nº <b>${esc(number)}</b><br>${esc(dateTimeBr(first.created_at))}`)}
-<h1>${esc(title)}</h1>
-<div class="grid">${party}
-${docs.length ? `<div class="full"><span>Documento (requisição / OS / NF)</span><b>${esc(docs.join(', '))}</b></div>` : ''}
-${notes.length ? `<div class="full"><span>Observação</span><b>${esc(notes.join(' · '))}</b></div>` : ''}
-</div>
-<h2>Itens (${rows.length})</h2>
-<table><thead><tr><th class="c">#</th><th>Descrição</th>${hasTag ? '<th>TAG</th>' : ''}${
+  const itemsSec = `${secTitle(
+    reason === 'devolucao' ? 'Itens devolvidos' : reason === 'descarte' ? 'Itens descartados' : 'Itens entregues'
+  )}
+<table class="ct"><thead><tr><th class="c">#</th><th>Item</th>${hasTag ? '<th>TAG / Nº de série</th>' : ''}${
     hasCa ? '<th class="c">Nº CA</th>' : ''
   }<th class="n">Qtd.</th><th class="c">Un.</th></tr></thead><tbody>${lines}</tbody></table>
-<h2>Declaração</h2>
-<div class="term">${esc(receiptDeclaration(reason, toSite))}</div>
-<div class="signs"><div>${leftSign}</div><div>${rightSign}</div></div>
-<p class="foot">Gerado pelo LoggB em ${esc(dateTimeBr(new Date()))} · Recibo ${esc(number)}</p>`;
+${notes.length ? `<table class="ct"><tr><td><span class="lbl">Observação:</span> ${esc(notes.join(' · '))}</td></tr></table>` : ''}`;
+
+  const termo = isTermo
+    ? `${secTitle('Termo de responsabilidade')}
+<div class="ct-term">Pelo presente termo, eu, colaborador identificado acima, declaro ter recebido de <b>${esc(companyName)}</b>,
+a título de empréstimo e para uso exclusivo nas minhas atividades de trabalho, os itens relacionados acima, em perfeito estado,
+comprometendo-me a mantê-los em bom estado de conservação e ficando ciente de que:
+<ol>
+<li>os itens são de uso pessoal e intransferível, não podendo ser emprestados, cedidos ou retirados da obra sem autorização;</li>
+<li>em caso de defeito, dano, extravio, furto ou roubo, devo comunicar imediatamente o meu superior; nos casos de furto ou roubo, devo apresentar o Boletim de Ocorrência;</li>
+<li>se os itens forem danificados, inutilizados ou extraviados por mau uso, negligência ou descuido, autorizo o desconto do valor do reparo ou da reposição em meu salário ou em minhas verbas rescisórias, conforme o art. 462, § 1º, da CLT. Defeitos de fabricação e o desgaste natural pelo uso não serão cobrados;</li>
+<li>ao término do serviço, na mudança de função ou de obra, no desligamento ou quando solicitado, devolverei os itens completos e em bom estado, considerado o tempo de uso;</li>
+<li>enquanto os itens estiverem em minha posse, estarei sujeito a conferência a qualquer momento, sem aviso prévio.</li>
+</ol></div>`
+    : `${secTitle('Declaração')}<div class="ct-term">${esc(receiptDeclaration(reason, toSite))}</div>`;
+
+  const partyName = emp ? formatEmployeeName(emp.full_name) : '';
+  const staffName = company.responsibleName.trim();
+  const signCell = (label: string, name: string) =>
+    `<td><span class="lbl">${esc(label)}</span><br>Nome por extenso: ${esc(name)}<div class="ln"></div></td>`;
+  const [leftLabel, rightLabel] =
+    reason === 'devolucao'
+      ? ['Quem devolveu', 'Recebido por']
+      : reason === 'descarte'
+        ? ['Colaborador', 'Almoxarifado']
+        : [emp ? 'Colaborador' : toSite ? `Responsável em ${site?.name ?? 'local'}` : 'Recebedor', 'Entregue por'];
+  const signs = `<table class="ct ct-sign"><tr>${signCell(leftLabel, partyName)}${signCell(rightLabel, staffName)}</tr></table>`;
+
+  const devolucao = isTermo
+    ? `${secTitle('Devolução')}
+<table class="ct"><tr><td><span class="lbl">Data da devolução:</span> ____/____/________</td></tr></table>
+<table class="ct"><thead><tr><th>Item</th><th class="c">Devolveu?</th><th>Observação (dano, falta etc.)</th></tr></thead><tbody>${durable
+        .map((r) => {
+          const it = one(r.items);
+          const tag = (r.tag || '').trim();
+          return `<tr><td>${esc(formatProductLabelDisplay(it?.description || '—'))}${tag ? ` <span class="muted">(${esc(tag)})</span>` : ''}</td>
+<td class="c"><span class="box"></span>Sim <span class="box"></span>Não</td><td></td></tr>`;
+        })
+        .join('')}</tbody></table>
+<table class="ct ct-sign"><tr>${signCell('Colaborador', partyName)}${signCell('Recebido por', '')}</tr></table>`
+    : '';
+
+  return `${header}
+${party}
+${itemsSec}
+${termo}
+${signs}
+${devolucao}
+<p class="foot">Documento de controle interno – arquivar o original assinado na pasta do colaborador/obra. Gerado pelo LoggB em ${esc(
+    dateTimeBr(new Date())
+  )} · Recibo ${esc(number)}</p>`;
 }
 
 /* ------------------------------------------------------------ ficha de EPI */
