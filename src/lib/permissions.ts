@@ -107,16 +107,21 @@ export function normCategory(s: string | null | undefined): string {
 /** A pessoa gerencia a área deste item? (mesma conta do banco) */
 export function accessManagesCategory(access: MyAccess | null, category: string | null | undefined): boolean {
   if (!access) return true; // banco ainda sem a etapa 9: segue como antes
-  if (access.is_adm || access.all_areas) return true;
+  if (access.is_adm) return true;
+  if (access.permissions.length === 0) return false; // consulta: nunca altera
+  if (access.all_areas) return true;
   const k = normCategory(category);
   if (!k) return false;
   return access.areas.some((a) => a.categories.some((c) => normCategory(c) === k));
 }
 
-/** Só consulta: não tem cargo com permissão nem área. */
+/**
+ * Só consulta: cargo sem nenhuma permissão (ex.: "Consulta"). Vê tudo, não altera nada.
+ * Almoxarifado marcado não dá direito de gravar (mesma regra do banco, etapa 17).
+ */
 export function accessIsReadOnly(access: MyAccess | null): boolean {
   if (!access) return false;
-  return !access.is_adm && !access.all_areas && access.permissions.length === 0 && access.areas.length === 0;
+  return !access.is_adm && access.permissions.length === 0;
 }
 
 /** Áreas cobertas por uma lista de categorias (comparação sem maiúsculas/minúsculas). */

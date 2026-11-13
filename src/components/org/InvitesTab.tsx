@@ -281,6 +281,7 @@ function InviteModal({
 }) {
   const [cargo, setCargo] = useState('');
   const [allAreas, setAllAreas] = useState(false);
+  const isConsulta = roles.find((r) => r.id === cargo)?.permissions.length === 0;
   const [areaIds, setAreaIds] = useState<string[]>([]);
   const [label, setLabel] = useState('');
   const [employeeId, setEmployeeId] = useState<string | null>(null);
@@ -318,8 +319,8 @@ function InviteModal({
           organization_id: orgId,
           role: 'membro',
           cargo_id: cargo,
-          all_areas: allAreas,
-          area_ids: allAreas ? [] : areaIds,
+          all_areas: isConsulta ? false : allAreas,
+          area_ids: isConsulta || allAreas ? [] : areaIds,
           label: label.trim() || null,
           ...(employees ? { employee_id: employeeId } : {}),
           workspace_scope: allWs ? null : selected,
@@ -435,7 +436,14 @@ function InviteModal({
             <FieldLabel htmlFor="inv-cargo">Cargo</FieldLabel>
             <CargoSelect id="inv-cargo" roles={roles} value={cargo} onChange={setCargo} />
           </div>
-          <AreaPicker areas={areas} all={allAreas} onAllChange={setAllAreas} selected={areaIds} onSelectedChange={setAreaIds} />
+          <AreaPicker
+            areas={areas}
+            all={allAreas}
+            onAllChange={setAllAreas}
+            selected={areaIds}
+            onSelectedChange={setAreaIds}
+            consulta={isConsulta}
+          />
           <WorkspaceScopePicker active={active} all={allWs} onAllChange={setAllWs} selected={selected} onSelectedChange={setSelected} />
           <div>
             <FieldLabel htmlFor="inv-duration">Acesso válido por</FieldLabel>

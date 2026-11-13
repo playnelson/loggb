@@ -281,7 +281,7 @@ export function WorkspaceProvider({ children, enabled }: { children: ReactNode; 
       canManageCategory: (category: string | null | undefined) =>
         access ? accessManagesCategory(access, category) : currentOrganization?.role !== 'gestor',
       managesAnyArea: access
-        ? access.is_adm || access.all_areas || access.areas.length > 0
+        ? access.is_adm || (access.permissions.length > 0 && (access.all_areas || access.areas.length > 0))
         : currentOrganization?.role !== 'gestor',
     };
   }, [status, organizations, workspaces, currentId, reload, switchWorkspace, access]);

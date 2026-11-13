@@ -149,13 +149,24 @@ export function AreaPicker({
   onAllChange,
   selected,
   onSelectedChange,
+  consulta = false,
 }: {
   areas: StockAreaRow[];
   all: boolean;
   onAllChange: (v: boolean) => void;
   selected: string[];
   onSelectedChange: (v: string[]) => void;
+  /** Cargo sem nenhuma permissão: só consulta, não escolhe almoxarifado. */
+  consulta?: boolean;
 }) {
+  if (consulta) {
+    return (
+      <div className="text-xs text-sky-900 bg-sky-50 border border-sky-200 border-l-[3px] border-l-sky-600 p-3">
+        <b>Cargo de consulta:</b> vê todos os almoxarifados, colaboradores e o histórico, e pode baixar e exportar arquivos.
+        Não altera nada.
+      </div>
+    );
+  }
   return (
     <fieldset>
       <legend className="block text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-1">

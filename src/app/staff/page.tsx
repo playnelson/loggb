@@ -6,7 +6,7 @@ import { useCallback, useMemo, useRef, useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { formatProductLabelDisplay } from '@/lib/productDisplayText';
 import { registerMovement, MOVEMENT_NOTE_MAX } from '@/lib/movements';
-import { openPrintable, buildEpiFichaHtml, loadCompanyInfo, saveCompanyInfo } from '@/lib/printDocs';
+import { openPrintable, buildEpiFichaHtml, buildFerramentasFichaHtml, loadCompanyInfo, saveCompanyInfo } from '@/lib/printDocs';
 import { formatEmployeeName, normalizeEmployeeNameForSave, normalizeSearchText } from '@/lib/employeeName';
 import { Search, UserPlus, Mail, Phone, ExternalLink, X, FileUp, Filter, Package, AlertCircle, History, RotateCcw, Download, Loader2, ArrowLeft, FileText, Trash2, Pencil, Printer, Paperclip } from 'lucide-react';
 import ImportSpreadsheet from '@/components/ImportSpreadsheet';
@@ -15,10 +15,7 @@ import { uploadEquipmentDoc } from '@/lib/equipmentDocs';
 import { useWorkspace } from '@/lib/workspace';
 import { useCanApproveDeletion } from '@/lib/deletion';
 import DeletionDialog from '@/components/DeletionDialog';
-import {
-  downloadFerramentasFichaTxt,
-  type FichaPossessionRow,
-} from '@/lib/carteiraFichasTxt';
+import { type FichaPossessionRow } from '@/lib/carteiraFichasTxt';
 import { downloadEmployeeWalletWorkbook } from '@/lib/employeeWalletExcel';
 import { downloadEpiFichaExcel } from '@/lib/carteiraFichasExcel';
 
@@ -626,42 +623,27 @@ export default function StaffPage() {
     persistFichaDefaults();
   };
 
-  const handleDownloadFerramentasTxt = () => {
+  const handlePrintFerramentasFicha = () => {
     if (!epiFichaEmployee) return;
     if (!epiFichaForm.companyName.trim()) {
       alert('Informe o nome da empresa (razão social ou nome fantasia).');
       return;
     }
-    const issued = epiFichaForm.issuedAt
-      ? new Date(epiFichaForm.issuedAt + 'T12:00:00').toLocaleDateString('pt-BR')
-      : new Date().toLocaleDateString('pt-BR');
-
-    const rows: FichaPossessionRow[] =
-      epiFichaEmployee.possession
-        ?.filter((p) => p.quantity > 0 && p.items && !p.items.consumable && !isEpiCat(p.items.category))
-        .map((p) => ({
-          description: p.items!.description,
-          unit: p.items!.unit,
-          quantity: p.quantity,
-          category: p.items!.category || '—',
-        })) ?? [];
-
-    if (rows.length === 0) {
-      alert('Este colaborador não tem ferramentas ou demais materiais (não EPI) em posse para listar na ficha.');
-      return;
-    }
-
-    downloadFerramentasFichaTxt(
-      {
-        full_name: formatEmployeeName(epiFichaEmployee.full_name),
-        role: epiFichaEmployee.role,
-        cpf: epiFichaEmployee.cpf,
-        department: epiFichaEmployee.department,
-      },
-      rows,
-      fichaMetaFromForm(issued)
-    );
     persistFichaDefaults();
+    const emp = epiFichaEmployee;
+    const company = {
+      companyName: epiFichaForm.companyName,
+      companyCnpj: epiFichaForm.companyCnpj,
+      branchOrDept: epiFichaForm.branchOrDept,
+      responsibleName: epiFichaForm.responsibleName,
+    };
+    void openPrintable(`Ferramentas e equipamentos - ${formatEmployeeName(emp.full_name)}`, () =>
+      buildFerramentasFichaHtml(
+        supabase,
+        { id: emp.id, full_name: emp.full_name, cpf: emp.cpf, role: emp.role, department: emp.department },
+        company
+      )
+    );
   };
 
   const handleReturn = async (e: React.FormEvent) => {
@@ -1155,7 +1137,7 @@ export default function StaffPage() {
                             type="button"
                             onClick={() => openEpiFichaModal(e)}
                             className="text-slate-400 hover:text-secondary p-2 bg-slate-50 border border-slate-200 rounded-lg transition-all"
-                            title="Fichas EPI (.xlsx) e ferramentas (.txt)"
+                            title="Fichas: EPI e ferramentas/equipamentos"
                           >
                             <FileText size={16} />
                           </button>
@@ -1553,11 +1535,11 @@ export default function StaffPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleDownloadFerramentasTxt()}
+                  onClick={handlePrintFerramentasFicha}
                   className="w-full p-3 bg-blue-700 text-white rounded-xl font-bold hover:bg-blue-800 flex items-center justify-center gap-2"
                 >
-                  <Download size={16} />
-                  Baixar ficha de ferramentas (.txt)
+                  <Printer size={16} />
+                  Imprimir / PDF — ficha de ferramentas e equipamentos
                 </button>
                 <button
                   type="button"

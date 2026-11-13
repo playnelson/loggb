@@ -386,13 +386,7 @@ ${notes.length ? `<table class="ct"><tr><td><span class="lbl">Observação:</spa
 <div class="ct-term">Pelo presente termo, eu, colaborador identificado acima, declaro ter recebido de <b>${esc(companyName)}</b>,
 a título de empréstimo e para uso exclusivo nas minhas atividades de trabalho, os itens relacionados acima, em perfeito estado,
 comprometendo-me a mantê-los em bom estado de conservação e ficando ciente de que:
-<ol>
-<li>os itens são de uso pessoal e intransferível, não podendo ser emprestados, cedidos ou retirados da obra sem autorização;</li>
-<li>em caso de defeito, dano, extravio, furto ou roubo, devo comunicar imediatamente o meu superior; nos casos de furto ou roubo, devo apresentar o Boletim de Ocorrência;</li>
-<li>se os itens forem danificados, inutilizados ou extraviados por mau uso, negligência ou descuido, autorizo o desconto do valor do reparo ou da reposição em meu salário ou em minhas verbas rescisórias, conforme o art. 462, § 1º, da CLT. Defeitos de fabricação e o desgaste natural pelo uso não serão cobrados;</li>
-<li>ao término do serviço, na mudança de função ou de obra, no desligamento ou quando solicitado, devolverei os itens completos e em bom estado, considerado o tempo de uso;</li>
-<li>enquanto os itens estiverem em minha posse, estarei sujeito a conferência a qualquer momento, sem aviso prévio.</li>
-</ol></div>`
+${TERMO_CLAUSES}</div>`
     : `${secTitle('Declaração')}<div class="ct-term">${esc(receiptDeclaration(reason, toSite))}</div>`;
 
   const partyName = emp ? formatEmployeeName(emp.full_name) : '';
@@ -433,6 +427,15 @@ ${devolucao}
 }
 
 /* ------------------------------------------------------------ ficha de EPI */
+
+/** Cláusulas do termo de responsabilidade (modelo das cautelas). */
+const TERMO_CLAUSES = `<ol>
+<li>os itens são de uso pessoal e intransferível, não podendo ser emprestados, cedidos ou retirados da obra sem autorização;</li>
+<li>em caso de defeito, dano, extravio, furto ou roubo, devo comunicar imediatamente o meu superior; nos casos de furto ou roubo, devo apresentar o Boletim de Ocorrência;</li>
+<li>se os itens forem danificados, inutilizados ou extraviados por mau uso, negligência ou descuido, autorizo o desconto do valor do reparo ou da reposição em meu salário ou em minhas verbas rescisórias, conforme o art. 462, § 1º, da CLT. Defeitos de fabricação e o desgaste natural pelo uso não serão cobrados;</li>
+<li>ao término do serviço, na mudança de função ou de obra, no desligamento ou quando solicitado, devolverei os itens completos e em bom estado, considerado o tempo de uso;</li>
+<li>enquanto os itens estiverem em minha posse, estarei sujeito a conferência a qualquer momento, sem aviso prévio.</li>
+</ol>`;
 
 export type EpiFichaEmployee = {
   id: string;
@@ -682,4 +685,123 @@ ${it.location ? `<div class="l">${esc(it.location)}</div>` : ''}
 </style>
 <p class="muted">${items.length} etiqueta(s). Recorte na linha tracejada. Ao ler o QR com o celular, o item abre no LoggB.</p>
 <div class="lbls">${cells.join('')}</div>`;
+}
+
+
+type FerrPossessionRow = {
+  item_id: string;
+  quantity: number;
+  items?: {
+    description?: string;
+    unit?: string;
+    category?: string | null;
+    consumable?: boolean | null;
+    accessories?: string[] | null;
+    tag?: string | null;
+  } | null;
+};
+
+/**
+ * Ficha de ferramentas e equipamentos (tudo que não é EPI nem consumível) em posse do colaborador,
+ * no modelo do termo de responsabilidade das cautelas.
+ */
+export async function buildFerramentasFichaHtml(
+  supabase: SupabaseClient,
+  employee: EpiFichaEmployee,
+  company: CompanyInfo
+): Promise<string | { error: string }> {
+  const { data, error } = await supabase
+    .from('possession')
+    .select('item_id, quantity, items(description, unit, category, consumable, accessories, tag)')
+    .eq('employee_id', employee.id)
+    .gt('quantity', 0);
+  if (error) return { error: error.message };
+  const rows = ((data ?? []) as FerrPossessionRow[])
+    .map((r) => ({ ...r, items: one(r.items) }))
+    .filter((r) => r.items && !r.items.consumable && !String(r.items.category ?? '').trim().toUpperCase().startsWith('EPI'))
+    .sort((a, b) => String(a.items?.description).localeCompare(String(b.items?.description), 'pt-BR'));
+  if (rows.length === 0) return { error: 'Este colaborador não tem ferramentas ou equipamentos em posse.' };
+
+  // Data e TAG da última entrega de cada item para este colaborador.
+  const last = new Map<string, { at: string; tag: string }>();
+  const { data: moves } = await supabase
+    .from('movements')
+    .select('item_id, created_at, tag')
+    .eq('employee_id', employee.id)
+    .eq('type', 'OUT')
+    .in('item_id', rows.map((r) => r.item_id))
+    .order('created_at', { ascending: false })
+    .limit(2000);
+  for (const m of (moves ?? []) as { item_id: string; created_at: string; tag: string | null }[]) {
+    if (!last.has(m.item_id)) last.set(m.item_id, { at: m.created_at, tag: (m.tag || '').trim() });
+  }
+
+  const companyName = company.companyName.trim() || PRINT_BRAND.orgName.trim() || 'a empresa';
+  const logo = safeLogo(PRINT_BRAND.logo);
+  const logoCell = logo ? `<img src="${logo}" alt="${esc(companyName)}">` : `<div class="co">${esc(companyName)}</div>`;
+  const tagOf = (r: FerrPossessionRow) => {
+    const t = last.get(r.item_id)?.tag || '';
+    return t && t.toUpperCase() !== 'DESCARTE' ? t : (r.items?.tag || '').trim();
+  };
+  const hasTag = rows.some((r) => tagOf(r));
+
+  let n = 0;
+  const secTitle = (t: string) => `<div class="sec">${++n}. ${esc(t)}</div>`;
+  const name = formatEmployeeName(employee.full_name);
+
+  const header = `<table class="ct"><tr><td class="ct-logo">${logoCell}</td>
+<td class="ct-title">Termo de responsabilidade<small>Ferramentas e equipamentos em posse</small></td></tr>
+<tr><td colspan="2" class="ct-sub">Gestão patrimonial – controle de equipamentos e materiais</td></tr></table>
+<table class="ct ct-meta"><tr><td>Emissão: <b>${esc(dateTimeBr(new Date()))}</b></td><td>Itens: <b>${rows.length}</b></td></tr></table>`;
+
+  const party = `${secTitle('Identificação do colaborador')}
+<table class="ct"><tr><td style="width:65%"><span class="lbl">Nome:</span> ${esc(name)}</td>
+<td><span class="lbl">CPF:</span> ${esc(formatCpf(employee.cpf) || '—')}</td></tr>
+<tr><td><span class="lbl">Função:</span> ${esc(employee.role || '—')}</td><td><span class="lbl">Setor:</span> ${esc(employee.department || '—')}</td></tr></table>`;
+
+  const lines = rows
+    .map((r, i) => {
+      const it = r.items!;
+      const acc = (it.accessories ?? []).filter(Boolean);
+      const when = last.get(r.item_id)?.at;
+      return `<tr><td class="c">${i + 1}</td><td>${esc(formatProductLabelDisplay(it.description || '—'))}${
+        acc.length ? `<span class="acc">Acompanha: ${esc(acc.map((a) => formatProductLabelDisplay(a)).join(', '))}</span>` : ''
+      }</td>${hasTag ? `<td>${esc(tagOf(r) || '—')}</td>` : ''}<td class="c">${esc(when ? dateBr(when) : '—')}</td><td class="n">${esc(
+        formatQty(r.quantity)
+      )}</td><td class="c">${esc(it.unit || 'un')}</td></tr>`;
+    })
+    .join('');
+  const itemsSec = `${secTitle('Itens em posse')}
+<table class="ct"><thead><tr><th class="c">#</th><th>Item</th>${hasTag ? '<th>TAG / Nº de série</th>' : ''}<th class="c">Entregue em</th><th class="n">Qtd.</th><th class="c">Un.</th></tr></thead><tbody>${lines}</tbody></table>`;
+
+  const termo = `${secTitle('Termo de responsabilidade')}
+<div class="ct-term">Pelo presente termo, eu, colaborador identificado acima, declaro estar em posse dos itens relacionados acima,
+recebidos de <b>${esc(companyName)}</b> a título de empréstimo e para uso exclusivo nas minhas atividades de trabalho,
+comprometendo-me a mantê-los em bom estado de conservação e ficando ciente de que:
+${TERMO_CLAUSES}</div>`;
+
+  const signCell = (label: string, who: string) =>
+    `<td><span class="lbl">${esc(label)}</span><br>Nome por extenso: ${esc(who)}<div class="ln"></div></td>`;
+  const signs = `<table class="ct ct-sign"><tr>${signCell('Colaborador', name)}${signCell('Responsável', company.responsibleName.trim())}</tr></table>`;
+
+  const devolucao = `${secTitle('Devolução')}
+<table class="ct"><tr><td><span class="lbl">Data da devolução:</span> ____/____/________</td></tr></table>
+<table class="ct"><thead><tr><th>Item</th><th class="c">Devolveu?</th><th>Observação (dano, falta etc.)</th></tr></thead><tbody>${rows
+    .map((r) => {
+      const tag = tagOf(r);
+      return `<tr><td>${esc(formatProductLabelDisplay(r.items?.description || '—'))}${tag ? ` <span class="muted">(${esc(tag)})</span>` : ''}</td>
+<td class="c"><span class="box"></span>Sim <span class="box"></span>Não</td><td></td></tr>`;
+    })
+    .join('')}</tbody></table>
+<table class="ct ct-sign"><tr>${signCell('Colaborador', name)}${signCell('Recebido por', '')}</tr></table>`;
+
+  return `${header}
+${party}
+${itemsSec}
+${termo}
+${signs}
+${devolucao}
+<p class="foot">Documento de controle interno – arquivar o original assinado na pasta do colaborador. Gerado pelo LoggB em ${esc(
+    dateTimeBr(new Date())
+  )}</p>`;
 }

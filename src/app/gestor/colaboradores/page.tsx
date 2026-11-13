@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, Eye, Loader2, Paperclip, Printer, RefreshCw, Search, Users } from 'lucide-react';
-import { buildEpiFichaHtml, formatCpf, loadCompanyInfo, openPrintable } from '@/lib/printDocs';
+import { buildEpiFichaHtml, buildFerramentasFichaHtml, formatCpf, loadCompanyInfo, openPrintable } from '@/lib/printDocs';
 import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/lib/workspace';
 import { EQUIPMENT_DOC_COLUMNS, type EquipmentDoc } from '@/lib/equipmentDocs';
@@ -255,7 +255,24 @@ export default function GestorColaboradoresPage() {
                               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-primary border border-slate-200 bg-white rounded hover:bg-slate-100"
                             >
                               <Printer size={14} />
-                              Imprimir ficha de EPI
+                              Ficha de EPI
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(ev) => {
+                                ev.stopPropagation();
+                                void openPrintable(`Ferramentas e equipamentos - ${r.full_name}`, () =>
+                                  buildFerramentasFichaHtml(
+                                    supabase,
+                                    { id: r.id, full_name: r.full_name, cpf: r.cpf, role: r.role, department: r.department },
+                                    loadCompanyInfo()
+                                  )
+                                );
+                              }}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-primary border border-slate-200 bg-white rounded hover:bg-slate-100"
+                            >
+                              <Printer size={14} />
+                              Ficha de ferramentas e equipamentos
                             </button>
                           </div>
                           {held.length > 0 ? (

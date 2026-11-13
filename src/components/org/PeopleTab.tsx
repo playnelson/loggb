@@ -148,7 +148,9 @@ export default function PeopleTab({
                     )}
                   </td>
                   <td className="px-3 py-2">
-                    {p.is_adm || p.all_areas ? (
+                    {cargo && !p.is_adm && cargo.permissions.length === 0 ? (
+                      <span className="text-xs text-slate-500">Todos (só consulta)</span>
+                    ) : p.is_adm || p.all_areas ? (
                       <span className="text-xs font-bold text-secondary">Todos</span>
                     ) : p.area_ids.length ? (
                       <span className="flex flex-wrap gap-1">
@@ -260,6 +262,7 @@ function PersonModal({
   const [isAdm, setIsAdm] = useState(person.is_adm);
   const [cargo, setCargo] = useState(person.cargo_id ?? '');
   const [allAreas, setAllAreas] = useState(person.all_areas);
+  const isConsulta = !isAdm && roles.find((r) => r.id === cargo)?.permissions.length === 0;
   const [areaIds, setAreaIds] = useState<string[]>(person.area_ids);
   const [allWs, setAllWs] = useState(person.workspace_scope === null);
   const [wsIds, setWsIds] = useState<string[]>(person.workspace_scope ?? []);
@@ -309,8 +312,8 @@ function PersonModal({
       p_user: person.user_id,
       p_is_adm: isAdm,
       p_cargo: isAdm ? null : cargo,
-      p_all_areas: isAdm ? false : allAreas,
-      p_area_ids: isAdm || allAreas ? [] : areaIds,
+      p_all_areas: isAdm || isConsulta ? false : allAreas,
+      p_area_ids: isAdm || isConsulta || allAreas ? [] : areaIds,
       p_scope: isAdm || allWs ? null : wsIds,
       p_expires_at: expires,
     });
@@ -396,7 +399,14 @@ function PersonModal({
               <FieldLabel htmlFor="p-cargo">Cargo</FieldLabel>
               <CargoSelect id="p-cargo" roles={roles} value={cargo} onChange={setCargo} />
             </div>
-            <AreaPicker areas={areas} all={allAreas} onAllChange={setAllAreas} selected={areaIds} onSelectedChange={setAreaIds} />
+            <AreaPicker
+              areas={areas}
+              all={allAreas}
+              onAllChange={setAllAreas}
+              selected={areaIds}
+              onSelectedChange={setAreaIds}
+              consulta={isConsulta}
+            />
             <WorkspaceScopePicker active={active} all={allWs} onAllChange={setAllWs} selected={wsIds} onSelectedChange={setWsIds} />
           </>
         ) : null}
