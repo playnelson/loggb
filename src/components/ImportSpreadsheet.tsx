@@ -13,6 +13,66 @@ import { downloadInventoryImportTemplate } from '@/lib/inventoryImportTemplate';
 
 type ImportMode = 'inventory' | 'movement';
 
+/** Categoria nova da planilha → '' (criar) ou o nome de uma categoria existente. */
+type CategoryChoice = Record<string, string>;
+type CategoryPrompt = {
+  fresh: { name: string; count: number }[];
+  existing: string[];
+  resolve: (choice: CategoryChoice | null) => void;
+};
+
+/** Pergunta, para cada categoria nova da planilha, se cria ou usa uma existente. */
+function CategoryChoiceModal({ prompt, onDone }: { prompt: CategoryPrompt; onDone: (c: CategoryChoice | null) => void }) {
+  const [choice, setChoice] = useState<CategoryChoice>(() => Object.fromEntries(prompt.fresh.map((f) => [f.name, ''])));
+  const creating = prompt.fresh.filter((f) => !choice[f.name]).length;
+  return (
+    <div className="fixed inset-0 z-[120] bg-primary/50 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-4">
+        <div>
+          <h3 className="text-lg font-bold text-primary">Categorias novas na planilha</h3>
+          <p className="text-sm text-slate-500 mt-1">
+            Estas categorias ainda não existem. Para cada uma, crie uma categoria nova ou coloque os itens numa que já existe.
+          </p>
+        </div>
+        <div className="space-y-3 max-h-[50vh] overflow-y-auto">
+          {prompt.fresh.map((f) => (
+            <div key={f.name} className="border border-slate-200 rounded-xl p-3">
+              <div className="text-sm font-bold text-primary">
+                {f.name} <span className="text-xs font-medium text-slate-400">· {f.count} item(ns)</span>
+              </div>
+              <select
+                className="mt-2 w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm"
+                value={choice[f.name] ?? ''}
+                onChange={(e) => setChoice((c) => ({ ...c, [f.name]: e.target.value }))}
+              >
+                <option value="">Criar nova categoria &quot;{f.name}&quot;</option>
+                {prompt.existing.map((n) => (
+                  <option key={n} value={n}>
+                    Usar a existente: {n}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ))}
+        </div>
+        {creating > 0 ? (
+          <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg p-2">
+            Categoria nova fica &quot;Sem almoxarifado&quot; até você escolher o almoxarifado em Organização › Categorias.
+          </p>
+        ) : null}
+        <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+          <button type="button" onClick={() => onDone(null)} className="px-4 py-2.5 rounded-lg font-bold text-slate-600 hover:bg-slate-100">
+            Cancelar importação
+          </button>
+          <button type="button" onClick={() => onDone(choice)} className="px-5 py-2.5 rounded-lg font-bold bg-secondary text-white hover:opacity-95">
+            Continuar importação
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 interface ImportProgress {
   total: number;
   current: number;
@@ -27,6 +87,9 @@ export default function ImportSpreadsheet({
   mode?: ImportMode; 
   onComplete: () => void 
 }) {
+  const [catPrompt, setCatPrompt] = useState<CategoryPrompt | null>(null);
+  const askCategories = (fresh: CategoryPrompt['fresh'], existing: string[]) =>
+    new Promise<CategoryChoice | null>((resolve) => setCatPrompt({ fresh, existing, resolve }));
   const [progress, setProgress] = useState<ImportProgress>({
     total: 0,
     current: 0,
@@ -360,18 +423,28 @@ export default function ImportSpreadsheet({
             }
           }
           if (fresh.size > 0) {
-            const list = [...fresh.entries()].map(([c, n]) => `• ${c} (${n} item(ns))`).join('\n');
-            const go = confirm(
-              `A planilha traz categoria(s) que ainda não existem:\n${list}\n\n` +
-                'Elas serão criadas, mas ficam "Sem almoxarifado" até você escolher o almoxarifado em Organização › Categorias.\n\nContinuar a importação?'
+            const existingNames = [...new Set(known.values())].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+            const choice = await askCategories(
+              [...fresh.entries()].map(([name, count]) => ({ name, count })),
+              existingNames
             );
-            if (!go) {
+            if (!choice) {
               setProgress(prev => ({ ...prev, status: 'idle', message: '' }));
               return;
             }
-            await supabase.from('item_categories').insert(
-              [...fresh.keys()].map((name) => ({ name, locked: false, user_id: user.id }))
-            );
+            const toCreate = [...fresh.keys()].filter((n) => !choice[n]);
+            for (const itm of uniqueItems.values()) {
+              const target = choice[String(itm.category ?? '').trim()];
+              if (target) {
+                fixed.set(String(itm.category).trim(), target);
+                itm.category = target;
+              }
+            }
+            if (toCreate.length) {
+              await supabase.from('item_categories').insert(
+                toCreate.map((name) => ({ name, locked: false, user_id: user.id }))
+              );
+            }
           }
           if (fixed.size > 0) {
             categoryNote = ` Categorias ajustadas para as existentes: ${[...fixed.entries()].map(([a, b]) => `${a} → ${b}`).join(', ')}.`;
@@ -547,6 +620,15 @@ export default function ImportSpreadsheet({
 
   return (
     <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-lg animate-in zoom-in duration-300">
+      {catPrompt ? (
+        <CategoryChoiceModal
+          prompt={catPrompt}
+          onDone={(c) => {
+            catPrompt.resolve(c);
+            setCatPrompt(null);
+          }}
+        />
+      ) : null}
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-xl font-bold text-primary flex items-center gap-2">
           {mode === 'inventory' ? <Package className="text-secondary" /> : <Users className="text-secondary" />}
