@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import * as XLSX from 'xlsx';
 import { supabase } from '@/lib/supabase';
 import { itemCodeFromDescription } from '@/lib/itemCode';
+import { categorySimilarityKey } from '@/components/org/CategoriesTab';
 import { normalizeProductLabelForSave } from '@/lib/productDisplayText';
 import { normalizeEmployeeNameForSave, normalizeSearchText } from '@/lib/employeeName';
 import { registerMovement } from '@/lib/movements';
@@ -331,6 +332,52 @@ export default function ImportSpreadsheet({
           });
         }
 
+        // Categorias da planilha × categorias que já existem: parecida (singular/plural, acento,
+        // caixa) usa a existente; nova só entra se a pessoa confirmar (e fica cadastrada).
+        let categoryNote = '';
+        if (uniqueItems.size > 0) {
+          const [{ data: catRows }, { data: itemCats }] = await Promise.all([
+            supabase.from('item_categories').select('name'),
+            supabase.from('items').select('category').not('category', 'is', null).limit(5000),
+          ]);
+          const known = new Map<string, string>();
+          for (const r of (catRows ?? []) as { name: string }[]) known.set(categorySimilarityKey(r.name), r.name);
+          for (const r of (itemCats ?? []) as { category: string }[]) {
+            const k = categorySimilarityKey(r.category);
+            if (k && !known.has(k)) known.set(k, r.category);
+          }
+          const fixed = new Map<string, string>();
+          const fresh = new Map<string, number>();
+          for (const itm of uniqueItems.values()) {
+            const raw = String(itm.category ?? '').trim();
+            if (!raw) continue;
+            const existing = known.get(categorySimilarityKey(raw));
+            if (existing) {
+              if (existing !== raw) fixed.set(raw, existing);
+              itm.category = existing;
+            } else {
+              fresh.set(raw, (fresh.get(raw) ?? 0) + 1);
+            }
+          }
+          if (fresh.size > 0) {
+            const list = [...fresh.entries()].map(([c, n]) => `• ${c} (${n} item(ns))`).join('\n');
+            const go = confirm(
+              `A planilha traz categoria(s) que ainda não existem:\n${list}\n\n` +
+                'Elas serão criadas, mas ficam "Sem almoxarifado" até você escolher o almoxarifado em Organização › Categorias.\n\nContinuar a importação?'
+            );
+            if (!go) {
+              setProgress(prev => ({ ...prev, status: 'idle', message: '' }));
+              return;
+            }
+            await supabase.from('item_categories').insert(
+              [...fresh.keys()].map((name) => ({ name, locked: false, user_id: user.id }))
+            );
+          }
+          if (fixed.size > 0) {
+            categoryNote = ` Categorias ajustadas para as existentes: ${[...fixed.entries()].map(([a, b]) => `${a} → ${b}`).join(', ')}.`;
+          }
+        }
+
         let iCount = 0;
         for (const [key, itm] of uniqueItems.entries()) {
           iCount++;
@@ -487,7 +534,7 @@ export default function ImportSpreadsheet({
           }
           setProgress(prev => ({ ...prev, status: 'completed', message: `Sincronização concluída: ${ok} registros.` }));
         } else {
-          setProgress(prev => ({ ...prev, status: 'completed', message: 'Inventário atualizado!' }));
+          setProgress(prev => ({ ...prev, status: 'completed', message: `Inventário atualizado!${categoryNote}` }));
         }
         setTimeout(onComplete, 2000);
       } catch (err: any) {

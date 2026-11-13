@@ -4,20 +4,22 @@ export const dynamic = 'force-dynamic';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Boxes, Building2, Loader2, Mail, RefreshCw, ShieldCheck, Users } from 'lucide-react';
+import { Boxes, Building2, Loader2, Mail, RefreshCw, ShieldCheck, Tags, Users } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/lib/workspace';
 import type { OrgCategory, OrgEmployee, OrgRoleRow, PersonRow, StockAreaRow } from '@/lib/permissions';
 import PeopleTab from '@/components/org/PeopleTab';
 import AreasTab from '@/components/org/AreasTab';
+import CategoriesTab from '@/components/org/CategoriesTab';
 import RolesTab from '@/components/org/RolesTab';
 import InvitesTab, { INVITE_COLUMNS, type InviteRow } from '@/components/org/InvitesTab';
 
-type Tab = 'pessoas' | 'areas' | 'cargos' | 'convites';
+type Tab = 'pessoas' | 'areas' | 'categorias' | 'cargos' | 'convites';
 
 const TABS: { key: Tab; label: string; icon: typeof Users }[] = [
   { key: 'pessoas', label: 'Pessoas', icon: Users },
   { key: 'areas', label: 'Almoxarifados', icon: Boxes },
+  { key: 'categorias', label: 'Categorias', icon: Tags },
   { key: 'cargos', label: 'Cargos', icon: ShieldCheck },
   { key: 'convites', label: 'Convites', icon: Mail },
 ];
@@ -133,6 +135,7 @@ export default function OrganizacaoPage() {
   const counts: Record<Tab, number> = {
     pessoas: people.length,
     areas: areas.length,
+    categorias: categories.length,
     cargos: roles.length,
     convites: invites.filter((i) => !i.revoked_at && new Date(i.invite_expires_at).getTime() > loadedAt && i.uses < i.max_uses).length,
   };
@@ -226,6 +229,8 @@ export default function OrganizacaoPage() {
           categories={categories}
           onChanged={load}
         />
+      ) : tab === 'categorias' ? (
+        <CategoriesTab orgId={org.id} areas={areas} categories={categories} onChanged={load} />
       ) : tab === 'cargos' ? (
         <RolesTab orgId={org.id} roles={roles} people={people} onChanged={load} />
       ) : (

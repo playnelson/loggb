@@ -90,7 +90,15 @@ export type OrgEmployee = {
   linked_email: string | null;
 };
 
-export type OrgCategory = { name: string; items: number; spellings: string[] };
+export type OrgCategory = {
+  name: string;
+  items: number;
+  spellings: string[];
+  /** Está na lista de categorias (e não só escrita em algum item). */
+  registered?: boolean;
+  /** Travada (EPI): não renomeia nem apaga. */
+  locked?: boolean;
+};
 
 export function normCategory(s: string | null | undefined): string {
   return String(s ?? '').trim().toUpperCase();
