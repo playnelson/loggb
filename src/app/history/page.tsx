@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { formatProductLabelDisplay } from '@/lib/productDisplayText';
 import { formatEmployeeName, normalizeSearchText } from '@/lib/employeeName';
+import { useWorkspace } from '@/lib/workspace';
 import {
   formatQty,
   movementReasonOf,
@@ -101,6 +102,7 @@ function movementTag(m: Movement): string {
 }
 
 export default function HistoryPage() {
+  const { readOnly } = useWorkspace();
   const [movements, setMovements] = useState<Movement[]>([]);
   /** Cautelas / termos assinados anexados a cada movimentação. */
   const [docsByMovement, setDocsByMovement] = useState<Map<string, EquipmentDoc[]>>(new Map());
@@ -476,7 +478,9 @@ export default function HistoryPage() {
                             {movementTag(move) ? (
                               <span className="text-[10px] font-mono text-slate-400">TAG {movementTag(move)}</span>
                             ) : null}
-                            {move.ca_number || (move.employee_id && isEpiCategory(move.items?.category)) ? (
+                            {readOnly ? (
+                              move.ca_number ? <span className="text-[10px] font-mono text-slate-400">CA {move.ca_number}</span> : null
+                            ) : move.ca_number || (move.employee_id && isEpiCategory(move.items?.category)) ? (
                               <button
                                 type="button"
                                 onClick={() => void editCa(move)}

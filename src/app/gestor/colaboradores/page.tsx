@@ -3,20 +3,24 @@
 export const dynamic = 'force-dynamic';
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, Eye, Loader2, Paperclip, RefreshCw, Search, Users } from 'lucide-react';
+import { ChevronDown, ChevronRight, Eye, Loader2, Paperclip, Printer, RefreshCw, Search, Users } from 'lucide-react';
+import { buildEpiFichaHtml, formatCpf, loadCompanyInfo, openPrintable } from '@/lib/printDocs';
 import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/lib/workspace';
 import { EQUIPMENT_DOC_COLUMNS, type EquipmentDoc } from '@/lib/equipmentDocs';
 import { EquipmentDocRow } from '@/components/EquipmentDocuments';
 
+type PossessionItem = { description: string; unit: string | null; tag?: string | null; category?: string | null };
+
 type PossessionRow = {
   quantity: number;
-  items: { description: string; unit: string | null } | { description: string; unit: string | null }[] | null;
+  items: PossessionItem | PossessionItem[] | null;
 };
 
 type EmployeeRow = {
   id: string;
   full_name: string;
+  cpf: string | null;
   role: string | null;
   department: string | null;
   status: string | null;
@@ -56,7 +60,7 @@ export default function GestorColaboradoresPage() {
     setError(null);
     const { data, error: qErr } = await supabase
       .from('employees')
-      .select('id, full_name, role, department, status, possession ( quantity, items ( description, unit ) )')
+      .select('id, full_name, cpf, role, department, status, possession ( quantity, items ( description, unit, tag, category ) )')
       .order('full_name', { ascending: true });
     if (qErr) setError(qErr.message);
     else setRows((data ?? []) as EmployeeRow[]);
@@ -93,8 +97,8 @@ export default function GestorColaboradoresPage() {
     return rows.filter((r) => {
       if (status !== 'Todos' && (r.status || 'Ativo') !== status) return false;
       if (!q) return true;
-      const items = (r.possession ?? []).map((p) => itemOf(p)?.description ?? '').join(' ');
-      return normalize(`${r.full_name} ${r.role ?? ''} ${r.department ?? ''} ${items}`).includes(q);
+      const items = (r.possession ?? []).map((p) => `${itemOf(p)?.description ?? ''} ${itemOf(p)?.tag ?? ''}`).join(' ');
+      return normalize(`${r.full_name} ${r.cpf ?? ''} ${r.role ?? ''} ${r.department ?? ''} ${items}`).includes(q);
     });
   }, [rows, search, status]);
 
@@ -144,7 +148,7 @@ export default function GestorColaboradoresPage() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar por nome, função, setor ou item em posse"
+            placeholder="Buscar por nome, CPF, função, setor, item ou TAG"
             className="w-full pl-9 pr-3 py-2 text-sm"
           />
         </label>
@@ -177,6 +181,7 @@ export default function GestorColaboradoresPage() {
               <tr className="text-left text-[11px] font-bold uppercase tracking-wide text-slate-500 border-b border-slate-200">
                 <th className="w-8 px-2 py-2" aria-label="Abrir" />
                 <th className="px-3 py-2">Nome</th>
+                <th className="px-3 py-2 hidden lg:table-cell">CPF</th>
                 <th className="px-3 py-2 hidden sm:table-cell">Função</th>
                 <th className="px-3 py-2 hidden md:table-cell">Setor</th>
                 <th className="px-3 py-2">Situação</th>
@@ -188,22 +193,22 @@ export default function GestorColaboradoresPage() {
               {filtered.map((r) => {
                 const held = (r.possession ?? []).filter((p) => Number(p.quantity) > 0);
                 const empDocs = docsByEmployee.get(r.id) ?? [];
-                const canOpen = held.length > 0 || empDocs.length > 0;
                 const isOpen = open === r.id;
                 const st = r.status || 'Ativo';
                 return (
                   <Fragment key={r.id}>
                     <tr
                       className="border-b border-slate-100 cursor-pointer"
-                      onClick={() => setOpen(isOpen || !canOpen ? null : r.id)}
+                      onClick={() => setOpen(isOpen ? null : r.id)}
                     >
                       <td className="px-2 py-2 text-slate-400">
-                        {canOpen ? isOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} /> : null}
+                        {isOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
                       </td>
                       <td className="px-3 py-2 font-semibold text-primary">
                         {r.full_name}
                         <span className="block sm:hidden text-[11px] font-normal text-slate-500">{r.role || '—'}</span>
                       </td>
+                      <td className="px-3 py-2 hidden lg:table-cell text-slate-600 whitespace-nowrap font-mono text-xs">{formatCpf(r.cpf) || '—'}</td>
                       <td className="px-3 py-2 hidden sm:table-cell text-slate-600">{r.role || '—'}</td>
                       <td className="px-3 py-2 hidden md:table-cell text-slate-600">{r.department || '—'}</td>
                       <td className="px-3 py-2">
@@ -229,17 +234,40 @@ export default function GestorColaboradoresPage() {
                         )}
                       </td>
                     </tr>
-                    {isOpen && canOpen ? (
+                    {isOpen ? (
                       <tr className="bg-slate-50 border-b border-slate-200">
                         <td />
-                        <td colSpan={6} className="px-3 py-2 space-y-3">
+                        <td colSpan={7} className="px-3 py-2 space-y-3">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-xs text-slate-500 lg:hidden">CPF: {formatCpf(r.cpf) || '—'}</span>
+                            <button
+                              type="button"
+                              onClick={(ev) => {
+                                ev.stopPropagation();
+                                void openPrintable(`Ficha de EPI - ${r.full_name}`, () =>
+                                  buildEpiFichaHtml(
+                                    supabase,
+                                    { id: r.id, full_name: r.full_name, cpf: r.cpf, role: r.role, department: r.department },
+                                    loadCompanyInfo()
+                                  )
+                                );
+                              }}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-primary border border-slate-200 bg-white rounded hover:bg-slate-100"
+                            >
+                              <Printer size={14} />
+                              Imprimir ficha de EPI
+                            </button>
+                          </div>
                           {held.length > 0 ? (
                           <ul className="grid gap-1 sm:grid-cols-2 text-xs text-slate-600">
                             {held.map((p, i) => {
                               const it = itemOf(p);
                               return (
                                 <li key={i} className="flex justify-between gap-3 border-b border-slate-200/70 py-1">
-                                  <span className="truncate">{it?.description ?? 'Item removido'}</span>
+                                  <span className="truncate">
+                                    {it?.description ?? 'Item removido'}
+                                    {it?.tag ? <span className="ml-1 font-mono text-[10px] text-slate-400">TAG {it.tag}</span> : null}
+                                  </span>
                                   <span className="font-semibold text-primary whitespace-nowrap">
                                     {num(p.quantity)} {it?.unit ?? ''}
                                   </span>

@@ -9,6 +9,7 @@ import { fetchAllTenantItems } from '@/lib/tenantItems';
 import { downloadInventoryWorkbookFromTemplate, type InventoryExportItem } from '@/lib/inventoryExportTemplate';
 import { formatDateTimeBR, useWorkspace, workspaceKindLabel } from '@/lib/workspace';
 import { OrgLogo } from '@/components/OrganizationSetup';
+import AlmoxarifadoTabs, { itemInAlmox, useAlmoxSelection, useAlmoxarifados } from '@/components/AlmoxarifadoTabs';
 
 type StockItem = {
   id: string;
@@ -36,6 +37,15 @@ function sumQty(list: { quantity: number }[] | undefined): number {
   return (list ?? []).reduce((acc, r) => acc + Number(r.quantity || 0), 0);
 }
 
+/** Nomes de quem está com o item agora (posse > 0). */
+function holdersOf(i: StockItem): string {
+  const names = (i.possession ?? [])
+    .filter((p) => Number(p.quantity) > 0)
+    .map((p) => (Array.isArray(p.employees) ? p.employees[0]?.full_name : p.employees?.full_name) ?? '')
+    .filter(Boolean);
+  return [...new Set(names)].join(', ');
+}
+
 function normalize(s: string): string {
   return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 }
@@ -51,6 +61,8 @@ export default function GestorPage() {
   const [onlyLow, setOnlyLow] = useState(false);
   const [limit, setLimit] = useState(PAGE);
   const [exporting, setExporting] = useState(false);
+  const almox = useAlmoxarifados();
+  const [almoxSel, setAlmoxSel] = useAlmoxSelection(almox.list);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -91,18 +103,26 @@ export default function GestorPage() {
     return { total: items.length, low, zero, withPeople };
   }, [items]);
 
+  const almoxCounts = useMemo(() => {
+    const out: Record<string, number> = { todos: items.length };
+    for (const a of almox.list) out[a.id] = items.filter((i) => itemInAlmox(i.category, a.id, almox.list)).length;
+    out.outros = items.filter((i) => itemInAlmox(i.category, 'outros', almox.list)).length;
+    return out;
+  }, [items, almox.list]);
+
   const filtered = useMemo(() => {
     const q = normalize(search.trim());
     return items.filter((i) => {
+      if (!itemInAlmox(i.category, almoxSel, almox.list)) return false;
       if (category && i.category !== category) return false;
       if (onlyLow) {
         const qty = Number(i.quantity_current || 0);
         if (!(qty <= 0 || (Number(i.quantity_min || 0) > 0 && qty < Number(i.quantity_min)))) return false;
       }
       if (!q) return true;
-      return normalize(`${i.description} ${i.code ?? ''} ${i.location ?? ''} ${i.tag ?? ''}`).includes(q);
+      return normalize(`${i.description} ${i.code ?? ''} ${i.location ?? ''} ${i.tag ?? ''} ${holdersOf(i)}`).includes(q);
     });
-  }, [items, search, category, onlyLow]);
+  }, [items, search, category, onlyLow, almoxSel, almox.list]);
 
   const download = async () => {
     if (exporting || items.length === 0) return;
@@ -185,6 +205,19 @@ export default function GestorPage() {
         ))}
       </div>
 
+      <div className="px-1">
+        <AlmoxarifadoTabs
+          list={almox.list}
+          seesAll={almox.seesAll}
+          value={almoxSel}
+          onChange={(v) => {
+            setAlmoxSel(v);
+            setLimit(PAGE);
+          }}
+          counts={almoxCounts}
+        />
+      </div>
+
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-3 flex flex-col md:flex-row gap-3">
         <label className="relative flex-1">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -194,7 +227,7 @@ export default function GestorPage() {
               setSearch(e.target.value);
               setLimit(PAGE);
             }}
-            placeholder="Buscar por descrição, código, local ou TAG"
+            placeholder="Buscar por descrição, código, local, TAG ou colaborador"
             className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-secondary text-sm"
           />
         </label>
@@ -240,7 +273,10 @@ export default function GestorPage() {
                 return (
                   <li key={i.id} className="p-4 space-y-1">
                     <div className="flex items-start justify-between gap-3">
-                      <span className="font-bold text-primary text-sm">{i.description}</span>
+                      <span className="font-bold text-primary text-sm">
+                        {i.description}
+                        {i.tag ? <span className="block text-[11px] font-mono font-normal text-slate-500">TAG {i.tag}{holdersOf(i) ? ` · com ${holdersOf(i)}` : ''}</span> : null}
+                      </span>
                       <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full shrink-0 ${st.cls}`}>{st.label}</span>
                     </div>
                     <p className="text-xs text-slate-500">
@@ -276,7 +312,15 @@ export default function GestorPage() {
                     return (
                       <tr key={i.id} className="hover:bg-slate-50/80">
                         <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap">{i.code || '—'}</td>
-                        <td className="px-3 py-2.5 font-bold text-primary">{i.description}</td>
+                        <td className="px-3 py-2.5 font-bold text-primary">
+                          {i.description}
+                          {i.tag ? (
+                            <span className="block text-[11px] font-mono font-normal text-slate-500">
+                              TAG {i.tag}
+                              {holdersOf(i) ? <span className="font-sans font-semibold text-secondary"> · com {holdersOf(i)}</span> : null}
+                            </span>
+                          ) : null}
+                        </td>
                         <td className="px-3 py-2.5 text-slate-600">{i.category}</td>
                         <td className="px-3 py-2.5 text-slate-600">{i.location || '—'}</td>
                         <td className="px-3 py-2.5 whitespace-nowrap">
