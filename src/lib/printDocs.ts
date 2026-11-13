@@ -82,23 +82,23 @@ function one<T>(v: T | T[] | null | undefined): T | null {
 
 const DOC_CSS = `
   *{box-sizing:border-box}
-  body{font-family:Arial,Helvetica,sans-serif;color:#0f172a;margin:0;padding:24px;font-size:12px;background:#fff}
+  body{font-family:Arial,Helvetica,sans-serif;color:#263238;margin:0;padding:24px;font-size:12px;background:#fff}
   .doc{max-width:780px;margin:0 auto}
   .toolbar{max-width:780px;margin:0 auto 16px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;
-    background:#f1f5f9;border:1px solid #cbd5e1;border-radius:8px;padding:10px}
-  .toolbar button{font:inherit;font-weight:700;padding:8px 14px;border-radius:6px;border:1px solid #0f172a;
-    background:#0f172a;color:#fff;cursor:pointer}
-  .toolbar button.sec{background:#fff;color:#0f172a}
-  .toolbar span{color:#475569;font-size:11px}
-  header{display:flex;justify-content:space-between;gap:16px;border-bottom:2px solid #0f172a;padding-bottom:8px;margin-bottom:12px}
+    background:#eceff1;border:1px solid #cbd5e1;border-radius:8px;padding:10px}
+  .toolbar button{font:inherit;font-weight:700;padding:8px 14px;border-radius:3px;border:1px solid #2e7d5b;
+    background:#2e7d5b;color:#fff;cursor:pointer}
+  .toolbar button.sec{background:#fff;color:#2e7d5b}
+  .toolbar span{color:#455a64;font-size:11px}
+  header{display:flex;justify-content:space-between;gap:16px;border-bottom:2px solid #2e7d5b;padding-bottom:8px;margin-bottom:12px}
   header .co{font-weight:700;font-size:14px}
-  header .sub{color:#475569;font-size:11px}
-  header .no{text-align:right;font-size:11px;color:#334155;white-space:nowrap}
-  header .no b{font-size:14px;color:#0f172a}
+  header .sub{color:#455a64;font-size:11px}
+  header .no{text-align:right;font-size:11px;color:#37474f;white-space:nowrap}
+  header .no b{font-size:14px;color:#263238}
   h1{font-size:15px;text-align:center;margin:8px 0 12px;letter-spacing:.5px;text-transform:uppercase}
-  h2{font-size:12px;margin:16px 0 6px;text-transform:uppercase;color:#334155}
+  h2{font-size:12px;margin:16px 0 6px;text-transform:uppercase;color:#37474f}
   .grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;border:1px solid #cbd5e1;border-radius:6px;padding:8px 10px}
-  .grid div span{color:#64748b;font-size:10px;text-transform:uppercase;display:block}
+  .grid div span{color:#607d8b;font-size:10px;text-transform:uppercase;display:block}
   .grid div b{font-size:12px}
   .full{grid-column:1 / -1}
   table{width:100%;border-collapse:collapse;margin-top:6px}
@@ -111,10 +111,10 @@ const DOC_CSS = `
   .term{border:1px solid #cbd5e1;border-radius:6px;padding:8px 10px;line-height:1.45;font-size:11px}
   .term ol{margin:6px 0 6px 18px;padding:0}
   .signs{display:grid;grid-template-columns:1fr 1fr;gap:32px;margin-top:40px}
-  .signs div{border-top:1px solid #0f172a;padding-top:4px;text-align:center;font-size:11px}
-  .signs small{display:block;color:#475569}
-  .muted{color:#64748b}
-  .foot{margin-top:18px;font-size:9px;color:#64748b;text-align:center}
+  .signs div{border-top:1px solid #263238;padding-top:4px;text-align:center;font-size:11px}
+  .signs small{display:block;color:#455a64}
+  .muted{color:#607d8b}
+  .foot{margin-top:18px;font-size:9px;color:#607d8b;text-align:center}
   @media print{
     body{padding:0}
     .toolbar{display:none}
@@ -150,7 +150,7 @@ export async function openPrintable(
   w.document.open();
   w.document.write(
     `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>${esc(title)}</title></head>` +
-      `<body style="font-family:Arial,sans-serif;padding:24px;color:#334155">Gerando documento…</body></html>`
+      `<body style="font-family:Arial,sans-serif;padding:24px;color:#37474f">Gerando documento…</body></html>`
   );
   w.document.close();
   try {
@@ -560,9 +560,9 @@ ${it.location ? `<div class="l">${esc(it.location)}</div>` : ''}
 .lbl{border:1px dashed #94a3b8;border-radius:2mm;padding:3mm;display:flex;gap:3mm;align-items:center;break-inside:avoid;page-break-inside:avoid;min-height:28mm}
 .lbl .qr{width:24mm;height:24mm;flex:none}.lbl .qr svg{width:100%;height:100%}
 .lbl .txt{min-width:0;font-size:9pt;line-height:1.25}
-.lbl .d{font-weight:700;color:#0f172a;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
-.lbl .t{margin-top:1mm;font-weight:700;font-family:monospace;color:#334155}
-.lbl .l{margin-top:1mm;color:#64748b;font-size:8pt}
+.lbl .d{font-weight:700;color:#263238;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.lbl .t{margin-top:1mm;font-weight:700;font-family:monospace;color:#37474f}
+.lbl .l{margin-top:1mm;color:#607d8b;font-size:8pt}
 </style>
 <p class="muted">${items.length} etiqueta(s). Recorte na linha tracejada. Ao ler o QR com o celular, o item abre no LoggB.</p>
 <div class="lbls">${cells.join('')}</div>`;

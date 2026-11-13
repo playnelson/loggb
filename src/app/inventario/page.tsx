@@ -143,9 +143,9 @@ export default function InventarioPage() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 max-w-4xl">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 erp-titlebar px-4 py-3 sm:px-5">
         <div>
-          <h1 className="text-2xl font-bold text-primary flex items-center gap-2">
+          <h1 className="text-xl sm:text-[22px] font-bold tracking-tight text-primary flex items-center gap-2">
             <ClipboardCheck className="text-secondary" />
             Inventário (contagem)
           </h1>
@@ -264,7 +264,7 @@ export default function InventarioPage() {
                 </div>
               </div>
               <span
-                className={`text-[10px] font-black uppercase px-2 py-1 rounded-full shrink-0 ${
+                className={`text-[10px] font-bold uppercase px-2 py-1 rounded-full shrink-0 ${
                   c.status === 'aberta'
                     ? 'bg-amber-100 text-amber-800'
                     : c.status === 'concluida'
@@ -467,7 +467,7 @@ function CountSheet({ countId, onBack }: { countId: string; onBack: () => void }
         <>
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-3">
             <div>
-              <h1 className="text-2xl font-bold text-primary">{count.title}</h1>
+              <h1 className="text-xl sm:text-[22px] font-bold tracking-tight text-primary">{count.title}</h1>
               <p className="text-sm text-slate-500">
                 {STATUS_LABEL[count.status]} · {countedN} de {lines.length} contados
                 {!hideSystem ? ` · ${diffLines.length} com diferença` : ''}
@@ -584,7 +584,7 @@ function CountSheet({ countId, onBack }: { countId: string; onBack: () => void }
                       ) : d === 0 ? (
                         <span className="text-[11px] font-bold text-emerald-700">confere</span>
                       ) : (
-                        <span className={`text-[11px] font-black ${d > 0 ? 'text-blue-700' : 'text-red-700'}`}>
+                        <span className={`text-[11px] font-bold ${d > 0 ? 'text-blue-700' : 'text-red-700'}`}>
                           {d > 0 ? '+' : '−'}
                           {formatQty(Math.abs(d))} (sistema {formatQty(l.system_qty)})
                         </span>

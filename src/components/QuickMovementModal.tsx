@@ -6,6 +6,7 @@ import { formatProductLabelDisplay } from '@/lib/productDisplayText';
 import { formatEmployeeName } from '@/lib/employeeName';
 import { registerMovement, receiptNumber, MOVEMENT_DOCUMENT_MAX, MOVEMENT_NOTE_MAX } from '@/lib/movements';
 import { openPrintable, buildReceiptHtml, loadCompanyInfo } from '@/lib/printDocs';
+import { MovementDocAttach } from '@/components/EquipmentDocuments';
 import {
   X,
   ArrowUpRight,
@@ -103,6 +104,8 @@ export default function QuickMovementModal({
   const [note, setNote] = useState('');
   /** Movimentação gravada com colaborador/local: permite imprimir o recibo antes de fechar. */
   const [savedMovementId, setSavedMovementId] = useState<string | null>(null);
+  /** Colaborador da entrega/devolução gravada: permite anexar o termo assinado. */
+  const [savedEmployeeId, setSavedEmployeeId] = useState<string | null>(null);
 
   const fetchEmployees = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -149,6 +152,7 @@ export default function QuickMovementModal({
       setMoveDocument('');
       setNote('');
       setSavedMovementId(null);
+      setSavedEmployeeId(null);
       void fetchEmployees();
       void fetchWorkSites();
     }
@@ -358,6 +362,7 @@ export default function QuickMovementModal({
     // Com colaborador ou local há recibo: a janela fica aberta para imprimir.
     if ((employeeForMove || siteForMove) && res.movement_id) {
       setSavedMovementId(res.movement_id);
+      setSavedEmployeeId(employeeForMove && !item.consumable ? employeeForMove : null);
       return;
     }
     setTimeout(() => {
@@ -401,6 +406,14 @@ export default function QuickMovementModal({
               </div>
               <h3 className="text-xl font-bold text-primary">Movimentação Concluída!</h3>
               <p className="text-slate-500">O estoque foi atualizado com sucesso.</p>
+              {savedMovementId && savedEmployeeId && item ? (
+                <MovementDocAttach
+                  itemId={item.id}
+                  employeeId={savedEmployeeId}
+                  movementId={savedMovementId}
+                  kind={mode === 'OUT' ? 'entrega' : 'devolucao'}
+                />
+              ) : null}
               {savedMovementId && (
                 <div className="flex flex-col sm:flex-row gap-2 justify-center pt-2">
                   <button
@@ -572,11 +585,11 @@ export default function QuickMovementModal({
 
               {isUnique && (
                 <div className="space-y-2">
-                  <label className="text-xs font-black uppercase flex items-center gap-2 text-secondary">
+                  <label className="text-xs font-bold uppercase flex items-center gap-2 text-secondary">
                     <Tag size={14} />
                     TAG cadastrada do item
                   </label>
-                  <div className="w-full p-3 bg-slate-100 border border-slate-200 rounded-lg font-black tracking-wide text-primary">
+                  <div className="w-full p-3 bg-slate-100 border border-slate-200 rounded-lg font-bold tracking-wide text-primary">
                     {registeredTag || 'Sem TAG cadastrada'}
                   </div>
                   <div className="text-[10px] text-slate-400 font-bold">

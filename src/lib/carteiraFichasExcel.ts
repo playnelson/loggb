@@ -86,7 +86,7 @@ export async function downloadEpiFichaExcel(
   const headerRow = ws.getRow(headerRowIndex);
   headerRow.height = 21;
   headerRow.eachCell((cell) => {
-    cell.font = { bold: true, size: 10, color: { argb: 'FF0F172A' } };
+    cell.font = { bold: true, size: 10, color: { argb: 'FF263238' } };
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
     cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
     setCellBorder(cell);

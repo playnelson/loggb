@@ -83,7 +83,7 @@ function styleHeaderRow(worksheet: ExcelJS.Worksheet, rowIndex: number): void {
   const row = worksheet.getRow(rowIndex);
   row.height = 21;
   row.eachCell((cell) => {
-    cell.font = { bold: true, color: { argb: 'FF0F172A' }, size: 10 };
+    cell.font = { bold: true, color: { argb: 'FF263238' }, size: 10 };
     cell.fill = {
       type: 'pattern',
       pattern: 'solid',

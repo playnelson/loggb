@@ -168,7 +168,7 @@ export default function SitesPage() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 erp-titlebar px-4 py-3 sm:px-5">
         <div className="flex items-start gap-3">
           <Link
             href="/inventory"
@@ -178,7 +178,7 @@ export default function SitesPage() {
             <ArrowLeft size={20} />
           </Link>
           <div>
-            <h1 className="text-2xl font-bold text-primary flex items-center gap-2">
+            <h1 className="text-xl sm:text-[22px] font-bold tracking-tight text-primary flex items-center gap-2">
               <MapPin className="text-secondary" />
               Sedes e canteiros
             </h1>
@@ -215,41 +215,41 @@ export default function SitesPage() {
             <table className="w-full text-left border-collapse">
               <thead className="bg-slate-50 border-b border-border">
                 <tr>
-                  <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Nome</th>
-                  <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Tipo</th>
-                  <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Responsável</th>
-                  <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Status</th>
-                  <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right">Ações</th>
+                  <th className="px-4 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Nome</th>
+                  <th className="px-4 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Tipo</th>
+                  <th className="px-4 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Responsável</th>
+                  <th className="px-4 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Status</th>
+                  <th className="px-4 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {sites.map((s) => (
                   <tr key={s.id} className="hover:bg-slate-50/80">
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-2">
                       <div className="font-bold text-primary">{s.name}</div>
                       {s.notes && <div className="text-xs text-slate-500 mt-0.5 line-clamp-2">{s.notes}</div>}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-2">
                       <span className="inline-flex items-center gap-1 text-xs font-bold text-slate-600 bg-slate-100 px-2 py-1 rounded-lg">
                         {s.kind === 'sede' ? <Building2 size={14} /> : <HardHat size={14} />}
                         {kindLabel(s.kind)}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-sm text-slate-600">
+                    <td className="px-4 py-2 text-sm text-slate-600">
                       {s.responsible_employee_id
                         ? nameByEmpId.get(s.responsible_employee_id) || '—'
                         : <span className="text-slate-400 italic">Não definido</span>}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-2">
                       <span
-                        className={`text-[10px] font-black uppercase px-2 py-1 rounded-full ${
+                        className={`text-[10px] font-bold uppercase px-2 py-1 rounded-full ${
                           s.active ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-600'
                         }`}
                       >
                         {s.active ? 'Ativo' : 'Inativo'}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="px-4 py-2 text-right">
                       <button
                         type="button"
                         onClick={() => openEdit(s)}

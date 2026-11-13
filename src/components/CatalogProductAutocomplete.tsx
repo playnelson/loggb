@@ -236,7 +236,7 @@ export function CatalogProductAutocomplete({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => pick(hit)}
             >
-              <div className="h-14 w-14 shrink-0 rounded-lg bg-slate-100 flex items-center justify-center text-[10px] font-black text-slate-500 text-center leading-tight px-1">
+              <div className="h-14 w-14 shrink-0 rounded-lg bg-slate-100 flex items-center justify-center text-[10px] font-bold text-slate-500 text-center leading-tight px-1">
                 {sourceLabel(hit)}
               </div>
               <div className="min-w-0 flex-1">
@@ -246,7 +246,7 @@ export function CatalogProductAutocomplete({
                 ) : null}
                 <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-500">
                   {hit.price != null && (
-                    <span className="font-black text-amber-800">
+                    <span className="font-bold text-amber-800">
                       {formatCatalogPrice(hit.price, hit.currency_id)}
                     </span>
                   )}

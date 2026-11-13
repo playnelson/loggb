@@ -10,6 +10,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { supabase } from '@/lib/supabase';
+import { accessIsReadOnly, accessManagesCategory, type MyAccess, type Permission } from '@/lib/permissions';
 
 export type WorkspaceKind = 'canteiro' | 'cidade' | 'sede' | 'outro';
 export type OrgRole = 'dono' | 'admin' | 'gestor' | 'membro';
@@ -22,11 +23,26 @@ export const WORKSPACE_KINDS: { value: WorkspaceKind; label: string }[] = [
 ];
 
 export const ORG_ROLE_LABEL: Record<OrgRole, string> = {
-  dono: 'Dono',
-  admin: 'Administrador',
+  dono: 'ADM',
+  admin: 'ADM',
   gestor: 'Gestor',
   membro: 'Membro',
 };
+
+/** Telas que o gestor (somente leitura) pode abrir. */
+export const READ_ONLY_PATHS = ['/gestor', '/history', '/workspaces', '/convite'] as const;
+
+export function isReadOnlyPath(pathname: string | null | undefined): boolean {
+  if (!pathname) return false;
+  return READ_ONLY_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+}
+
+export function formatDateTimeBR(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
 
 export function workspaceKindLabel(kind: string): string {
   return WORKSPACE_KINDS.find((k) => k.value === kind)?.label ?? 'Outro';
@@ -37,6 +53,8 @@ export type Organization = {
   name: string;
   logo_data: string | null;
   role: OrgRole;
+  /** Fim do acesso da pessoa logada (gestor com convite temporário). */
+  access_expires_at: string | null;
 };
 
 export type Workspace = {
@@ -68,6 +86,16 @@ type WorkspaceContextValue = {
   reload: () => Promise<void>;
   switchWorkspace: (workspaceId: string) => Promise<void>;
   isOrgAdmin: (organizationId: string) => boolean;
+  /** Só consulta: não grava nada (o banco também bloqueia). */
+  readOnly: boolean;
+  /** Cargo e áreas da pessoa logada no workspace atual (null se o banco ainda não tem a etapa 9). */
+  access: MyAccess | null;
+  /** ADM da organização do workspace atual. */
+  isAdm: boolean;
+  /** Pode usar o módulo (colaboradores, compras...)? */
+  can: (perm: Permission) => boolean;
+  /** Gerencia a área deste item (pela categoria)? */
+  canManageCategory: (category: string | null | undefined) => boolean;
 };
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
@@ -97,6 +125,7 @@ export function WorkspaceProvider({ children, enabled }: { children: ReactNode; 
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [currentId, setCurrentId] = useState<string | null>(null);
+  const [access, setAccess] = useState<MyAccess | null>(null);
 
   const reload = useCallback(async () => {
     if (!supabase) {
@@ -114,7 +143,7 @@ export function WorkspaceProvider({ children, enabled }: { children: ReactNode; 
     const [memRes, wsRes, stateRes] = await Promise.all([
       supabase
         .from('organization_members')
-        .select('organization_id, role, organizations(id, name, logo_data)')
+        .select('organization_id, role, expires_at, organizations(id, name, logo_data)')
         .eq('user_id', user.id),
       supabase
         .from('workspaces')
@@ -137,14 +166,18 @@ export function WorkspaceProvider({ children, enabled }: { children: ReactNode; 
       .map((row: unknown) => {
         const r = row as unknown as {
           role: unknown;
+          expires_at: string | null;
           organizations: { id: string; name: string; logo_data: string | null } | null;
         };
         if (!r.organizations) return null;
+        // Acesso vencido: a organização some (o banco também já não libera nada).
+        if (r.expires_at && new Date(r.expires_at).getTime() <= Date.now()) return null;
         return {
           id: r.organizations.id,
           name: r.organizations.name,
           logo_data: r.organizations.logo_data,
           role: asRole(r.role),
+          access_expires_at: r.expires_at ?? null,
         };
       })
       .filter((o: Organization | null): o is Organization => o !== null)
@@ -181,6 +214,25 @@ export function WorkspaceProvider({ children, enabled }: { children: ReactNode; 
       else console.error('Falha ao escolher o workspace:', error);
     }
 
+    // Cargo e áreas no workspace atual. Sem a etapa 9 no banco, segue como antes.
+    let acc: MyAccess | null = null;
+    if (current) {
+      const accRes = await supabase.rpc('my_access');
+      if (!accRes.error && accRes.data && typeof accRes.data === 'object') {
+        const d = accRes.data as Partial<MyAccess>;
+        acc = {
+          organization_id: String(d.organization_id ?? ''),
+          is_adm: !!d.is_adm,
+          cargo_id: d.cargo_id ?? null,
+          cargo_name: d.cargo_name ?? null,
+          permissions: Array.isArray(d.permissions) ? d.permissions : [],
+          all_areas: !!d.all_areas,
+          areas: Array.isArray(d.areas) ? d.areas : [],
+        };
+      }
+    }
+    setAccess(acc);
+
     setCurrentId(current?.id ?? null);
     setStatus(current ? 'ready' : 'no_workspace');
   }, []);
@@ -216,8 +268,17 @@ export function WorkspaceProvider({ children, enabled }: { children: ReactNode; 
         const role = organizations.find((o) => o.id === organizationId)?.role;
         return role === 'dono' || role === 'admin';
       },
+      readOnly: access ? accessIsReadOnly(access) : currentOrganization?.role === 'gestor',
+      access,
+      isAdm: access ? access.is_adm : currentOrganization?.role === 'dono' || currentOrganization?.role === 'admin',
+      can: (perm: Permission) => {
+        if (!access) return currentOrganization?.role !== 'gestor';
+        return access.is_adm || access.permissions.includes(perm);
+      },
+      canManageCategory: (category: string | null | undefined) =>
+        access ? accessManagesCategory(access, category) : currentOrganization?.role !== 'gestor',
     };
-  }, [status, organizations, workspaces, currentId, reload, switchWorkspace]);
+  }, [status, organizations, workspaces, currentId, reload, switchWorkspace, access]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

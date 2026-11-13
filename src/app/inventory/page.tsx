@@ -1194,9 +1194,9 @@ function InventoryContent() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 erp-titlebar px-4 py-3 sm:px-5">
         <div>
-          <h1 className="text-2xl font-bold text-primary">Almoxarifado LoggB</h1>
+          <h1 className="text-xl sm:text-[22px] font-bold tracking-tight text-primary">Almoxarifado</h1>
           <p className="text-slate-500 text-sm">Gestão de materiais, EPIs e ferramentas por descrição e categoria.</p>
         </div>
         <div className="flex flex-col gap-2 w-full md:flex-row md:flex-nowrap md:w-auto md:gap-2">
@@ -1206,13 +1206,13 @@ function InventoryContent() {
               void fetchWorkSites();
               setIsCartOpen(true);
             }}
-            className="relative flex w-full md:w-auto items-center justify-center gap-2 bg-secondary text-white px-3 py-3 md:px-4 md:py-2 rounded-lg hover:opacity-95 transition-all font-medium text-sm min-h-[48px]"
+            className="relative flex w-full md:w-auto items-center justify-center gap-2 bg-secondary text-white px-3 py-3 md:px-4 md:py-2 rounded-lg hover:opacity-95 transition-all font-medium text-sm min-h-[48px] md:min-h-[36px]"
             title="Monte a retirada e depois escolha o colaborador"
           >
             <ShoppingCart size={18} />
             Carrinho
             {cart.length > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-5 px-1 bg-amber-400 text-amber-950 text-[11px] font-black rounded-full flex items-center justify-center border-2 border-white shadow-sm">
+              <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-5 px-1 bg-amber-400 text-amber-950 text-[11px] font-bold rounded-full flex items-center justify-center border-2 border-white shadow-sm">
                 {cart.length}
               </span>
             )}
@@ -1221,7 +1221,7 @@ function InventoryContent() {
             type="button"
             onClick={() => void handleDownloadInventory()}
             disabled={loading || isExportingInventory}
-            className="flex w-full md:w-auto items-center justify-center gap-2 bg-white text-primary border border-slate-200 px-3 py-3 md:px-4 md:py-2 rounded-lg hover:bg-slate-50 transition-all font-medium text-sm disabled:opacity-50 min-h-[48px]"
+            className="flex w-full md:w-auto items-center justify-center gap-2 bg-white text-primary border border-slate-200 px-3 py-3 md:px-4 md:py-2 rounded-lg hover:bg-slate-50 transition-all font-medium text-sm disabled:opacity-50 min-h-[48px] md:min-h-[36px]"
             title="Baixa em XLSX com todos os itens da sua conta, incluindo TAG"
           >
             {isExportingInventory ? (
@@ -1238,7 +1238,7 @@ function InventoryContent() {
             type="button"
             onClick={handlePrintQrLabels}
             disabled={loading || filteredProducts.length === 0}
-            className="flex w-full md:w-auto items-center justify-center gap-2 bg-white text-primary border border-slate-200 px-3 py-3 md:px-4 md:py-2 rounded-lg hover:bg-slate-50 transition-all font-medium text-sm disabled:opacity-50 min-h-[48px]"
+            className="flex w-full md:w-auto items-center justify-center gap-2 bg-white text-primary border border-slate-200 px-3 py-3 md:px-4 md:py-2 rounded-lg hover:bg-slate-50 transition-all font-medium text-sm disabled:opacity-50 min-h-[48px] md:min-h-[36px]"
             title="Imprime etiquetas com QR code dos itens da lista filtrada; ao ler, o item abre no LoggB"
           >
             <QrCode size={18} className="text-secondary shrink-0" />
@@ -1247,7 +1247,7 @@ function InventoryContent() {
           <button
             type="button"
             onClick={openCategoryManager}
-            className="flex w-full md:w-auto items-center justify-center gap-2 bg-white text-primary border border-slate-200 px-3 py-3 md:px-4 md:py-2 rounded-lg hover:bg-slate-50 transition-all font-medium text-sm min-h-[48px]"
+            className="flex w-full md:w-auto items-center justify-center gap-2 bg-white text-primary border border-slate-200 px-3 py-3 md:px-4 md:py-2 rounded-lg hover:bg-slate-50 transition-all font-medium text-sm min-h-[48px] md:min-h-[36px]"
             title="Criar, editar e excluir categorias"
           >
             <Tags size={18} className="text-secondary shrink-0" />
@@ -1256,7 +1256,7 @@ function InventoryContent() {
           <button
             type="button"
             onClick={() => downloadInventoryImportTemplate()}
-            className="flex w-full md:w-auto items-center justify-center gap-2 bg-white text-primary border border-teal-200 px-3 py-3 md:px-4 md:py-2 rounded-lg hover:bg-teal-50 transition-all font-medium text-sm min-h-[48px]"
+            className="flex w-full md:w-auto items-center justify-center gap-2 bg-white text-primary border border-teal-200 px-3 py-3 md:px-4 md:py-2 rounded-lg hover:bg-teal-50 transition-all font-medium text-sm min-h-[48px] md:min-h-[36px]"
             title="Planilha .xlsx formatada com instruções e colunas reconhecidas pelo importador"
           >
             <Download size={18} className="text-teal-600 shrink-0" />
@@ -1267,7 +1267,7 @@ function InventoryContent() {
           </button>
           <button 
             onClick={() => setIsImportModalOpen(true)}
-            className="flex w-full md:w-auto items-center justify-center gap-2 bg-slate-100 text-primary border border-slate-200 px-3 py-3 md:px-4 md:py-2 rounded-lg hover:bg-slate-200 transition-all font-medium text-sm min-h-[48px]"
+            className="flex w-full md:w-auto items-center justify-center gap-2 bg-slate-100 text-primary border border-slate-200 px-3 py-3 md:px-4 md:py-2 rounded-lg hover:bg-slate-200 transition-all font-medium text-sm min-h-[48px] md:min-h-[36px]"
           >
             <FileUp size={18} className="text-secondary shrink-0" />
             Importar
@@ -1278,7 +1278,7 @@ function InventoryContent() {
               setFormData(emptyItemForm());
               setIsModalOpen(true);
             }}
-            className="flex w-full md:w-auto items-center justify-center gap-2 bg-primary text-white px-3 py-3 md:px-4 md:py-2 rounded-lg hover:bg-slate-800 transition-all font-medium text-sm min-h-[48px]"
+            className="flex w-full md:w-auto items-center justify-center gap-2 bg-primary text-white px-3 py-3 md:px-4 md:py-2 rounded-lg hover:bg-bar-2 transition-all font-medium text-sm min-h-[48px] md:min-h-[36px]"
           >
             <Plus size={18} />
             Novo Material
@@ -1479,7 +1479,7 @@ function InventoryContent() {
             className="w-full text-sm font-bold text-primary bg-white border border-slate-200 rounded-xl px-3 py-3 outline-none focus:ring-2 focus:ring-secondary/40 min-h-[48px]"
           />
           <div className="grid grid-cols-2 gap-2">
-            <label className="col-span-2 text-[10px] font-black uppercase text-slate-400">Consumível</label>
+            <label className="col-span-2 text-[10px] font-bold uppercase text-slate-400">Consumível</label>
             <select
               className={`${selectFilterClass} col-span-2 min-h-[44px]`}
               value={filterConsumable}
@@ -1489,7 +1489,7 @@ function InventoryContent() {
               <option value="sim">Sim</option>
               <option value="nao">Não</option>
             </select>
-            <label className="col-span-2 text-[10px] font-black uppercase text-slate-400">Estoque</label>
+            <label className="col-span-2 text-[10px] font-bold uppercase text-slate-400">Estoque</label>
             <select
               className={`${selectFilterClass} col-span-2 min-h-[44px]`}
               value={filterEstoque}
@@ -1502,7 +1502,7 @@ function InventoryContent() {
               <option value="positive">Com saldo</option>
               <option value="below_min">Abaixo do mín.</option>
             </select>
-            <label className="col-span-2 text-[10px] font-black uppercase text-slate-400">Em posse</label>
+            <label className="col-span-2 text-[10px] font-bold uppercase text-slate-400">Em posse</label>
             <select
               className={`${selectFilterClass} col-span-2 min-h-[44px]`}
               value={filterPosse}
@@ -1512,7 +1512,7 @@ function InventoryContent() {
               <option value="zero">Zero</option>
               <option value="positive">Com posse</option>
             </select>
-            <label className="col-span-2 text-[10px] font-black uppercase text-slate-400">Categoria</label>
+            <label className="col-span-2 text-[10px] font-bold uppercase text-slate-400">Categoria</label>
             <select
               className={`${selectFilterClass} col-span-2 min-h-[44px]`}
               value={filterCategory}
@@ -1525,7 +1525,7 @@ function InventoryContent() {
                 </option>
               ))}
             </select>
-            <label className="col-span-2 text-[10px] font-black uppercase text-slate-400">Carrinho</label>
+            <label className="col-span-2 text-[10px] font-bold uppercase text-slate-400">Carrinho</label>
             <select
               className={`${selectFilterClass} col-span-2 min-h-[44px]`}
               value={filterCart}
@@ -1539,7 +1539,7 @@ function InventoryContent() {
           <button
             type="button"
             onClick={resetInventoryFilters}
-            className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 text-sm font-black uppercase tracking-tight text-slate-600 border border-slate-200 rounded-xl bg-white hover:bg-slate-50"
+            className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 text-sm font-bold uppercase tracking-tight text-slate-600 border border-slate-200 rounded-xl bg-white hover:bg-slate-50"
           >
             <FilterX size={16} />
             Limpar filtros
@@ -1657,7 +1657,7 @@ function InventoryContent() {
                   <button
                     type="button"
                     onClick={resetInventoryFilters}
-                    className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-tight text-slate-600 hover:text-primary border border-slate-200 rounded-md px-2 py-1.5 bg-white hover:bg-slate-50"
+                    className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-tight text-slate-600 hover:text-primary border border-slate-200 rounded-md px-2 py-1.5 bg-white hover:bg-slate-50"
                     title="Limpar todos os filtros"
                   >
                     <FilterX size={14} />
@@ -1669,14 +1669,14 @@ function InventoryContent() {
             <tbody className="divide-y divide-border text-sm">
               {loading ? (
                 <tr>
-                  <td colSpan={9} className="px-6 py-12 text-center text-slate-400">
+                  <td colSpan={9} className="px-4 py-12 text-center text-slate-400">
                     <Loader2 className="animate-spin inline mr-2" size={20} />
                     Carregando inventário...
                   </td>
                 </tr>
               ) : filteredProducts.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-6 py-12 text-center text-slate-400">Nenhum item encontrado.</td>
+                  <td colSpan={9} className="px-4 py-12 text-center text-slate-400">Nenhum item encontrado.</td>
                 </tr>
               ) : (
                 visibleProducts.map((p) => {
@@ -1689,7 +1689,7 @@ function InventoryContent() {
                   
                   return (
                     <tr key={p.id} className="hover:bg-slate-50 transition-colors group">
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-2.5">
                         <div className="font-bold text-primary text-base">{formatProductLabelDisplay(p.description)}</div>
                         <div className="text-[10px] text-slate-400 uppercase font-bold tracking-tight">{p.location || 'Sem local definido'} • {p.unit}</div>
                         {p.tag ? (
@@ -1699,19 +1699,19 @@ function InventoryContent() {
                           </div>
                         ) : null}
                         {p.is_rented ? (
-                          <div className="mt-1 inline-flex items-center rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-amber-800">
+                          <div className="mt-1 inline-flex items-center rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800">
                             Equipamento alugado
                           </div>
                         ) : null}
                       </td>
-                      <td className="px-6 py-4 text-xs text-center border-x border-slate-50">
+                      <td className="px-4 py-2.5 text-xs text-center border-x border-slate-50">
                         <span className={`px-2 py-1 rounded-md font-bold text-[10px] uppercase tracking-tighter ${p.consumable ? 'bg-green-50 text-green-600' : 'bg-slate-50 text-slate-400'}`}>
                           {p.consumable ? 'Sim' : 'Não'}
                         </span>
                       </td>
-                      <td className="px-6 py-4 bg-slate-50/30">
+                      <td className="px-4 py-2.5 bg-slate-50/30">
                         <div className="flex flex-col items-center gap-1">
-                          <span className={`font-black text-sm ${isLowStock ? 'text-red-500' : 'text-primary'}`}>
+                          <span className={`font-bold text-sm ${isLowStock ? 'text-red-500' : 'text-primary'}`}>
                             {formatQty(p.quantity_current)}
                           </span>
                           {totalAtSites > 0 ? (
@@ -1721,7 +1721,7 @@ function InventoryContent() {
                                 onClick={() =>
                                   setActivePopover(activePopover === popoverSitesKey ? null : popoverSitesKey)
                                 }
-                                className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-tight text-amber-800 hover:bg-amber-100 transition-colors"
+                                className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-tight text-amber-800 hover:bg-amber-100 transition-colors"
                                 title="Material enviado a canteiros ou sedes — saldo do almoxarifado mantido"
                               >
                                 <MapPin size={10} />
@@ -1753,7 +1753,7 @@ function InventoryContent() {
                           ) : null}
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-center">
+                      <td className="px-4 py-2.5 text-center">
                         {totalInPossession > 0 ? (
                           <div className="relative inline-block">
                             <button 
@@ -1782,14 +1782,14 @@ function InventoryContent() {
                           <span className="text-slate-300 text-[10px] font-bold">0</span>
                         )}
                       </td>
-                      <td className="px-6 py-4 text-center font-black text-primary text-sm bg-slate-50/30 transition-colors group-hover:bg-slate-100/50">{formatQty(totalQuantity)}</td>
-                      <td className="px-6 py-4 text-center">
+                      <td className="px-4 py-2.5 text-center font-bold text-primary text-sm bg-slate-50/30 transition-colors group-hover:bg-slate-100/50">{formatQty(totalQuantity)}</td>
+                      <td className="px-4 py-2.5 text-center">
                         <div className="flex flex-col items-center">
                           <span className="text-slate-400 font-bold text-xs">{formatQty(p.quantity_min)}</span>
                           {isLowStock && <AlertCircle size={10} className="text-red-400 mt-1 animate-pulse" />}
                         </div>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-2.5">
                         <div className="flex flex-col gap-1">
                           <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-tighter w-fit ${
                             p.category === 'Ferramenta' ? 'bg-blue-50 text-blue-600' :
@@ -1800,7 +1800,7 @@ function InventoryContent() {
 
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-center border-x border-slate-50/80">
+                      <td className="px-4 py-2.5 text-center border-x border-slate-50/80">
                         <button
                           type="button"
                           disabled={p.quantity_current <= 0 || Boolean(p.archived_at)}
@@ -1815,10 +1815,10 @@ function InventoryContent() {
                           <ShoppingCart size={18} strokeWidth={2.25} />
                         </button>
                       </td>
-                      <td className="px-6 py-4 text-right">
+                      <td className="px-4 py-2.5 text-right">
                         {p.archived_at ? (
                           <div className="flex justify-end items-center gap-1">
-                            <span className="text-[10px] font-black uppercase text-slate-400 mr-1">Arquivado</span>
+                            <span className="text-[10px] font-bold uppercase text-slate-400 mr-1">Arquivado</span>
                             <button
                               onClick={() => openHistory(p)}
                               className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-secondary"
@@ -1944,14 +1944,14 @@ function InventoryContent() {
                     ) : null}
                     <div className="flex flex-wrap gap-2 mt-2">
                       <span
-                        className={`inline-flex items-center px-2 py-1 rounded-lg text-[10px] font-black uppercase ${
+                        className={`inline-flex items-center px-2 py-1 rounded-lg text-[10px] font-bold uppercase ${
                           p.consumable ? 'bg-green-50 text-green-700' : 'bg-slate-100 text-slate-500'
                         }`}
                       >
                         {p.consumable ? 'Consumível' : 'Não consumível'}
                       </span>
                       <span
-                        className={`inline-flex items-center px-2 py-1 rounded-lg text-[10px] font-black uppercase ${
+                        className={`inline-flex items-center px-2 py-1 rounded-lg text-[10px] font-bold uppercase ${
                           p.category === 'Ferramenta'
                             ? 'bg-blue-50 text-blue-700'
                             : p.category === 'EPI'
@@ -1962,7 +1962,7 @@ function InventoryContent() {
                         {p.category}
                       </span>
                       {p.is_rented ? (
-                        <span className="inline-flex items-center px-2 py-1 rounded-lg text-[10px] font-black uppercase bg-amber-50 text-amber-700">
+                        <span className="inline-flex items-center px-2 py-1 rounded-lg text-[10px] font-bold uppercase bg-amber-50 text-amber-700">
                           Alugado
                         </span>
                       ) : null}
@@ -1971,20 +1971,20 @@ function InventoryContent() {
 
                   <div className="grid grid-cols-3 gap-2 text-center">
                     <div className="rounded-xl bg-slate-50 border border-slate-100 px-2 py-2">
-                      <div className="text-[9px] font-black uppercase text-slate-400">Estoque</div>
+                      <div className="text-[9px] font-bold uppercase text-slate-400">Estoque</div>
                       <div
-                        className={`text-lg font-black ${isLowStock ? 'text-red-500' : 'text-primary'}`}
+                        className={`text-lg font-bold ${isLowStock ? 'text-red-500' : 'text-primary'}`}
                       >
                         {formatQty(p.quantity_current)}
                       </div>
                     </div>
                     <div className="rounded-xl bg-slate-50 border border-slate-100 px-2 py-2">
-                      <div className="text-[9px] font-black uppercase text-slate-400">Posse</div>
-                      <div className="text-lg font-black text-primary">{formatQty(totalInPossession)}</div>
+                      <div className="text-[9px] font-bold uppercase text-slate-400">Posse</div>
+                      <div className="text-lg font-bold text-primary">{formatQty(totalInPossession)}</div>
                     </div>
                     <div className="rounded-xl bg-slate-50 border border-slate-100 px-2 py-2">
-                      <div className="text-[9px] font-black uppercase text-slate-400">Total</div>
-                      <div className="text-lg font-black text-primary">{formatQty(totalQuantity)}</div>
+                      <div className="text-[9px] font-bold uppercase text-slate-400">Total</div>
+                      <div className="text-lg font-bold text-primary">{formatQty(totalQuantity)}</div>
                     </div>
                   </div>
                   {isLowStock ? (
@@ -1996,7 +1996,7 @@ function InventoryContent() {
 
                   {totalAtSites > 0 ? (
                     <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-3">
-                      <p className="text-[10px] font-black uppercase text-amber-800 mb-2 flex items-center gap-1">
+                      <p className="text-[10px] font-bold uppercase text-amber-800 mb-2 flex items-center gap-1">
                         <MapPin size={12} />
                         {formatQty(totalAtSites)}em canteiros / sedes
                       </p>
@@ -2020,7 +2020,7 @@ function InventoryContent() {
 
                   {totalInPossession > 0 ? (
                     <div className="rounded-xl border border-slate-100 bg-slate-50/80 p-3">
-                      <p className="text-[10px] font-black uppercase text-slate-400 mb-2">Em posse de</p>
+                      <p className="text-[10px] font-bold uppercase text-slate-400 mb-2">Em posse de</p>
                       <div className="space-y-1.5">
                         {p.possession?.map((pos) => (
                           <div key={pos.id} className="flex justify-between text-xs font-bold">
@@ -2293,7 +2293,7 @@ function InventoryContent() {
                     />
                     <label
                       htmlFor="unique-item-toggle"
-                      className={`text-sm font-black cursor-pointer ${formData.consumable ? 'text-slate-300' : 'text-secondary'}`}
+                      className={`text-sm font-bold cursor-pointer ${formData.consumable ? 'text-slate-300' : 'text-secondary'}`}
                       title="Quando marcado, a movimentação exige TAG e força quantidade 1."
                     >
                       Item único (exige TAG)
@@ -2310,7 +2310,7 @@ function InventoryContent() {
                     />
                     <label
                       htmlFor="rented-item-toggle"
-                      className="text-sm font-black cursor-pointer text-amber-700"
+                      className="text-sm font-bold cursor-pointer text-amber-700"
                       title="Marca que este item foi alugado pela empresa."
                     >
                       Item alugado
@@ -2425,7 +2425,7 @@ function InventoryContent() {
                         setAdjustItem(editingItem);
                         setAdjustQty(0);
                       }}
-                      className="mt-2 w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs font-black text-slate-600 hover:bg-slate-50"
+                      className="mt-2 w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-50"
                       title="Ajustar saldo com histórico"
                     >
                       Ajustar estoque (com histórico)
@@ -2457,7 +2457,7 @@ function InventoryContent() {
                 <button 
                   type="submit"
                   disabled={isSubmitting}
-                  className="flex-1 p-3 bg-primary text-white rounded-xl font-bold hover:bg-slate-800 transition-all shadow-lg shadow-primary/20 disabled:opacity-50"
+                  className="flex-1 p-3 bg-primary text-white rounded-xl font-bold hover:bg-bar-2 transition-all shadow-lg shadow-primary/20 disabled:opacity-50"
                 >
                   {isSubmitting ? 'Salvando...' : (editingItem ? 'Salvar Edição' : 'Cadastrar Item')}
                 </button>
@@ -2668,7 +2668,7 @@ function InventoryContent() {
                     <input
                       type="text"
                       placeholder="TAG obrigatoria"
-                      className="md:col-span-3 p-3 bg-white border-2 border-secondary/50 rounded-lg outline-none font-black"
+                      className="md:col-span-3 p-3 bg-white border-2 border-secondary/50 rounded-lg outline-none font-bold"
                       value={cartPickTag}
                       onChange={(e) => setCartPickTag(e.target.value)}
                     />
@@ -2722,7 +2722,7 @@ function InventoryContent() {
                             <Minus size={14} />
                           </button>
                         )}
-                        <span className="font-black min-w-8 text-center">{formatQty(line.quantity)}</span>
+                        <span className="font-bold min-w-8 text-center">{formatQty(line.quantity)}</span>
                         {!line.unique_item && (
                           <button
                             type="button"
@@ -2819,7 +2819,7 @@ function InventoryContent() {
                 <input
                   type="number"
                   step="any"
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none font-black text-lg"
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none font-bold text-lg"
                   value={adjustQty === 0 ? '' : adjustQty}
                   onChange={(e) => setAdjustQty(Number(e.target.value))}
                   onFocus={(e) => e.target.select()}
@@ -2840,7 +2840,7 @@ function InventoryContent() {
                 <button
                   type="submit"
                   disabled={isSubmitting || adjustQty === 0}
-                  className="flex-1 p-3 bg-primary text-white rounded-xl font-bold hover:bg-slate-800 disabled:opacity-50"
+                  className="flex-1 p-3 bg-primary text-white rounded-xl font-bold hover:bg-bar-2 disabled:opacity-50"
                 >
                   {isSubmitting ? 'Salvando...' : 'Confirmar ajuste'}
                 </button>

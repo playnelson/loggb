@@ -475,9 +475,9 @@ export default function ImportSpreadsheet({
 
       <div className="space-y-6">
         {progress.status === 'idle' && mode === 'inventory' && (
-          <div className="rounded-xl border border-teal-200 bg-gradient-to-br from-teal-50/90 to-white p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="rounded-xl border border-teal-200 border-l-[3px] border-l-teal-600 bg-teal-50 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div className="text-xs text-teal-900 font-medium leading-relaxed">
-              <p className="font-black uppercase tracking-wide text-[10px] text-teal-800 mb-1">Modelo oficial</p>
+              <p className="font-bold uppercase tracking-wide text-[10px] text-teal-800 mb-1">Modelo oficial</p>
               <p>Baixe a planilha formatada (duas abas: Materiais + Instruções) e preencha conforme o guia.</p>
             </div>
             <button
@@ -491,7 +491,7 @@ export default function ImportSpreadsheet({
           </div>
         )}
         {progress.status === 'idle' && (
-          <div className="border border-dashed border-slate-300/90 rounded-xl p-10 text-center hover:border-secondary/70 transition-colors group cursor-pointer relative bg-white/65 backdrop-blur-sm shadow-sm">
+          <div className="border border-dashed border-slate-300 rounded-xl p-10 text-center hover:border-secondary hover:bg-secondary/5 transition-colors group cursor-pointer relative bg-white">
             <input 
               type="file" 
               accept=".xlsx, .xls, .csv" 

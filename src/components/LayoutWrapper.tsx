@@ -2,12 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { Layers, Loader2 } from 'lucide-react';
-import { Header, MobileMenuPanel, MobileBottomNav } from '@/components/Navigation';
+import { Header, MobileMenuPanel, MobileBottomNav, PageTrail } from '@/components/Navigation';
 import AppFooter from '@/components/AppFooter';
 import { OrganizationSetupForm } from '@/components/OrganizationSetup';
-import { WorkspaceProvider, useWorkspace } from '@/lib/workspace';
+import { WorkspaceProvider, isReadOnlyPath, useWorkspace } from '@/lib/workspace';
 
 /**
  * As telas só aparecem quando já se sabe em qual workspace a pessoa está;
@@ -15,9 +15,20 @@ import { WorkspaceProvider, useWorkspace } from '@/lib/workspace';
  */
 function WorkspaceGate({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { status } = useWorkspace();
+  const router = useRouter();
+  const { status, readOnly } = useWorkspace();
+  const isInvitePage = Boolean(pathname?.startsWith('/convite'));
+  const blockedForReadOnly = status === 'ready' && readOnly && !isReadOnlyPath(pathname);
 
-  if (status === 'loading') {
+  // Gestor (somente leitura) só usa as telas de consulta.
+  useEffect(() => {
+    if (blockedForReadOnly) router.replace('/gestor');
+  }, [blockedForReadOnly, router]);
+
+  // A página do convite precisa abrir mesmo para quem ainda não tem organização.
+  if (isInvitePage && status !== 'loading') return <>{children}</>;
+
+  if (status === 'loading' || blockedForReadOnly) {
     return (
       <div className="py-24 flex flex-col items-center gap-3 text-slate-400" aria-busy>
         <Loader2 className="animate-spin" size={28} />
@@ -29,7 +40,7 @@ function WorkspaceGate({ children }: { children: React.ReactNode }) {
   if (status === 'onboarding') {
     return (
       <div className="max-w-xl mx-auto py-6 sm:py-10">
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden border-t-[3px] border-t-secondary">
           <div className="p-6 border-b border-slate-100 bg-slate-50">
             <h1 className="text-xl font-bold text-primary flex items-center gap-2">
               <Layers className="text-secondary" />
@@ -37,6 +48,9 @@ function WorkspaceGate({ children }: { children: React.ReactNode }) {
             </h1>
             <p className="text-sm text-slate-500 mt-1">
               Para começar, crie a sua organização (empresa) e o primeiro workspace (canteiro, cidade ou sede).
+            </p>
+            <p className="text-xs text-slate-400 mt-2">
+              Recebeu um convite de outra empresa? Abra o link do convite de novo para entrar.
             </p>
           </div>
           <div className="p-6">
@@ -66,7 +80,12 @@ function WorkspaceGate({ children }: { children: React.ReactNode }) {
     );
   }
 
-  return <>{children}</>;
+  return (
+    <>
+      <PageTrail />
+      {children}
+    </>
+  );
 }
 
 export default function LayoutWrapper({ children }: { children: React.ReactNode }) {
@@ -93,8 +112,8 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
       <Header mobileNavOpen={mobileNavOpen} onMenuButtonClick={() => setMobileNavOpen((open) => !open)} />
       <MobileMenuPanel open={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />
       <MobileBottomNav onOpenFullMenu={() => setMobileNavOpen(true)} />
-      <div className="pt-16 h-screen min-h-0">
-        <main className="h-full w-full min-w-0 overflow-y-auto bg-transparent p-4 pb-28 sm:p-6 md:p-8 md:pb-8">
+      <div className="pt-14 lg:pt-[88px] h-screen min-h-0">
+        <main className="h-full w-full min-w-0 overflow-y-auto bg-transparent p-3 pb-28 sm:p-5 lg:px-6 lg:py-5 md:pb-8">
           <div className="mx-auto w-full max-w-[1800px]">
             <WorkspaceGate>{children}</WorkspaceGate>
             <AppFooter />

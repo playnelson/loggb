@@ -174,7 +174,7 @@ export function HomeAlertsFeed() {
   return (
     <div className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden">
       <div className="px-5 py-3 border-b bg-slate-50 flex items-center justify-between">
-        <h2 className="text-sm font-black text-primary uppercase tracking-wide flex items-center gap-2">
+        <h2 className="text-sm font-bold text-primary uppercase tracking-wide flex items-center gap-2">
           <BellRing size={18} className="text-secondary" />
           Feed de lembretes
         </h2>
@@ -208,7 +208,7 @@ export function HomeAlertsFeed() {
                       </Link>
                     </p>
                   </div>
-                  <span className={`text-[10px] font-black uppercase px-2 py-1 rounded-full ${tag.tone}`}>{tag.label}</span>
+                  <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-full ${tag.tone}`}>{tag.label}</span>
                 </li>
               );
             })}

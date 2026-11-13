@@ -183,7 +183,7 @@ export function MuralPostIts() {
             type="button"
             disabled={saving || !newBody.trim()}
             onClick={() => void addNote()}
-            className="ml-auto flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-800 disabled:opacity-50"
+            className="ml-auto flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-bar-2 disabled:opacity-50"
           >
             {saving ? <Loader2 className="animate-spin" size={16} /> : <Plus size={16} />}
             Adicionar
@@ -192,7 +192,7 @@ export function MuralPostIts() {
       </div>
 
       <div
-        className="rounded-2xl border border-slate-200/90 bg-white/45 backdrop-blur-sm min-h-[360px] p-4 md:p-6 shadow-sm"
+        className="rounded-2xl border border-slate-200 bg-slate-50 min-h-[360px] p-4 md:p-6 shadow-sm"
         style={{
           backgroundImage:
             'radial-gradient(circle, rgba(148,163,184,0.42) 1px, transparent 1px), linear-gradient(180deg, rgba(255,255,255,0.3), rgba(248,250,252,0.38))',
@@ -208,7 +208,7 @@ export function MuralPostIts() {
             {notes.map((n) => (
               <div
                 key={n.id}
-                className={`w-[200px] min-h-[160px] rounded-xl border shadow-[0_10px_24px_-16px_rgba(15,23,42,0.34)] p-3 flex flex-col transition-all hover:-translate-y-0.5 ${COLOR_STYLES[n.color]}`}
+                className={`w-[200px] min-h-[160px] rounded-xl border shadow-md p-3 flex flex-col transition-all hover:-translate-y-0.5 ${COLOR_STYLES[n.color]}`}
               >
                 <div className="flex justify-end mb-1">
                   <button

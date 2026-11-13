@@ -8,8 +8,11 @@ import { formatProductLabelDisplay } from '@/lib/productDisplayText';
 import { registerMovement, MOVEMENT_NOTE_MAX } from '@/lib/movements';
 import { openPrintable, buildEpiFichaHtml, loadCompanyInfo, saveCompanyInfo } from '@/lib/printDocs';
 import { formatEmployeeName, normalizeEmployeeNameForSave, normalizeSearchText } from '@/lib/employeeName';
-import { Search, UserPlus, Mail, Phone, ExternalLink, X, FileUp, Filter, Package, AlertCircle, History, RotateCcw, Download, Loader2, ArrowLeft, FileText, Trash2, Pencil, Printer } from 'lucide-react';
+import { Search, UserPlus, Mail, Phone, ExternalLink, X, FileUp, Filter, Package, AlertCircle, History, RotateCcw, Download, Loader2, ArrowLeft, FileText, Trash2, Pencil, Printer, Paperclip } from 'lucide-react';
 import ImportSpreadsheet from '@/components/ImportSpreadsheet';
+import { DocFileField, EquipmentDocsModal, useEquipmentDocCounts, type PossessionOption } from '@/components/EquipmentDocuments';
+import { uploadEquipmentDoc } from '@/lib/equipmentDocs';
+import { useWorkspace } from '@/lib/workspace';
 import {
   downloadFerramentasFichaTxt,
   type FichaPossessionRow,
@@ -259,6 +262,42 @@ export default function StaffPage() {
   const [fichaSince, setFichaSince] = useState('');
   const walletReqIdRef = useRef(0);
   const [returnItem, setReturnItem] = useState<{employeeId: string, item: Possession} | null>(null);
+  /** Termo de devolução assinado, anexado junto com a devolução (opcional). */
+  const [returnFile, setReturnFile] = useState<File | null>(null);
+  /** Janela de documentos aberta (colaborador inteiro ou um item com ele). */
+  const [docsTarget, setDocsTarget] = useState<{
+    employeeId: string;
+    employeeName: string;
+    itemId?: string;
+    itemLabel?: string;
+    possessionItems?: PossessionOption[];
+  } | null>(null);
+  const docCounts = useEquipmentDocCounts();
+  const { currentWorkspace } = useWorkspace();
+
+  /** Itens não consumíveis com o colaborador (os que costumam ter termo assinado). */
+  const docPossessionOptions = (emp: Employee): PossessionOption[] =>
+    (emp.possession || [])
+      .filter((x) => x.quantity > 0 && !!x.items && !x.items.consumable)
+      .map((x) => ({ item_id: x.item_id, description: formatProductLabelDisplay(x.items?.description) }));
+
+  const attachReturnDoc = async (itemId: string, employeeId: string, movementId: string | null) => {
+    if (!returnFile || !currentWorkspace) return;
+    const up = await uploadEquipmentDoc(supabase, {
+      workspaceId: currentWorkspace.id,
+      file: returnFile,
+      itemId,
+      employeeId,
+      movementId,
+      kind: 'devolucao',
+    });
+    setReturnFile(null);
+    if (!up.ok) {
+      alert(`A devolução foi registrada, mas o termo não foi anexado: ${up.message}\nAnexe depois pelo botão Documentos do colaborador.`);
+    } else {
+      void docCounts.reload();
+    }
+  };
   const [returnQty, setReturnQty] = useState<number>(0);
   const [epiFichaEmployee, setEpiFichaEmployee] = useState<Employee | null>(null);
   const [epiFichaForm, setEpiFichaForm] = useState<EpiFichaFormState>({
@@ -629,6 +668,7 @@ export default function StaffPage() {
       setIsSubmitting(false);
       return;
     }
+    await attachReturnDoc(returnItem.item.item_id, returnItem.employeeId, res.movement_id);
 
     setMoveNote('');
     setReturnItem(null);
@@ -705,6 +745,7 @@ export default function StaffPage() {
       setIsSubmitting(false);
       return;
     }
+    await attachReturnDoc(walletReturn.item_id, walletReturn.employeeId, res.movement_id);
 
     setMoveNote('');
     setWalletReturn(null);
@@ -820,22 +861,22 @@ export default function StaffPage() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 erp-titlebar px-4 py-3 sm:px-5">
         <div>
-          <h1 className="text-2xl font-bold text-primary">Quadro de Funcionários</h1>
+          <h1 className="text-xl sm:text-[22px] font-bold tracking-tight text-primary">Colaboradores</h1>
           <p className="text-slate-500 text-sm">Monitoramento de ativos e histórico por colaborador.</p>
         </div>
         <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
           <button 
             onClick={() => setIsImportModalOpen(true)}
-            className="flex w-full sm:w-auto items-center justify-center gap-2 bg-slate-100 text-primary border border-slate-200 px-4 py-3 md:py-2 rounded-lg hover:bg-slate-200 transition-all font-medium text-sm min-h-[48px]"
+            className="flex w-full sm:w-auto items-center justify-center gap-2 bg-slate-100 text-primary border border-slate-200 px-4 py-3 md:py-2 rounded-lg hover:bg-slate-200 transition-all font-medium text-sm min-h-[48px] md:min-h-[36px]"
           >
             <FileUp size={16} className="text-secondary" />
             Importar Histórico
           </button>
           <button 
             onClick={openNewEmployeeModal}
-            className="flex w-full sm:w-auto items-center justify-center gap-2 bg-primary text-white px-4 py-3 md:py-2 rounded-lg hover:bg-slate-800 transition-all font-medium text-sm min-h-[48px]"
+            className="flex w-full sm:w-auto items-center justify-center gap-2 bg-primary text-white px-4 py-3 md:py-2 rounded-lg hover:bg-bar-2 transition-all font-medium text-sm min-h-[48px] md:min-h-[36px]"
           >
             <UserPlus size={16} />
             Novo Colaborador
@@ -903,31 +944,31 @@ export default function StaffPage() {
           <table className="w-full text-left border-collapse">
             <thead className="bg-slate-50 border-b border-border">
               <tr>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Colaborador</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Cargo</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Status</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Carteiras (EPI + demais)</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Ações</th>
+                <th className="px-4 py-2.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Colaborador</th>
+                <th className="px-4 py-2.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Cargo</th>
+                <th className="px-4 py-2.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Status</th>
+                <th className="px-4 py-2.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Carteiras (EPI + demais)</th>
+                <th className="px-4 py-2.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {loading ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-12 text-center text-slate-400">
+                  <td colSpan={5} className="px-4 py-12 text-center text-slate-400">
                     <Loader2 className="animate-spin inline mr-2 text-secondary" size={20} />
                     Carregando quadro...
                   </td>
                 </tr>
               ) : filteredEmployees.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-12 text-center text-slate-400">Nenhum funcionário encontrado.</td>
+                  <td colSpan={5} className="px-4 py-12 text-center text-slate-400">Nenhum funcionário encontrado.</td>
                 </tr>
               ) : (
                 filteredEmployees.map((e) => {
                   const epiLines = mergeEpiWalletLines(e.possession, epiConsumableByEmployee[e.id] || []);
                   return (
                     <tr key={e.id} className="hover:bg-slate-50 transition-colors group">
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-2.5">
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 bg-slate-100 rounded-lg flex items-center justify-center text-primary font-bold uppercase shrink-0 group-hover:bg-secondary/10 group-hover:text-secondary transition-colors">
                             {e.full_name.charAt(0)}
@@ -935,22 +976,22 @@ export default function StaffPage() {
                           <span className="font-bold text-primary">{e.full_name}</span>
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-sm text-slate-600 font-medium">
+                      <td className="px-4 py-2.5 text-sm text-slate-600 font-medium">
                         {e.role || '---'}
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-2.5">
                         <div className="flex items-center gap-1.5">
                           <div className={`w-1.5 h-1.5 rounded-full ${e.status === 'Ativo' ? 'bg-green-500' : 'bg-slate-300'}`}></div>
                           <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">{e.status}</span>
                         </div>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-2.5">
                         <div className="flex flex-col gap-3 min-w-[200px]">
                           {/* EPIs Wallet */}
                           <div>
                             <div className="flex items-center gap-1.5 mb-1.5">
                               <div className="w-1 h-3 bg-purple-500 rounded-full"></div>
-                              <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Carteira de EPIs</span>
+                              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Carteira de EPIs</span>
                             </div>
                             <div className="flex flex-wrap gap-1.5">
                               {epiLines.length ? (
@@ -961,7 +1002,7 @@ export default function StaffPage() {
                                   >
                                     <span className="truncate max-w-[150px]">{formatProductLabelDisplay(row.description)}</span>
                                     {row.consumable && (
-                                      <span className="text-[8px] font-black uppercase text-amber-800 bg-amber-100/80 px-1 rounded shrink-0">
+                                      <span className="text-[8px] font-bold uppercase text-amber-800 bg-amber-100/80 px-1 rounded shrink-0">
                                         cons.
                                       </span>
                                     )}
@@ -999,6 +1040,24 @@ export default function StaffPage() {
                                         <RotateCcw size={10} />
                                       </button>
                                     )}
+                                    {!row.consumable ? (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setDocsTarget({
+                                            employeeId: e.id,
+                                            employeeName: e.full_name,
+                                            itemId: row.item_id,
+                                            itemLabel: formatProductLabelDisplay(row.description),
+                                          })
+                                        }
+                                        className="hover:text-secondary transition-colors inline-flex items-center gap-0.5"
+                                        title="Documentos (termo de entrega/devolução)"
+                                      >
+                                        <Paperclip size={10} />
+                                        {docCounts.byPair.get(`${e.id}:${row.item_id}`) || null}
+                                      </button>
+                                    ) : null}
                                   </div>
                                 ))
                               ) : (
@@ -1011,7 +1070,7 @@ export default function StaffPage() {
                           <div>
                             <div className="flex items-center gap-1.5 mb-1.5">
                               <div className="w-1 h-3 bg-blue-500 rounded-full"></div>
-                              <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Demais materiais</span>
+                              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Demais materiais</span>
                             </div>
                             <div className="flex flex-wrap gap-1.5">
                               {e.possession?.filter(p => p.quantity > 0 && !!p.items && !p.items.consumable && p.items.category !== 'EPI').length ? (
@@ -1028,6 +1087,22 @@ export default function StaffPage() {
                                       >
                                         <RotateCcw size={10} />
                                       </button>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setDocsTarget({
+                                            employeeId: e.id,
+                                            employeeName: e.full_name,
+                                            itemId: p.item_id,
+                                            itemLabel: formatProductLabelDisplay(p.items?.description),
+                                          })
+                                        }
+                                        className="hover:text-secondary transition-colors inline-flex items-center gap-0.5"
+                                        title="Documentos (termo de entrega/devolução)"
+                                      >
+                                        <Paperclip size={10} />
+                                        {docCounts.byPair.get(`${e.id}:${p.item_id}`) || null}
+                                      </button>
                                     </div>
                                   ))
                               ) : (
@@ -1037,7 +1112,7 @@ export default function StaffPage() {
                           </div>
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-right">
+                      <td className="px-4 py-2.5 text-right">
                         <div className="flex items-center justify-end gap-1.5">
                           <button
                             type="button"
@@ -1062,6 +1137,25 @@ export default function StaffPage() {
                             title="Histórico completo (busca, retiradas e devoluções)"
                           >
                             <History size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setDocsTarget({
+                                employeeId: e.id,
+                                employeeName: e.full_name,
+                                possessionItems: docPossessionOptions(e),
+                              })
+                            }
+                            className="relative text-slate-400 hover:text-secondary p-2 bg-slate-50 border border-slate-200 rounded-lg transition-all"
+                            title="Documentos anexados (termos de entrega e devolução)"
+                          >
+                            <Paperclip size={16} />
+                            {docCounts.byEmployee.get(e.id) ? (
+                              <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded bg-secondary text-white text-[10px] font-bold leading-4 text-center">
+                                {docCounts.byEmployee.get(e.id)}
+                              </span>
+                            ) : null}
                           </button>
                           <button
                             type="button"
@@ -1118,7 +1212,7 @@ export default function StaffPage() {
                     <div>
                       <div className="flex items-center gap-1.5 mb-2">
                         <div className="w-1 h-3 bg-purple-500 rounded-full" />
-                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-tight">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-tight">
                           Carteira de EPIs
                         </span>
                       </div>
@@ -1135,11 +1229,11 @@ export default function StaffPage() {
                                 </p>
                                 <div className="flex flex-wrap items-center gap-2 mt-1">
                                   {row.consumable && (
-                                    <span className="text-[9px] font-black uppercase text-amber-800 bg-amber-100/80 px-1.5 py-0.5 rounded">
+                                    <span className="text-[9px] font-bold uppercase text-amber-800 bg-amber-100/80 px-1.5 py-0.5 rounded">
                                       Consumível
                                     </span>
                                   )}
-                                  <span className="text-xs font-black text-purple-800">×{row.quantity}</span>
+                                  <span className="text-xs font-bold text-purple-800">×{row.quantity}</span>
                                 </div>
                               </div>
                               <div className="flex shrink-0">
@@ -1176,6 +1270,24 @@ export default function StaffPage() {
                                     <RotateCcw size={18} />
                                   </button>
                                 )}
+                                {!row.consumable ? (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setDocsTarget({
+                                        employeeId: e.id,
+                                        employeeName: e.full_name,
+                                        itemId: row.item_id,
+                                        itemLabel: formatProductLabelDisplay(row.description),
+                                      })
+                                    }
+                                    className="min-h-[44px] min-w-[44px] flex items-center justify-center gap-0.5 rounded-xl border border-purple-200 bg-white text-purple-800 text-xs font-bold"
+                                    title="Documentos (termo de entrega/devolução)"
+                                  >
+                                    <Paperclip size={16} />
+                                    {docCounts.byPair.get(`${e.id}:${row.item_id}`) || null}
+                                  </button>
+                                ) : null}
                               </div>
                             </div>
                           ))
@@ -1188,7 +1300,7 @@ export default function StaffPage() {
                     <div>
                       <div className="flex items-center gap-1.5 mb-2">
                         <div className="w-1 h-3 bg-blue-500 rounded-full" />
-                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-tight">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-tight">
                           Demais materiais
                         </span>
                       </div>
@@ -1209,7 +1321,7 @@ export default function StaffPage() {
                                   <p className="text-sm font-bold text-blue-900 leading-snug">
                                     {formatProductLabelDisplay(p.items?.description)}
                                   </p>
-                                  <span className="text-xs font-black text-blue-800 mt-1 inline-block">
+                                  <span className="text-xs font-bold text-blue-800 mt-1 inline-block">
                                     ×{p.quantity}
                                   </span>
                                 </div>
@@ -1224,6 +1336,22 @@ export default function StaffPage() {
                                 >
                                   <RotateCcw size={18} />
                                 </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setDocsTarget({
+                                      employeeId: e.id,
+                                      employeeName: e.full_name,
+                                      itemId: p.item_id,
+                                      itemLabel: formatProductLabelDisplay(p.items?.description),
+                                    })
+                                  }
+                                  className="min-h-[44px] min-w-[44px] shrink-0 flex items-center justify-center gap-0.5 rounded-xl border border-blue-200 bg-white text-blue-800 text-xs font-bold"
+                                  title="Documentos (termo de entrega/devolução)"
+                                >
+                                  <Paperclip size={16} />
+                                  {docCounts.byPair.get(`${e.id}:${p.item_id}`) || null}
+                                </button>
                               </div>
                             ))
                         ) : (
@@ -1234,6 +1362,20 @@ export default function StaffPage() {
                   </div>
 
                   <div className="flex flex-wrap gap-2 pt-1 border-t border-slate-100">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setDocsTarget({
+                          employeeId: e.id,
+                          employeeName: e.full_name,
+                          possessionItems: docPossessionOptions(e),
+                        })
+                      }
+                      className="flex-1 min-w-[100%] sm:min-w-0 min-h-[48px] inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold text-primary"
+                    >
+                      <Paperclip size={18} />
+                      Documentos{docCounts.byEmployee.get(e.id) ? ` (${docCounts.byEmployee.get(e.id)})` : ''}
+                    </button>
                     <button
                       type="button"
                       onClick={() => openEditEmployeeModal(e)}
@@ -1365,7 +1507,7 @@ export default function StaffPage() {
                 <button
                   type="button"
                   onClick={handlePrintEpiFicha}
-                  className="w-full p-3 bg-primary text-white rounded-xl font-bold hover:bg-slate-800 flex items-center justify-center gap-2"
+                  className="w-full p-3 bg-primary text-white rounded-xl font-bold hover:bg-bar-2 flex items-center justify-center gap-2"
                 >
                   <Printer size={16} />
                   Imprimir / PDF — ficha de EPI (NR-6)
@@ -1476,7 +1618,7 @@ export default function StaffPage() {
                           <div className="bg-white p-4 rounded-xl border border-border shadow-sm">
                             <div className="flex flex-wrap justify-between items-start gap-2 mb-2">
                               <span
-                                className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wide ${
+                                className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide ${
                                   isOut
                                     ? 'bg-red-50 text-red-700'
                                     : isDiscard
@@ -1491,7 +1633,7 @@ export default function StaffPage() {
                                     : 'Devolução'}
                               </span>
                               {m.items?.consumable && (
-                                <span className="text-[9px] font-black uppercase bg-amber-50 text-amber-800 px-2 py-0.5 rounded-full">
+                                <span className="text-[9px] font-bold uppercase bg-amber-50 text-amber-800 px-2 py-0.5 rounded-full">
                                   Consumível
                                 </span>
                               )}
@@ -1506,7 +1648,7 @@ export default function StaffPage() {
                                 Baixa de uso do colaborador; estoque do almoxarifado não é creditado.
                               </p>
                             )}
-                            <p className="text-xs font-black text-primary">
+                            <p className="text-xs font-bold text-primary">
                               {isOut
                                 ? 'Data da retirada: '
                                 : isDiscard
@@ -1519,13 +1661,13 @@ export default function StaffPage() {
                             </h4>
                             {m.tag && (
                               <div className="mt-2 inline-flex items-center gap-2 bg-secondary/10 border border-secondary/20 px-2 py-1 rounded-lg">
-                                <span className="text-[9px] font-black text-secondary uppercase tracking-wider">TAG</span>
-                                <span className="text-[11px] font-black text-primary font-mono tracking-wide">{String(m.tag)}</span>
+                                <span className="text-[9px] font-bold text-secondary uppercase tracking-wider">TAG</span>
+                                <span className="text-[11px] font-bold text-primary font-mono tracking-wide">{String(m.tag)}</span>
                               </div>
                             )}
                             <div className="flex items-center justify-between mt-3 pt-2 border-t border-slate-100">
                               <span className="text-[10px] text-slate-400 font-bold uppercase">{m.items?.unit}</span>
-                              <span className="text-sm font-black text-primary">×{m.quantity}</span>
+                              <span className="text-sm font-bold text-primary">×{m.quantity}</span>
                             </div>
                           </div>
                         </div>
@@ -1578,23 +1720,23 @@ export default function StaffPage() {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden flex flex-col min-h-0">
                   <div className="p-4 border-b bg-purple-50/80 flex items-center justify-between shrink-0">
-                    <div className="text-xs font-black text-purple-900 uppercase tracking-wide">Carteira EPI</div>
+                    <div className="text-xs font-bold text-purple-900 uppercase tracking-wide">Carteira EPI</div>
                     <div className="text-xs font-bold text-purple-800 tabular-nums">{walletMergedEpiLines.length}</div>
                   </div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm border-collapse min-w-[400px]">
                       <thead>
                         <tr className="bg-purple-50/40 border-b border-purple-100">
-                          <th scope="col" className="text-left py-2.5 px-3 text-[10px] font-black uppercase tracking-wide text-purple-900">
+                          <th scope="col" className="text-left py-2.5 px-3 text-[10px] font-bold uppercase tracking-wide text-purple-900">
                             Material
                           </th>
-                          <th scope="col" className="text-left py-2.5 px-3 text-[10px] font-black uppercase tracking-wide text-purple-900 w-[120px]">
+                          <th scope="col" className="text-left py-2.5 px-3 text-[10px] font-bold uppercase tracking-wide text-purple-900 w-[120px]">
                             Tipo
                           </th>
-                          <th scope="col" className="text-left py-2.5 px-3 text-[10px] font-black uppercase tracking-wide text-purple-900 w-[72px]">
+                          <th scope="col" className="text-left py-2.5 px-3 text-[10px] font-bold uppercase tracking-wide text-purple-900 w-[72px]">
                             Un.
                           </th>
-                          <th scope="col" className="text-right py-2.5 px-3 text-[10px] font-black uppercase tracking-wide text-purple-900 w-[72px]">
+                          <th scope="col" className="text-right py-2.5 px-3 text-[10px] font-bold uppercase tracking-wide text-purple-900 w-[72px]">
                             Qtd
                           </th>
                         </tr>
@@ -1620,7 +1762,7 @@ export default function StaffPage() {
                             <td className="py-2.5 px-3 align-middle text-[11px] text-slate-500 font-bold uppercase tabular-nums">
                               {row.unit}
                             </td>
-                            <td className="py-2.5 px-3 align-middle text-right font-black text-primary tabular-nums">
+                            <td className="py-2.5 px-3 align-middle text-right font-bold text-primary tabular-nums">
                               {row.quantity}
                             </td>
                           </tr>
@@ -1639,26 +1781,26 @@ export default function StaffPage() {
 
                 <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden flex flex-col min-h-0">
                   <div className="p-4 border-b bg-blue-50/80 flex items-center justify-between shrink-0">
-                    <div className="text-xs font-black text-blue-900 uppercase tracking-wide">Demais materiais em posse</div>
+                    <div className="text-xs font-bold text-blue-900 uppercase tracking-wide">Demais materiais em posse</div>
                     <div className="text-xs font-bold text-blue-800 tabular-nums">{walletDemaisMateriaisLines.length}</div>
                   </div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm border-collapse min-w-[400px]">
                       <thead>
                         <tr className="bg-blue-50/40 border-b border-blue-100">
-                          <th scope="col" className="text-left py-2.5 px-3 text-[10px] font-black uppercase tracking-wide text-blue-900">
+                          <th scope="col" className="text-left py-2.5 px-3 text-[10px] font-bold uppercase tracking-wide text-blue-900">
                             Material
                           </th>
-                          <th scope="col" className="text-left py-2.5 px-3 text-[10px] font-black uppercase tracking-wide text-blue-900 w-[100px]">
+                          <th scope="col" className="text-left py-2.5 px-3 text-[10px] font-bold uppercase tracking-wide text-blue-900 w-[100px]">
                             Categoria
                           </th>
-                          <th scope="col" className="text-left py-2.5 px-3 text-[10px] font-black uppercase tracking-wide text-blue-900 w-[72px]">
+                          <th scope="col" className="text-left py-2.5 px-3 text-[10px] font-bold uppercase tracking-wide text-blue-900 w-[72px]">
                             Un.
                           </th>
-                          <th scope="col" className="text-right py-2.5 px-3 text-[10px] font-black uppercase tracking-wide text-blue-900 w-[72px]">
+                          <th scope="col" className="text-right py-2.5 px-3 text-[10px] font-bold uppercase tracking-wide text-blue-900 w-[72px]">
                             Qtd
                           </th>
-                          <th scope="col" className="text-right py-2.5 px-3 text-[10px] font-black uppercase tracking-wide text-blue-900 w-[88px]">
+                          <th scope="col" className="text-right py-2.5 px-3 text-[10px] font-bold uppercase tracking-wide text-blue-900 w-[88px]">
                             Ação
                           </th>
                         </tr>
@@ -1680,7 +1822,7 @@ export default function StaffPage() {
                             <td className="py-2.5 px-3 align-middle text-[11px] text-slate-500 font-bold uppercase tabular-nums">
                               {p.items.unit}
                             </td>
-                            <td className="py-2.5 px-3 align-middle text-right font-black text-primary tabular-nums">
+                            <td className="py-2.5 px-3 align-middle text-right font-bold text-primary tabular-nums">
                               {p.quantity}
                             </td>
                             <td className="py-2.5 px-3 align-middle text-right">
@@ -1697,7 +1839,7 @@ export default function StaffPage() {
                                   });
                                   setReturnQty(Math.max(1, Number(p.quantity || 1)));
                                 }}
-                                className="px-3 py-1.5 bg-white border border-blue-200 rounded-lg text-xs font-black text-blue-800 hover:bg-blue-50"
+                                className="px-3 py-1.5 bg-white border border-blue-200 rounded-lg text-xs font-bold text-blue-800 hover:bg-blue-50"
                                 title="Devolver ao estoque"
                               >
                                 Devolver
@@ -1720,12 +1862,12 @@ export default function StaffPage() {
 
               <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
                 <div className="p-4 border-b bg-slate-50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                  <div className="text-xs font-black text-primary uppercase">Histórico (todos os materiais)</div>
+                  <div className="text-xs font-bold text-primary uppercase">Histórico (todos os materiais)</div>
                   <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
                       onClick={() => walletEmployee && void downloadWalletWorkbook(walletEmployee, walletMovements)}
-                      className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-black text-slate-600 hover:bg-slate-50 flex items-center gap-2"
+                      className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-50 flex items-center gap-2"
                       title="Baixar carteiras e histórico em Excel"
                     >
                       <Download size={14} />
@@ -1769,7 +1911,7 @@ export default function StaffPage() {
                             <div className="min-w-0 flex-1">
                               <div className="flex flex-wrap items-center gap-2 mb-1">
                                 <span
-                                  className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase ${
+                                  className={`text-[9px] font-bold px-2 py-0.5 rounded-full uppercase ${
                                     isOut
                                       ? 'bg-red-50 text-red-700'
                                       : isDiscard
@@ -1784,7 +1926,7 @@ export default function StaffPage() {
                                       : 'Devolução'}
                                 </span>
                                 {m.items?.consumable && (
-                                  <span className="text-[9px] font-black uppercase bg-amber-50 text-amber-800 px-2 py-0.5 rounded-full">
+                                  <span className="text-[9px] font-bold uppercase bg-amber-50 text-amber-800 px-2 py-0.5 rounded-full">
                                     Consumível
                                   </span>
                                 )}
@@ -1812,13 +1954,13 @@ export default function StaffPage() {
                               </div>
                               {m.tag && (
                                 <div className="mt-1 inline-flex items-center gap-2 bg-secondary/10 border border-secondary/20 px-2 py-1 rounded-lg">
-                                  <span className="text-[9px] font-black text-secondary uppercase tracking-wider">TAG</span>
-                                  <span className="text-[11px] font-black text-primary font-mono tracking-wide">{String(m.tag)}</span>
+                                  <span className="text-[9px] font-bold text-secondary uppercase tracking-wider">TAG</span>
+                                  <span className="text-[11px] font-bold text-primary font-mono tracking-wide">{String(m.tag)}</span>
                                 </div>
                               )}
                             </div>
                             <div className="flex items-center gap-2 shrink-0">
-                              <div className="text-sm font-black text-primary text-right">
+                              <div className="text-sm font-bold text-primary text-right">
                                 {isOut ? '−' : '+'}
                                 {m.quantity}{' '}
                                 <span className="text-xs text-slate-400">{m.items?.unit || ''}</span>
@@ -1838,7 +1980,7 @@ export default function StaffPage() {
                                     });
                                     setReturnQty(Math.max(1, Math.min(Number(m.quantity || 1), Math.max(1, maxQty || 1))));
                                   }}
-                                  className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-black text-slate-600 hover:bg-slate-50"
+                                  className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-50"
                                   title="Devolver ao estoque (não consumível)"
                                 >
                                   Devolver
@@ -1857,7 +1999,7 @@ export default function StaffPage() {
                                     });
                                     setDiscardQty(epiConsumableBalanceRow.quantity);
                                   }}
-                                  className="px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-lg text-xs font-black text-amber-900 hover:bg-amber-100"
+                                  className="px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-lg text-xs font-bold text-amber-900 hover:bg-amber-100"
                                   title="Registrar descarte (não retorna ao estoque)"
                                 >
                                   Descarte
@@ -1913,12 +2055,19 @@ export default function StaffPage() {
                       </div>
                     </div>
                     {noteField('Observação (opcional)', 'Ex.: devolvido com defeito, fim da obra…')}
+                    <DocFileField
+                      label="Termo de devolução assinado (opcional)"
+                      hint="Fica guardado com o item e qualquer pessoa do workspace pode baixar."
+                      file={returnFile}
+                      onChange={setReturnFile}
+                    />
                     <div className="flex gap-2 pt-4">
                       <button
                         type="button"
                         onClick={() => {
                           setWalletReturn(null);
                           setMoveNote('');
+                          setReturnFile(null);
                         }}
                         className="flex-1 p-3 border border-slate-200 rounded-xl font-bold text-slate-500 hover:bg-slate-50"
                       >
@@ -1927,7 +2076,7 @@ export default function StaffPage() {
                       <button
                         type="submit"
                         disabled={isSubmitting}
-                        className="flex-1 p-3 bg-primary text-white rounded-xl font-bold hover:bg-slate-800 shadow-lg shadow-primary/20 disabled:opacity-50"
+                        className="flex-1 p-3 bg-primary text-white rounded-xl font-bold hover:bg-bar-2 shadow-lg shadow-primary/20 disabled:opacity-50"
                       >
                         {isSubmitting ? '...' : 'Confirmar'}
                       </button>
@@ -1999,6 +2148,18 @@ export default function StaffPage() {
         </div>
       )}
 
+      {docsTarget ? (
+        <EquipmentDocsModal
+          employeeId={docsTarget.employeeId}
+          employeeName={formatEmployeeName(docsTarget.employeeName)}
+          itemId={docsTarget.itemId}
+          itemLabel={docsTarget.itemLabel}
+          possessionItems={docsTarget.possessionItems}
+          onClose={() => setDocsTarget(null)}
+          onChanged={() => void docCounts.reload()}
+        />
+      ) : null}
+
       {/* Modal de Devolução */}
       {returnItem && (
         <div className="fixed inset-0 bg-primary/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -2028,12 +2189,19 @@ export default function StaffPage() {
                 </div>
               </div>
               {noteField('Observação (opcional)', 'Ex.: devolvido com defeito, fim da obra…')}
+                    <DocFileField
+                      label="Termo de devolução assinado (opcional)"
+                      hint="Fica guardado com o item e qualquer pessoa do workspace pode baixar."
+                      file={returnFile}
+                      onChange={setReturnFile}
+                    />
               <div className="flex gap-2 pt-4">
                 <button
                   type="button"
                   onClick={() => {
                     setReturnItem(null);
                     setMoveNote('');
+                    setReturnFile(null);
                   }}
                   className="flex-1 p-3 border border-slate-200 rounded-xl font-bold text-slate-500 hover:bg-slate-50"
                 >
@@ -2042,7 +2210,7 @@ export default function StaffPage() {
                 <button 
                   type="submit"
                   disabled={isSubmitting}
-                  className="flex-1 p-3 bg-primary text-white rounded-xl font-bold hover:bg-slate-800 shadow-lg shadow-primary/20 disabled:opacity-50"
+                  className="flex-1 p-3 bg-primary text-white rounded-xl font-bold hover:bg-bar-2 shadow-lg shadow-primary/20 disabled:opacity-50"
                 >
                   {isSubmitting ? '...' : 'Confirmar'}
                 </button>
@@ -2155,7 +2323,7 @@ export default function StaffPage() {
                 <button 
                   type="submit"
                   disabled={isSubmitting}
-                  className="flex-1 p-3 bg-primary text-white rounded-xl font-bold hover:bg-slate-800 transition-all shadow-lg shadow-primary/20 disabled:opacity-50"
+                  className="flex-1 p-3 bg-primary text-white rounded-xl font-bold hover:bg-bar-2 transition-all shadow-lg shadow-primary/20 disabled:opacity-50"
                 >
                   {isSubmitting ? 'Salvando...' : editingEmployee ? 'Salvar' : 'Cadastrar'}
                 </button>

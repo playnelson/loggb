@@ -24,11 +24,11 @@ export default function AppFooter() {
   const when = formatBuildTime(buildTime);
 
   return (
-    <footer className="mt-10 border-t border-slate-200 pt-4 pb-2 text-[11px] text-slate-400">
+    <footer className="mt-10 border-t border-slate-300 pt-3 pb-2 text-[11px] text-slate-500">
       <div className="flex flex-col gap-1 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-3">
-        <span className="inline-flex items-center gap-1.5 font-semibold text-slate-500">
+        <span className="inline-flex items-center gap-1.5 font-semibold text-slate-600">
           <RefreshCw size={12} aria-hidden />
-          LoggB{version ? ` v${version}` : ''}
+          LoggB · Estoque e Suprimentos{version ? ` · v${version}` : ''}
         </span>
         {when ? <span>Última atualização: {when}</span> : null}
         {sha ? (

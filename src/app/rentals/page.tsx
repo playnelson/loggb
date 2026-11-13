@@ -457,7 +457,7 @@ export default function RentalsPage() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 erp-titlebar px-4 py-3 sm:px-5">
         <div className="flex items-start gap-3">
           <Link
             href="/inventory"
@@ -467,7 +467,7 @@ export default function RentalsPage() {
             <ArrowLeft size={20} />
           </Link>
           <div>
-            <h1 className="text-2xl font-bold text-primary">Gestão de Aluguéis</h1>
+            <h1 className="text-xl sm:text-[22px] font-bold tracking-tight text-primary">Gestão de aluguéis</h1>
             <p className="text-slate-500 text-sm">
               Itens marcados como aluguel aparecem aqui automaticamente. O responsável é o colaborador com o item em carteira.
             </p>
@@ -491,18 +491,18 @@ export default function RentalsPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-[10px] font-black uppercase tracking-wider text-slate-500">Aluguéis ativos</p>
-          <p className="text-2xl font-black text-primary mt-1 tabular-nums">{activeCount}</p>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Aluguéis ativos</p>
+          <p className="text-2xl font-bold text-primary mt-1 tabular-nums">{activeCount}</p>
         </div>
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-[10px] font-black uppercase tracking-wider text-slate-500">Custo mensal ativo</p>
-          <p className="text-2xl font-black text-primary mt-1 tabular-nums">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Custo mensal ativo</p>
+          <p className="text-2xl font-bold text-primary mt-1 tabular-nums">
             {monthlyTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
           </p>
         </div>
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-[10px] font-black uppercase tracking-wider text-slate-500">Locadoras cadastradas</p>
-          <p className="text-2xl font-black text-primary mt-1 tabular-nums">{suppliers.length}</p>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Locadoras cadastradas</p>
+          <p className="text-2xl font-bold text-primary mt-1 tabular-nums">{suppliers.length}</p>
         </div>
       </div>
 
@@ -521,11 +521,11 @@ export default function RentalsPage() {
             <table className="w-full text-left border-collapse">
               <thead className="bg-slate-50 border-b border-border">
                 <tr>
-                  <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Equipamento</th>
-                  <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Locadora</th>
-                  <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Responsável</th>
-                  <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Período</th>
-                  <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right">Ações</th>
+                  <th className="px-4 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Equipamento</th>
+                  <th className="px-4 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Locadora</th>
+                  <th className="px-4 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Responsável</th>
+                  <th className="px-4 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Período</th>
+                  <th className="px-4 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -546,7 +546,7 @@ export default function RentalsPage() {
                         : null;
                   return (
                     <tr key={r.id} className="hover:bg-slate-50/80">
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-2">
                         <div className="font-bold text-primary">{formatProductLabelDisplay(it?.description || '—')}</div>
                         <div className="text-xs text-slate-500">
                           {shownQty} {it?.unit || 'un'} ·{' '}
@@ -559,14 +559,14 @@ export default function RentalsPage() {
                           )}
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-sm text-slate-700">
+                      <td className="px-4 py-2 text-sm text-slate-700">
                         <div className="font-bold">{sup?.name || r.supplier}</div>
                         {r.contract_ref ? <div className="text-xs text-slate-500">Contrato: {r.contract_ref}</div> : null}
                       </td>
-                      <td className="px-4 py-3 text-sm text-slate-700">
+                      <td className="px-4 py-2 text-sm text-slate-700">
                         {holdersLabel || formatEmployeeName(emp?.full_name) || inferredLabel || 'Sem carteira vinculada'}
                       </td>
-                      <td className="px-4 py-3 text-sm text-slate-700">
+                      <td className="px-4 py-2 text-sm text-slate-700">
                         {rowIsDraft(r) ? (
                           <span className="text-slate-500">Defina na configuração</span>
                         ) : (
@@ -579,13 +579,13 @@ export default function RentalsPage() {
                           </>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-right">
+                      <td className="px-4 py-2 text-right">
                         <div className="flex justify-end gap-2">
                           {rowIsDraft(r) ? (
                             <button
                               type="button"
                               onClick={() => openFromDraft(r.item_id)}
-                              className="px-3 py-1.5 text-xs font-black text-amber-700 border border-amber-200 bg-amber-50 rounded-lg hover:bg-amber-100"
+                              className="px-3 py-1.5 text-xs font-bold text-amber-700 border border-amber-200 bg-amber-50 rounded-lg hover:bg-amber-100"
                               title={
                                 inferredHolders.length === 0
                                   ? 'Configurar aluguel (sem carteira vinculada no momento)'
@@ -601,7 +601,7 @@ export default function RentalsPage() {
                               <button
                                 type="button"
                                 onClick={() => openEdit(r)}
-                                className="px-3 py-1.5 text-xs font-black text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50"
+                                className="px-3 py-1.5 text-xs font-bold text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50"
                               >
                                 Editar
                               </button>
@@ -609,7 +609,7 @@ export default function RentalsPage() {
                                 <button
                                   type="button"
                                   onClick={() => void closeRental(r)}
-                                  className="px-3 py-1.5 text-xs font-black text-emerald-700 border border-emerald-200 bg-emerald-50 rounded-lg hover:bg-emerald-100"
+                                  className="px-3 py-1.5 text-xs font-bold text-emerald-700 border border-emerald-200 bg-emerald-50 rounded-lg hover:bg-emerald-100"
                                 >
                                   Encerrar
                                 </button>
@@ -682,7 +682,7 @@ export default function RentalsPage() {
                     <button
                       type="button"
                       onClick={() => setSupplierModalOpen(true)}
-                      className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-700 font-black text-xs hover:bg-slate-50"
+                      className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-700 font-bold text-xs hover:bg-slate-50"
                     >
                       + Locadora
                     </button>
@@ -807,7 +807,7 @@ export default function RentalsPage() {
                 <button
                   type="submit"
                   disabled={saving}
-                  className="flex-1 p-3 bg-primary text-white rounded-xl font-bold hover:bg-slate-800 disabled:opacity-50 inline-flex items-center justify-center gap-2"
+                  className="flex-1 p-3 bg-primary text-white rounded-xl font-bold hover:bg-bar-2 disabled:opacity-50 inline-flex items-center justify-center gap-2"
                 >
                   {saving ? <Loader2 size={16} className="animate-spin" /> : <ShieldCheck size={16} />}
                   {saving ? 'Salvando...' : editing ? 'Salvar edição' : 'Salvar aluguel'}
@@ -870,7 +870,7 @@ export default function RentalsPage() {
                 <button
                   type="submit"
                   disabled={supplierSaving}
-                  className="w-full p-3 bg-primary text-white rounded-xl font-bold hover:bg-slate-800 disabled:opacity-50"
+                  className="w-full p-3 bg-primary text-white rounded-xl font-bold hover:bg-bar-2 disabled:opacity-50"
                 >
                   {supplierSaving ? 'Salvando...' : 'Cadastrar locadora'}
                 </button>

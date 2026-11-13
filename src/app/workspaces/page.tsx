@@ -23,6 +23,7 @@ import { supabase } from '@/lib/supabase';
 import {
   ORG_ROLE_LABEL,
   WORKSPACE_KINDS,
+  formatDateTimeBR,
   useWorkspace,
   workspaceKindLabel,
   type Organization,
@@ -30,6 +31,7 @@ import {
   type WorkspaceKind,
 } from '@/lib/workspace';
 import { LogoPicker, OrgLogo, OrganizationSetupForm } from '@/components/OrganizationSetup';
+import Link from 'next/link';
 
 const inputClass = 'mt-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-secondary';
 const labelClass = 'text-xs font-bold uppercase text-slate-400';
@@ -271,7 +273,8 @@ type ModalState =
 function WorkspacesContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { status, organizations, workspaces, currentWorkspace, reload, switchWorkspace, isOrgAdmin } = useWorkspace();
+  const { status, organizations, workspaces, currentWorkspace, currentOrganization, reload, switchWorkspace, isOrgAdmin, access } =
+    useWorkspace();
   const [modal, setModal] = useState<ModalState>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -329,9 +332,9 @@ function WorkspacesContent() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 erp-titlebar px-4 py-3 sm:px-5">
         <div>
-          <h1 className="text-2xl font-bold text-primary flex items-center gap-2">
+          <h1 className="text-xl sm:text-[22px] font-bold tracking-tight text-primary flex items-center gap-2">
             <Layers className="text-secondary" />
             Workspaces
           </h1>
@@ -366,8 +369,17 @@ function WorkspacesContent() {
                 <div className="min-w-0">
                   <h2 className="text-lg font-bold text-primary truncate">{org.name}</h2>
                   <p className="text-xs text-slate-500">
-                    Seu papel: <span className="font-bold">{ORG_ROLE_LABEL[org.role]}</span> · {active.length}{' '}
+                    Seu papel:{' '}
+                    <span className="font-bold">
+                      {org.role === 'dono' || org.role === 'admin'
+                        ? ORG_ROLE_LABEL[org.role]
+                        : access && access.organization_id === org.id && access.cargo_name
+                          ? access.cargo_name
+                          : ORG_ROLE_LABEL[org.role]}
+                    </span>
+                    {org.role === 'gestor' ? ' (somente leitura)' : ''} · {active.length}{' '}
                     {active.length === 1 ? 'workspace ativo' : 'workspaces ativos'}
+                    {org.access_expires_at ? ` · acesso até ${formatDateTimeBR(org.access_expires_at)}` : ''}
                   </p>
                 </div>
               </div>
@@ -418,7 +430,7 @@ function WorkspacesContent() {
                             <div className="flex items-center gap-2">
                               <h3 className="font-bold text-primary truncate">{w.name}</h3>
                               {isCurrent ? (
-                                <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-secondary text-white shrink-0">
+                                <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-full bg-secondary text-white shrink-0">
                                   Atual
                                 </span>
                               ) : null}
@@ -507,6 +519,24 @@ function WorkspacesContent() {
                       ))}
                     </ul>
                   ) : null}
+                </div>
+              ) : null}
+
+              {admin ? (
+                <div className="mt-4 border-t border-slate-100 pt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <p className="text-xs text-slate-600">
+                    Pessoas, cargos, áreas do estoque e convites ficam na página <strong>Organização</strong>.
+                  </p>
+                  {currentOrganization?.id === org.id ? (
+                    <Link
+                      href="/organizacao"
+                      className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-primary rounded hover:opacity-90 shrink-0"
+                    >
+                      Abrir Organização
+                    </Link>
+                  ) : (
+                    <span className="text-[11px] text-slate-500">Entre em um workspace desta organização para gerenciá-la.</span>
+                  )}
                 </div>
               ) : null}
             </div>

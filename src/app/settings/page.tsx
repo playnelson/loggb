@@ -206,12 +206,12 @@ export default function SettingsPage() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-4 erp-titlebar px-4 py-3 sm:px-5">
         <Link href="/" className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-400 hover:text-primary">
           <ArrowLeft size={20} />
         </Link>
         <div>
-          <h1 className="text-3xl font-bold text-primary flex items-center gap-2">
+          <h1 className="text-xl sm:text-[22px] font-bold tracking-tight text-primary flex items-center gap-2">
             <SettingsIcon className="text-secondary" />
             Configurações
           </h1>
@@ -356,7 +356,7 @@ export default function SettingsPage() {
                     Isso apagará permanentemente os dados deste workspace em todos os módulos: materiais,
                     funcionários, históricos, ordens de compra, canteiros/sedes, contagens de inventário, mural e aluguéis.
                     Os outros workspaces não são afetados.
-                    {!canReset ? ' Só o dono ou um administrador da organização pode fazer isso.' : ''}
+                    {!canReset ? ' Só um ADM da organização pode fazer isso.' : ''}
                   </p>
                 </div>
                 <button 
@@ -395,14 +395,14 @@ export default function SettingsPage() {
                   
                   {confirmStage === 1 ? (
                     <>
-                      <h3 className="text-2xl font-black text-primary uppercase tracking-tight">Você tem certeza?</h3>
+                      <h3 className="text-2xl font-bold text-primary uppercase tracking-tight">Você tem certeza?</h3>
                       <p className="text-slate-500 text-sm">
                         Esta ação apagará TODOS os registros do workspace {wsName}. Não existe opção de desfazer!
                       </p>
                     </>
                   ) : (
                     <>
-                      <h3 className="text-2xl font-black text-red-600 uppercase tracking-tight italic">Último Aviso!</h3>
+                      <h3 className="text-2xl font-bold text-red-600 uppercase tracking-tight italic">Último Aviso!</h3>
                       <p className="text-slate-500 text-sm font-medium">
                         Confirme clicando no botão abaixo que você entende que perderá todos os materiais e históricos de movimentação.
                       </p>

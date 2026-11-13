@@ -23,7 +23,7 @@ export function OrgLogo({ src, name, size = 32 }: { src: string | null | undefin
   }
   return (
     <span
-      className="rounded-lg bg-primary/5 border border-slate-200 text-primary/60 flex items-center justify-center shrink-0"
+      className="rounded-lg bg-slate-100 border border-slate-300 text-slate-500 flex items-center justify-center shrink-0"
       style={{ width: size, height: size }}
       aria-hidden
     >
@@ -104,7 +104,7 @@ const labelClass = 'text-xs font-bold uppercase text-slate-400';
 
 /**
  * Cria uma organização (nome + logo) já com o primeiro workspace.
- * Quem cria vira dono e entra no workspace novo.
+ * Quem cria vira ADM e entra no workspace novo.
  */
 export function OrganizationSetupForm({
   onCreated,
@@ -149,7 +149,7 @@ export function OrganizationSetupForm({
       {error ? <div className="text-sm font-bold text-red-600 bg-red-50 border border-red-100 rounded-lg p-3">{error}</div> : null}
 
       <fieldset className="space-y-4">
-        <legend className="text-sm font-black text-primary mb-2">Organização</legend>
+        <legend className="text-sm font-bold text-primary mb-2">Organização</legend>
         <div>
           <label className={labelClass} htmlFor="org-name">Nome da empresa ou organização</label>
           <input
@@ -172,7 +172,7 @@ export function OrganizationSetupForm({
       </fieldset>
 
       <fieldset className="space-y-4 border-t border-slate-100 pt-5">
-        <legend className="text-sm font-black text-primary mb-2">Primeiro workspace</legend>
+        <legend className="text-sm font-bold text-primary mb-2">Primeiro workspace</legend>
         <p className="text-xs text-slate-500 -mt-1">
           Um workspace é um canteiro, cidade ou sede, com estoque, equipe e histórico próprios. Depois você pode criar outros.
         </p>

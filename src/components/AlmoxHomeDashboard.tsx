@@ -43,7 +43,7 @@ function StatCard({
       <div className="flex items-start justify-between gap-2">
         <div>
           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{label}</p>
-          <p className="text-2xl font-black text-primary mt-1 tabular-nums">{value}</p>
+          <p className="text-2xl font-bold text-primary mt-1 tabular-nums">{value}</p>
           {sub ? <p className="text-xs text-slate-600 mt-1">{sub}</p> : null}
         </div>
         <div className="text-slate-500 opacity-90">{icon}</div>
@@ -156,7 +156,7 @@ export function AlmoxHomeDashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden">
           <div className="px-5 py-3 border-b bg-slate-50 flex items-center justify-between">
-            <h2 className="text-sm font-black text-primary uppercase tracking-wide flex items-center gap-2">
+            <h2 className="text-sm font-bold text-primary uppercase tracking-wide flex items-center gap-2">
               <TrendingDown size={18} className="text-secondary" />
               Mais saídas (90 dias)
             </h2>
@@ -171,7 +171,7 @@ export function AlmoxHomeDashboard() {
               <ul className="divide-y divide-slate-100">
                 {snap.topOut.map((row, idx) => (
                   <li key={row.item_id} className="px-3 py-2.5 flex items-center gap-3 hover:bg-slate-50/80">
-                    <span className="text-xs font-black text-slate-400 w-6 tabular-nums">{idx + 1}.</span>
+                    <span className="text-xs font-bold text-slate-400 w-6 tabular-nums">{idx + 1}.</span>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-bold text-primary truncate">
                         {formatProductLabelDisplay(row.description)}
@@ -189,7 +189,7 @@ export function AlmoxHomeDashboard() {
 
         <div className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden">
           <div className="px-5 py-3 border-b bg-slate-50 flex items-center justify-between">
-            <h2 className="text-sm font-black text-primary uppercase tracking-wide flex items-center gap-2">
+            <h2 className="text-sm font-bold text-primary uppercase tracking-wide flex items-center gap-2">
               <AlertTriangle size={18} className="text-amber-600" />
               Abaixo do mínimo
             </h2>
@@ -223,7 +223,7 @@ export function AlmoxHomeDashboard() {
       </div>
 
       <div className="bg-white rounded-2xl border border-border shadow-sm p-5">
-        <h2 className="text-sm font-black text-primary uppercase tracking-wide mb-4">Itens por categoria</h2>
+        <h2 className="text-sm font-bold text-primary uppercase tracking-wide mb-4">Itens por categoria</h2>
         {categoriesTop.length === 0 ? (
           <p className="text-sm text-slate-500">Sem dados.</p>
         ) : (

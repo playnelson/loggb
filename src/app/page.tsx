@@ -21,10 +21,10 @@ export default function Home() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
+      <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4 erp-titlebar px-4 py-3 sm:px-5">
         <div className="space-y-3">
           <div>
-            <h1 className="text-2xl font-bold text-primary">Início</h1>
+            <h1 className="text-xl sm:text-[22px] font-bold tracking-tight text-primary">Início</h1>
             <p className="text-slate-500 text-sm">
               {homeSection === 'resumo' && 'Indicadores para o almoxarifado: saídas, estoque e categorias.'}
               {homeSection === 'mural' && 'Post-its para lembretes rápidos da equipe.'}

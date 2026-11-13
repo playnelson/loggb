@@ -732,7 +732,7 @@ ${summary}` : summary);
             </div>
           )}
           <div className="flex flex-col gap-2">
-            <h1 className="text-2xl font-bold text-primary flex items-center gap-2 flex-wrap">
+            <h1 className="text-xl sm:text-[22px] font-bold tracking-tight text-primary flex items-center gap-2 flex-wrap">
               <ClipboardList className="text-secondary shrink-0" />
               <span>OC {!editing ? header.oc_number || '—' : draftHeader.oc_number || '—'}</span>
             </h1>
@@ -763,7 +763,7 @@ ${summary}` : summary);
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="bg-white rounded-xl border border-border p-4 space-y-2">
-              <div className="text-[10px] font-black uppercase text-slate-400 flex items-center gap-1">
+              <div className="text-[10px] font-bold uppercase text-slate-400 flex items-center gap-1">
                 <User size={12} /> Comprador
               </div>
               <div className="space-y-1 text-sm">
@@ -783,7 +783,7 @@ ${summary}` : summary);
             </div>
 
             <div className="bg-white rounded-xl border border-border p-4 space-y-2">
-              <div className="text-[10px] font-black uppercase text-slate-400 flex items-center gap-1">
+              <div className="text-[10px] font-bold uppercase text-slate-400 flex items-center gap-1">
                 <Store size={12} /> Fornecedor
               </div>
               <div className="space-y-1 text-sm">
@@ -822,7 +822,7 @@ ${summary}` : summary);
             </div>
 
             <div className="bg-white rounded-xl border border-border p-4 space-y-2 sm:col-span-2">
-              <div className="text-[10px] font-black uppercase text-slate-400 flex items-center gap-1">
+              <div className="text-[10px] font-bold uppercase text-slate-400 flex items-center gap-1">
                 <Truck size={12} /> Entrega
               </div>
               <div className="text-sm">
@@ -898,7 +898,7 @@ ${summary}` : summary);
                     </button>
                     <div className="flex-1 min-w-0">
                       <div className="flex flex-wrap items-baseline gap-2">
-                        <span className="text-xs font-black text-slate-400 w-6">{idx + 1}</span>
+                        <span className="text-xs font-bold text-slate-400 w-6">{idx + 1}</span>
                         <span
                           className={`text-sm font-medium ${
                             it.delivered ? 'text-slate-500 line-through' : 'text-primary'
@@ -951,7 +951,7 @@ ${summary}` : summary);
               <div className="p-4 space-y-3">
                 <div className="border border-slate-100 rounded-xl overflow-hidden">
                   <table className="w-full text-xs">
-                    <thead className="bg-slate-50 text-[10px] font-black uppercase text-slate-500">
+                    <thead className="bg-slate-50 text-[10px] font-bold uppercase text-slate-500">
                       <tr>
                         <th className="px-2 py-2 w-10">#</th>
                         <th className="px-2 py-2">Descrição</th>

@@ -209,7 +209,7 @@ export default function ReceivePoLineModal({ line, ocNumber, onClose, onDone }: 
                 </div>
               ) : creating ? (
                 <div className="border border-secondary/30 bg-secondary/5 rounded-xl p-3 space-y-2">
-                  <div className="text-[11px] font-black uppercase text-secondary">Novo item (saldo começa em 0)</div>
+                  <div className="text-[11px] font-bold uppercase text-secondary">Novo item (saldo começa em 0)</div>
                   <input
                     className="w-full p-2.5 bg-white border border-slate-200 rounded-lg text-sm font-bold"
                     value={newDesc}

@@ -233,9 +233,9 @@ export default function HistoryPage() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 erp-titlebar px-4 py-3 sm:px-5">
         <div>
-          <h1 className="text-2xl font-bold text-primary flex items-center gap-2">
+          <h1 className="text-xl sm:text-[22px] font-bold tracking-tight text-primary flex items-center gap-2">
             <History className="text-secondary" />
             Histórico Completo
           </h1>
@@ -338,25 +338,25 @@ export default function HistoryPage() {
           <table className="w-full text-left border-collapse">
             <thead className="bg-slate-50 border-b border-border">
               <tr>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Data / Hora</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Motivo</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Material</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Colaborador / local</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Qtd.</th>
-                <th className="px-4 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Recibo</th>
+                <th className="px-4 py-2.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Data / Hora</th>
+                <th className="px-4 py-2.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Motivo</th>
+                <th className="px-4 py-2.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Material</th>
+                <th className="px-4 py-2.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Colaborador / local</th>
+                <th className="px-4 py-2.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Qtd.</th>
+                <th className="px-4 py-2.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Recibo</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-12 text-center text-slate-400">
+                  <td colSpan={6} className="px-4 py-12 text-center text-slate-400">
                     <Loader2 className="animate-spin inline mr-2 text-secondary" size={20} />
                     Carregando histórico...
                   </td>
                 </tr>
               ) : filteredMovements.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-12 text-center text-slate-300 italic font-medium">
+                  <td colSpan={6} className="px-4 py-12 text-center text-slate-300 italic font-medium">
                     Nenhuma movimentação encontrada com estes filtros.
                   </td>
                 </tr>
@@ -365,7 +365,7 @@ export default function HistoryPage() {
                   const reason = movementReasonOf(move);
                   return (
                     <tr key={move.id} className="hover:bg-slate-50 transition-colors group">
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-4 py-2.5 whitespace-nowrap">
                         <div className="text-xs font-bold text-primary font-mono bg-slate-50 inline-block px-2 py-1 rounded">
                           {new Date(move.created_at).toLocaleString('pt-BR', {
                             day: '2-digit',
@@ -376,15 +376,15 @@ export default function HistoryPage() {
                           })}
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-center">
+                      <td className="px-4 py-2.5 text-center">
                         <div
-                          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-tighter ${REASON_TONE[reason]}`}
+                          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-tighter ${REASON_TONE[reason]}`}
                         >
                           {move.type === 'IN' ? <ArrowDownLeft size={12} /> : <ArrowUpRight size={12} />}
                           {MOVEMENT_REASON_LABEL[reason]}
                         </div>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-2.5">
                         <div className="flex items-center gap-3">
                           <div className="p-2 bg-slate-100 rounded-lg group-hover:bg-white transition-colors">
                             <Package size={14} className="text-slate-400" />
@@ -409,7 +409,7 @@ export default function HistoryPage() {
                           </div>
                         </div>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-2.5">
                         <div className="flex items-center gap-2">
                           <div className="w-6 h-6 bg-slate-100 rounded-full flex items-center justify-center text-[10px] font-bold text-secondary">
                             {movementCounterpartyLabel(move).charAt(0)}
@@ -417,14 +417,14 @@ export default function HistoryPage() {
                           <span className="text-sm font-medium text-slate-600">{movementCounterpartyLabel(move)}</span>
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-right whitespace-nowrap">
-                        <span className={`text-sm font-black ${move.type === 'IN' ? 'text-green-600' : 'text-red-600'}`}>
+                      <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                        <span className={`text-sm font-bold ${move.type === 'IN' ? 'text-green-600' : 'text-red-600'}`}>
                           {move.type === 'IN' ? '+' : '−'}
                           {formatQty(move.quantity)}
                         </span>
                         <span className="ml-1 text-[10px] font-bold text-slate-400 lowercase">{move.items?.unit}</span>
                       </td>
-                      <td className="px-4 py-4 text-center whitespace-nowrap">
+                      <td className="px-4 py-2.5 text-center whitespace-nowrap">
                         {move.employee_id || move.work_site_id ? (
                           <button
                             type="button"

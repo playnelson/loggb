@@ -18,7 +18,7 @@ export function downloadInventoryImportTemplate(): void {
   } as const;
 
   const titleStyle = {
-    font: { bold: true, sz: 18, color: { rgb: '0F172A' } },
+    font: { bold: true, sz: 18, color: { rgb: '263238' } },
     alignment: { vertical: 'center', horizontal: 'left' },
   } as const;
 
@@ -115,7 +115,7 @@ export function downloadInventoryImportTemplate(): void {
   }
 
   const instrTitle = {
-    font: { bold: true, sz: 16, color: { rgb: '0F172A' } },
+    font: { bold: true, sz: 16, color: { rgb: '263238' } },
     alignment: { vertical: 'center', horizontal: 'left' },
   } as const;
   const instrBody = {

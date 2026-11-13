@@ -7,10 +7,9 @@ import PwaServiceWorker from "@/components/PwaServiceWorker";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "LoggB | Almoxarifado Inteligente",
-  description: "Sistema de Gestão de Inventário e Movimentação LoggB",
+  title: "LoggB | Estoque e Suprimentos",
+  description: "LoggB: estoque, compras e cadastros da obra",
   manifest: "/manifest.webmanifest",
-  themeColor: "#0f172a",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
@@ -22,6 +21,7 @@ export const viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover" as const,
+  themeColor: "#263238",
 };
 
 export default function RootLayout({

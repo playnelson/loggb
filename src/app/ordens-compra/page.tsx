@@ -737,9 +737,9 @@ export default function OrdensCompraPage() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 erp-titlebar px-4 py-3 sm:px-5">
         <div>
-          <h1 className="text-2xl font-bold text-primary flex items-center gap-2">
+          <h1 className="text-xl sm:text-[22px] font-bold tracking-tight text-primary flex items-center gap-2">
             <ClipboardList className="text-secondary" />
             Ordens de compra
           </h1>
@@ -789,7 +789,7 @@ export default function OrdensCompraPage() {
       <div className="bg-white rounded-xl border border-border shadow-sm p-4 space-y-3">
         <div className="flex flex-col lg:flex-row gap-3 lg:items-end">
           <div className="flex-1 min-w-0">
-            <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">Busca</label>
+            <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Busca</label>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
               <input
@@ -801,7 +801,7 @@ export default function OrdensCompraPage() {
             </div>
           </div>
           <div className="w-full lg:w-52">
-            <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">Entrega</label>
+            <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Entrega</label>
             <select
               className="w-full px-3 py-3 rounded-xl border border-slate-200 text-sm font-medium bg-white min-h-[48px]"
               value={filterPending}
@@ -813,7 +813,7 @@ export default function OrdensCompraPage() {
             </select>
           </div>
           <div className="w-full lg:w-48">
-            <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">Status</label>
+            <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Status</label>
             <select
               className="w-full px-3 py-3 rounded-xl border border-slate-200 text-sm font-medium bg-white min-h-[48px]"
               value={statusFilter}
@@ -838,7 +838,7 @@ export default function OrdensCompraPage() {
             </select>
           </div>
           <div className="w-full lg:w-48">
-            <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">Prazo</label>
+            <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Prazo</label>
             <select
               className="w-full px-3 py-3 rounded-xl border border-slate-200 text-sm font-medium bg-white min-h-[48px]"
               value={deadlineFilter}
@@ -879,7 +879,7 @@ export default function OrdensCompraPage() {
       <div className="bg-white rounded-xl border border-border shadow-sm p-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <p className="text-[10px] font-black uppercase text-slate-400">Consulta</p>
+            <p className="text-[10px] font-bold uppercase text-slate-400">Consulta</p>
             <p className="text-sm font-bold text-primary">
               Arquivadas: {archivedCount}
             </p>
@@ -911,15 +911,15 @@ export default function OrdensCompraPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-slate-50 border-b border-slate-100 text-left text-[10px] font-black uppercase text-slate-500">
-                  <th className="px-2 py-3 w-10" />
-                  <th className="px-4 py-3">OC</th>
-                  <th className="px-4 py-3">Fornecedor / título</th>
-                  <th className="px-4 py-3">Comprador</th>
-                  <th className="px-4 py-3">Prazo</th>
-                  <th className="px-4 py-3">Entrega</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3 w-56" />
+                <tr className="bg-slate-50 border-b border-slate-100 text-left text-[10px] font-bold uppercase text-slate-500">
+                  <th className="px-2 py-2 w-10" />
+                  <th className="px-4 py-2">OC</th>
+                  <th className="px-4 py-2">Fornecedor / título</th>
+                  <th className="px-4 py-2">Comprador</th>
+                  <th className="px-4 py-2">Prazo</th>
+                  <th className="px-4 py-2">Entrega</th>
+                  <th className="px-4 py-2">Status</th>
+                  <th className="px-4 py-2 w-56" />
                 </tr>
               </thead>
               <tbody>
@@ -940,23 +940,23 @@ export default function OrdensCompraPage() {
                         className={`border-b border-slate-50 hover:bg-slate-50/80 cursor-pointer ${archived ? 'bg-slate-50/80' : ''}`}
                         onClick={() => setExpandedOrderId((prev) => (prev === o.id ? null : o.id))}
                       >
-                        <td className="px-2 py-3 text-slate-500">
+                        <td className="px-2 py-2 text-slate-500">
                           {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                         </td>
-                        <td className="px-4 py-3 font-bold text-primary whitespace-nowrap">
+                        <td className="px-4 py-2 font-bold text-primary whitespace-nowrap">
                           {o.oc_number || '—'}
                         </td>
-                        <td className="px-4 py-3 min-w-[180px]">
+                        <td className="px-4 py-2 min-w-[180px]">
                           <div className="font-medium text-primary truncate max-w-[240px] sm:max-w-md">
                             {o.title || o.vendor_name || 'Sem título'}
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-slate-600 min-w-[180px]">
+                        <td className="px-4 py-2 text-slate-600 min-w-[180px]">
                           <span className="text-xs font-medium">
                             {o.buyer_name || buyerNameFromNotes(o.notes) || '—'}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
+                        <td className="px-4 py-2 text-slate-600 whitespace-nowrap">
                           <div className="font-medium text-primary">{formatDateBR(o.delivery_deadline)}</div>
                           {!archived && total > 0 && done < total && dKind === 'late' && (
                             <div className="text-[11px] font-bold text-red-600">
@@ -967,7 +967,7 @@ export default function OrdensCompraPage() {
                             <div className="text-[11px] font-bold text-amber-700">Vence hoje</div>
                           )}
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-4 py-2">
                           {total === 0 ? (
                             <span className="text-slate-400 text-xs">Sem itens</span>
                           ) : (
@@ -981,7 +981,7 @@ export default function OrdensCompraPage() {
                             </span>
                           )}
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-4 py-2">
                           <span
                             className={`inline-flex items-center rounded-full px-2 py-1 text-[11px] font-bold ${
                               rowStatus === 'Arquivada'
@@ -996,7 +996,7 @@ export default function OrdensCompraPage() {
                             {rowStatus}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-right">
+                        <td className="px-4 py-2 text-right">
                           <div className="inline-flex items-center gap-3">
                             <Link
                               href={`/ordens-compra/${o.id}`}
@@ -1037,7 +1037,7 @@ export default function OrdensCompraPage() {
 
                       {expanded && (
                         <tr className="border-b border-slate-100 bg-slate-50/50">
-                          <td colSpan={8} className="px-4 py-3">
+                          <td colSpan={8} className="px-4 py-2">
                             {items.length === 0 ? (
                               <p className="text-xs text-slate-500">Esta OC não possui itens.</p>
                             ) : (
@@ -1204,7 +1204,7 @@ export default function OrdensCompraPage() {
                 </div>
                 <div className="border border-slate-100 rounded-xl overflow-hidden">
                   <table className="w-full text-xs">
-                    <thead className="bg-slate-50 text-[10px] font-black uppercase text-slate-500">
+                    <thead className="bg-slate-50 text-[10px] font-bold uppercase text-slate-500">
                       <tr>
                         <th className="px-2 py-2 w-10">#</th>
                         <th className="px-2 py-2">Descrição</th>
