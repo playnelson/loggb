@@ -16,6 +16,7 @@ import {
 } from '@/lib/movements';
 import { EQUIPMENT_DOC_COLUMNS, openEquipmentDoc, type EquipmentDoc } from '@/lib/equipmentDocs';
 import {
+  Users,
   Paperclip,
   History,
   Search,
@@ -45,6 +46,7 @@ interface Movement {
     description: string;
     unit: string;
     category?: string | null;
+    tag?: string | null;
   } | null;
   employees?: {
     full_name: string;
@@ -84,15 +86,17 @@ function defaultFromDate(): string {
 
 const isEpiCategory = (c: string | null | undefined) => String(c ?? '').trim().toUpperCase().startsWith('EPI');
 
-function movementCounterpartyLabel(m: Movement): string {
+/** Colaborador da movimentação (vazio quando não teve colaborador). */
+function movementEmployeeLabel(m: Movement): string {
   const emp = m.employees?.full_name;
-  if (emp) return formatEmployeeName(emp);
-  const ws = m.work_sites;
-  if (ws?.name) {
-    const k = ws.kind === 'sede' ? 'Sede' : 'Canteiro';
-    return `${k}: ${ws.name}`;
-  }
-  return 'Almoxarifado';
+  return emp ? formatEmployeeName(emp) : '';
+}
+
+/** TAG da movimentação ou, se ela não tiver (ex.: entrada/importação), a TAG do item único. */
+function movementTag(m: Movement): string {
+  const own = (m.tag || '').trim();
+  if (own && own.toUpperCase() !== 'DESCARTE') return own;
+  return (m.items?.tag || '').trim();
 }
 
 export default function HistoryPage() {
@@ -120,6 +124,7 @@ export default function HistoryPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [reasonFilter, setReasonFilter] = useState<'ALL' | MovementReason>('ALL');
+  const [employeeFilter, setEmployeeFilter] = useState('');
   const [dateFrom, setDateFrom] = useState(defaultFromDate);
   const [dateTo, setDateTo] = useState('');
   const [renderLimit, setRenderLimit] = useState(RENDER_STEP);
@@ -144,7 +149,7 @@ export default function HistoryPage() {
       let q = supabase
         .from('movements')
         .select(
-          'id, created_at, quantity, type, reason, tag, note, document, batch_id, ca_number, employee_id, work_site_id, items(description, unit, category), employees(full_name), work_sites(name, kind)'
+          'id, created_at, quantity, type, reason, tag, note, document, batch_id, ca_number, employee_id, work_site_id, items(description, unit, category, tag), employees(full_name), work_sites(name, kind)'
         )
         .order('created_at', { ascending: false })
         .order('id', { ascending: false });
@@ -190,13 +195,20 @@ export default function HistoryPage() {
     };
   }, [reasonFilter, dateFrom, dateTo]);
 
+  const employeeOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of movements) if (m.employee_id && m.employees?.full_name) map.set(m.employee_id, formatEmployeeName(m.employees.full_name));
+    return [...map].sort((a, b) => a[1].localeCompare(b[1], 'pt-BR'));
+  }, [movements]);
+
   const filteredMovements = useMemo(() => {
-    if (!searchLower) return movements;
-    return movements.filter((m) => {
+    const base = employeeFilter ? movements.filter((m) => m.employee_id === employeeFilter) : movements;
+    if (!searchLower) return base;
+    return base.filter((m) => {
       const item = normalizeSearchText(m.items?.description || '');
       const emp = normalizeSearchText(m.employees?.full_name || '');
       const site = normalizeSearchText(m.work_sites?.name || '');
-      const tag = normalizeSearchText(m.tag || '');
+      const tag = normalizeSearchText(movementTag(m));
       const extra = normalizeSearchText(
         `${m.document || ''} ${m.note || ''} ${m.batch_id ? receiptNumber(m.batch_id) : ''}`
       );
@@ -208,7 +220,7 @@ export default function HistoryPage() {
         extra.includes(searchLower)
       );
     });
-  }, [movements, searchLower]);
+  }, [movements, searchLower, employeeFilter]);
 
   const visibleMovements = filteredMovements.slice(0, renderLimit);
 
@@ -224,7 +236,7 @@ export default function HistoryPage() {
       'Motivo',
       'Direção',
       'Material',
-      'Colaborador / local',
+      'Colaborador',
       'Quantidade',
       'Unidade',
       'TAG',
@@ -238,10 +250,10 @@ export default function HistoryPage() {
       MOVEMENT_REASON_LABEL[movementReasonOf(m)],
       m.type === 'IN' ? 'Entrada no almoxarifado' : 'Saída do almoxarifado',
       m.items?.description,
-      movementCounterpartyLabel(m),
+      movementEmployeeLabel(m),
       formatQty(m.quantity),
       m.items?.unit,
-      m.tag || '',
+      movementTag(m),
       m.ca_number || '',
       m.document || '',
       m.note || '',
@@ -314,6 +326,22 @@ export default function HistoryPage() {
             </div>
 
             <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1">
+              <Users size={14} className="text-slate-400" />
+              <select
+                className="bg-transparent border-none text-sm font-bold text-slate-600 focus:ring-0 outline-none max-w-[220px]"
+                value={employeeFilter}
+                onChange={(e) => setEmployeeFilter(e.target.value)}
+              >
+                <option value="">Todos os colaboradores</option>
+                {employeeOptions.map(([id, name]) => (
+                  <option key={id} value={id}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1">
               <Calendar size={14} className="text-slate-400" />
               <span className="text-[11px] font-bold text-slate-400">De</span>
               <input
@@ -372,7 +400,7 @@ export default function HistoryPage() {
                 <th className="px-4 py-2.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Data / Hora</th>
                 <th className="px-4 py-2.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Motivo</th>
                 <th className="px-4 py-2.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Material</th>
-                <th className="px-4 py-2.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Colaborador / local</th>
+                <th className="px-4 py-2.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Colaborador</th>
                 <th className="px-4 py-2.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Qtd.</th>
                 <th className="px-4 py-2.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Cautela</th>
               </tr>
@@ -424,8 +452,8 @@ export default function HistoryPage() {
                             <p className="text-sm font-bold text-primary leading-tight">
                               {formatProductLabelDisplay(move.items?.description)}
                             </p>
-                            {move.tag && reason !== 'descarte' ? (
-                              <span className="text-[10px] font-mono text-slate-400">TAG {move.tag}</span>
+                            {movementTag(move) ? (
+                              <span className="text-[10px] font-mono text-slate-400">TAG {movementTag(move)}</span>
                             ) : null}
                             {move.ca_number || (move.employee_id && isEpiCategory(move.items?.category)) ? (
                               <button
@@ -448,12 +476,21 @@ export default function HistoryPage() {
                         </div>
                       </td>
                       <td className="px-4 py-2.5">
-                        <div className="flex items-center gap-2">
-                          <div className="w-6 h-6 bg-slate-100 rounded-full flex items-center justify-center text-[10px] font-bold text-secondary">
-                            {movementCounterpartyLabel(move).charAt(0)}
-                          </div>
-                          <span className="text-sm font-medium text-slate-600">{movementCounterpartyLabel(move)}</span>
-                        </div>
+                        {movementEmployeeLabel(move) ? (
+                          <button
+                            type="button"
+                            onClick={() => setEmployeeFilter(move.employee_id ?? '')}
+                            title="Ver só as movimentações deste colaborador"
+                            className="flex items-center gap-2 text-left hover:underline"
+                          >
+                            <div className="w-6 h-6 bg-slate-100 rounded-full flex items-center justify-center text-[10px] font-bold text-secondary">
+                              {movementEmployeeLabel(move).charAt(0)}
+                            </div>
+                            <span className="text-sm font-medium text-slate-600">{movementEmployeeLabel(move)}</span>
+                          </button>
+                        ) : (
+                          <span className="text-slate-300">—</span>
+                        )}
                       </td>
                       <td className="px-4 py-2.5 text-right whitespace-nowrap">
                         <span className={`text-sm font-bold ${move.type === 'IN' ? 'text-green-600' : 'text-red-600'}`}>
