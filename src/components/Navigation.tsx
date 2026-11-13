@@ -22,6 +22,7 @@ import {
   Eye,
   Building2,
   ShieldCheck,
+  Fuel,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useRouter, usePathname } from 'next/navigation';
@@ -76,12 +77,15 @@ const NAV_READ_ONLY: NavEntry[] = [
 /** Só para ADM: pessoas, cargos, almoxarifados e convites. */
 const NAV_ORG: NavLinkItem = { name: 'Organização', href: '/organizacao', icon: Building2 };
 
+/** Em teste: só ADM vê o módulo de abastecimentos. */
+const NAV_FUEL: NavLinkItem = { name: 'Abastecimentos', href: '/abastecimentos', icon: Fuel };
+
 function useNavEntries(): NavEntry[] {
   const { readOnly, isAdm } = useWorkspace();
   if (readOnly) return NAV_READ_ONLY;
   if (!isAdm) return NAV;
   const i = NAV.findIndex((e) => !isGroup(e) && e.href === '/settings');
-  return [...NAV.slice(0, i), NAV_ORG, ...NAV.slice(i)];
+  return [...NAV.slice(0, i), NAV_FUEL, NAV_ORG, ...NAV.slice(i)];
 }
 
 function isGroup(e: NavEntry): e is NavGroup {

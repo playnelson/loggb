@@ -805,3 +805,84 @@ ${devolucao}
     dateTimeBr(new Date())
   )}</p>`;
 }
+
+/* ------------------------------------------------------- autorização de abastecimento */
+
+export type FuelAuthorizationData = {
+  controlNo: number;
+  /** yyyy-mm-dd */
+  date: string;
+  sourceName: string;
+  sourceKind: 'posto' | 'tanque';
+  workspaceName: string;
+  requester: string;
+  vehicle: string;
+  plate: string;
+  code: string;
+  fuelType: string;
+  meterType: 'km' | 'horas' | 'nenhum';
+  meterReading: number | null;
+  liters: number | null;
+  authorizedBy: string;
+  notes: string;
+};
+
+function longDateBr(day: string): string {
+  const [y, m, d] = day.slice(0, 10).split('-').map(Number);
+  const dt = new Date(y, (m || 1) - 1, d || 1);
+  if (Number.isNaN(dt.getTime())) return day;
+  const s = dt.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/** Autorização para abastecimento: 2 vias na mesma folha (posto e obra). */
+export function buildFuelAuthorizationHtml(d: FuelAuthorizationData): string {
+  const companyName = loadCompanyInfo().companyName.trim() || PRINT_BRAND.orgName.trim() || '—';
+  const logo = safeLogo(PRINT_BRAND.logo);
+  const logoCell = logo ? `<img src="${logo}" alt="${esc(companyName)}">` : `<div class="co">${esc(companyName)}</div>`;
+  const num = (v: number | null) =>
+    v == null ? '' : v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const meterLabel = d.meterType === 'horas' ? 'Horímetro (horas)' : d.meterType === 'km' ? 'Quilômetros' : 'Controle';
+  const meterValue = d.meterType === 'nenhum' ? 'Sem controle' : num(d.meterReading) || '__________';
+  const blank = '<span class="fa-blank"></span>';
+  const authName = d.authorizedBy.split(/\s+[–-]\s+/)[0] || d.authorizedBy;
+  const authRole = d.authorizedBy.includes('–') || d.authorizedBy.includes(' - ')
+    ? d.authorizedBy.split(/\s+[–-]\s+/).slice(1).join(' – ')
+    : '';
+
+  const via = (label: string) => `<div class="fa">
+<table class="ct"><tr><td class="ct-logo">${logoCell}</td>
+<td class="ct-title">Autorização para abastecimento<small>${esc(d.sourceKind === 'tanque' ? 'Tanque' : 'Posto')}: ${esc(d.sourceName)}</small></td>
+<td class="fa-no">Controle<b>${esc(String(d.controlNo).padStart(4, '0'))}</b><span>${esc(label)}</span></td></tr></table>
+<table class="ct">
+<tr><td style="width:55%"><span class="lbl">Empresa:</span> ${esc(companyName)}</td><td><span class="lbl">Obra:</span> ${esc(d.workspaceName || '—')}</td></tr>
+<tr><td colspan="2"><span class="lbl">Requisitante:</span> ${esc(d.requester || '—')}</td></tr>
+<tr><td><span class="lbl">Veículo / equipamento:</span> <b>${esc(d.vehicle)}</b>${d.code ? ` <span class="muted">(cód. ${esc(d.code)})</span>` : ''}</td>
+<td><span class="lbl">Placa / patrimônio:</span> <b>${esc(d.plate || '—')}</b></td></tr>
+<tr><td><span class="lbl">Combustível:</span> <b>${esc(d.fuelType)}</b></td><td><span class="lbl">${esc(meterLabel)}:</span> <b>${esc(meterValue)}</b></td></tr>
+<tr><td><span class="lbl">Litros abastecidos:</span> ${d.liters != null ? `<b>${esc(num(d.liters))}</b>` : blank}</td>
+<td><span class="lbl">Valor total:</span> R$ ${blank}</td></tr>
+${d.notes.trim() ? `<tr><td colspan="2"><span class="lbl">Observação:</span> ${esc(d.notes)}</td></tr>` : ''}
+</table>
+<table class="ct ct-sign"><tr>
+<td><span class="lbl">Autorizado por</span>${esc(authName)}${authRole ? `<br><small>${esc(authRole)}</small>` : ''}<div class="ln"></div></td>
+<td><span class="lbl">Frentista / quem abasteceu</span>Nome:<div class="ln"></div></td>
+</tr></table>
+<div class="fa-date">${esc(longDateBr(d.date))}</div>
+</div>`;
+
+  return `<style>
+.fa{margin-bottom:6mm}
+.fa .ct td.ct-title{font-size:16px}
+.fa td.fa-no{width:120px;text-align:center;font-size:10px;font-weight:700;text-transform:uppercase;color:#2F5597}
+.fa td.fa-no b{display:block;font-size:22px;color:#000;letter-spacing:1px}
+.fa td.fa-no span{display:block;font-size:9px;color:#455a64;font-weight:400}
+.fa .ct td{font-size:11.5px;padding:6px 8px}
+.fa-blank{display:inline-block;min-width:110px;border-bottom:1px solid #263238;height:12px}
+.fa-date{text-align:right;font-size:11px;margin-top:4px;color:#263238}
+.fa-cut{border:0;border-top:1px dashed #90a4ae;margin:0 0 6mm}
+</style>
+${via('1ª via – posto')}
+<hr class="fa-cut">
+${via('2ª via – obra')}`;
+}
