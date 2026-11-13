@@ -42,6 +42,7 @@ interface Movement {
   ca_number?: string | null;
   employee_id?: string | null;
   work_site_id?: string | null;
+  performed_by?: string | null;
   items: {
     description: string;
     unit: string;
@@ -103,6 +104,9 @@ export default function HistoryPage() {
   const [movements, setMovements] = useState<Movement[]>([]);
   /** Cautelas / termos assinados anexados a cada movimentação. */
   const [docsByMovement, setDocsByMovement] = useState<Map<string, EquipmentDoc[]>>(new Map());
+  /** Nome de quem registrou cada movimentação (performed_by → nome). */
+  const [actorNames, setActorNames] = useState<Map<string, string>>(new Map());
+  const actorOf = (m: Movement) => (m.performed_by ? actorNames.get(m.performed_by) ?? '' : '');
   const openDoc = async (doc: EquipmentDoc) => {
     const err = await openEquipmentDoc(supabase, doc);
     if (err) alert(err);
@@ -149,7 +153,7 @@ export default function HistoryPage() {
       let q = supabase
         .from('movements')
         .select(
-          'id, created_at, quantity, type, reason, tag, note, document, batch_id, ca_number, employee_id, work_site_id, items(description, unit, category, tag), employees(full_name), work_sites(name, kind)'
+          'id, created_at, quantity, type, reason, tag, note, document, batch_id, ca_number, employee_id, work_site_id, performed_by, items(description, unit, category, tag), employees(full_name), work_sites(name, kind)'
         )
         .order('created_at', { ascending: false })
         .order('id', { ascending: false });
@@ -189,6 +193,15 @@ export default function HistoryPage() {
       }
     }
     setDocsByMovement(docs);
+
+    const actorIds = [...new Set(all.map((m) => m.performed_by).filter((v): v is string => !!v))];
+    if (actorIds.length) {
+      const { data: actorRows } = await supabase.rpc('movement_actor_names', { p_ids: actorIds });
+      if (cancelled) return;
+      setActorNames(
+        new Map(((actorRows ?? []) as { user_id: string; name: string }[]).map((r) => [r.user_id, formatEmployeeName(r.name)]))
+      );
+    }
     })();
     return () => {
       cancelled = true;
@@ -207,7 +220,7 @@ export default function HistoryPage() {
     return base.filter((m) => {
       const item = normalizeSearchText(m.items?.description || '');
       const emp = normalizeSearchText(m.employees?.full_name || '');
-      const site = normalizeSearchText(m.work_sites?.name || '');
+      const site = normalizeSearchText(`${m.work_sites?.name || ''} ${actorOf(m)}`);
       const tag = normalizeSearchText(movementTag(m));
       const extra = normalizeSearchText(
         `${m.document || ''} ${m.note || ''} ${m.batch_id ? receiptNumber(m.batch_id) : ''}`
@@ -220,7 +233,8 @@ export default function HistoryPage() {
         extra.includes(searchLower)
       );
     });
-  }, [movements, searchLower, employeeFilter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [movements, searchLower, employeeFilter, actorNames]);
 
   const visibleMovements = filteredMovements.slice(0, renderLimit);
 
@@ -244,6 +258,7 @@ export default function HistoryPage() {
       'Documento',
       'Observação',
       'Recibo',
+      'Registrado por',
     ];
     const rows = filteredMovements.map((m) => [
       new Date(m.created_at).toLocaleString('pt-BR'),
@@ -258,6 +273,7 @@ export default function HistoryPage() {
       m.document || '',
       m.note || '',
       m.employee_id || m.work_site_id ? receiptNumber(m.batch_id || m.id) : '',
+      actorOf(m),
     ]);
 
     // ";" e BOM: abre certo no Excel em português (vírgula é separador decimal).
@@ -434,6 +450,11 @@ export default function HistoryPage() {
                             minute: '2-digit',
                           })}
                         </div>
+                        {actorOf(move) ? (
+                          <div className="mt-1 text-[10px] font-medium text-slate-400" title="Quem registrou a movimentação">
+                            por {actorOf(move)}
+                          </div>
+                        ) : null}
                       </td>
                       <td className="px-4 py-2.5 text-center">
                         <div
