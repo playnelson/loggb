@@ -15,7 +15,9 @@ import {
   type MovementReason,
 } from '@/lib/movements';
 import { openPrintable, buildReceiptHtml, loadCompanyInfo } from '@/lib/printDocs';
+import { EQUIPMENT_DOC_COLUMNS, openEquipmentDoc, type EquipmentDoc } from '@/lib/equipmentDocs';
 import {
+  Paperclip,
   History,
   Search,
   Filter,
@@ -97,6 +99,12 @@ function movementCounterpartyLabel(m: Movement): string {
 
 export default function HistoryPage() {
   const [movements, setMovements] = useState<Movement[]>([]);
+  /** Cautelas / termos assinados anexados a cada movimentação. */
+  const [docsByMovement, setDocsByMovement] = useState<Map<string, EquipmentDoc[]>>(new Map());
+  const openDoc = async (doc: EquipmentDoc) => {
+    const err = await openEquipmentDoc(supabase, doc);
+    if (err) alert(err);
+  };
 
   /** CA do EPI informado depois da entrega. */
   const editCa = async (m: Movement) => {
@@ -161,6 +169,23 @@ export default function HistoryPage() {
     setMovements(all);
     setRenderLimit(RENDER_STEP);
     setLoading(false);
+
+    // Documentos anexados (cautela assinada etc.) das movimentações com colaborador ou local.
+    const ids = all.filter((m) => m.employee_id || m.work_site_id).map((m) => m.id);
+    const docs = new Map<string, EquipmentDoc[]>();
+    for (let i = 0; i < ids.length; i += 100) {
+      const { data: docRows, error: docErr } = await supabase
+        .from('equipment_documents')
+        .select(EQUIPMENT_DOC_COLUMNS)
+        .in('movement_id', ids.slice(i, i + 100));
+      if (cancelled) return;
+      if (docErr) break; // documentos não ativados: só não mostra
+      for (const d of (docRows ?? []) as unknown as EquipmentDoc[]) {
+        if (!d.movement_id) continue;
+        docs.set(d.movement_id, [...(docs.get(d.movement_id) ?? []), d]);
+      }
+    }
+    setDocsByMovement(docs);
     })();
     return () => {
       cancelled = true;
@@ -458,7 +483,20 @@ export default function HistoryPage() {
                             <Printer size={12} />
                             <span className="font-mono">{receiptNumber(move.batch_id || move.id)}</span>
                           </button>
-                        ) : (
+                        ) : null}
+                        {(docsByMovement.get(move.id) ?? []).map((doc) => (
+                          <button
+                            key={doc.id}
+                            type="button"
+                            onClick={() => void openDoc(doc)}
+                            className="ml-1 inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-secondary/40 bg-secondary/5 text-[11px] font-bold text-secondary hover:bg-secondary/10"
+                            title={`Abrir ${doc.file_name}`}
+                          >
+                            <Paperclip size={12} />
+                            {doc.kind === 'entrega' ? 'Cautela' : doc.kind === 'devolucao' ? 'Termo dev.' : 'Documento'}
+                          </button>
+                        ))}
+                        {move.employee_id || move.work_site_id ? null : (
                           <span className="text-slate-300">—</span>
                         )}
                       </td>
