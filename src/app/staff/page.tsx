@@ -81,6 +81,14 @@ function isEpiConsumableItem(items: Possession['items'] | null | undefined): boo
   return !!items && isEpiCat(items.category) && !!items.consumable;
 }
 
+/**
+ * EPI descartável (máscara PFF2, protetor auricular…): o colaborador não acumula.
+ * Cada nova entrega SUBSTITUI a anterior; devolução/descarte só baixa o que está com ele.
+ */
+function consumableEpiStep(balance: number, type: string, qty: number): number {
+  return type === 'OUT' ? qty : Math.max(0, balance - qty);
+}
+
 function movementIsEpiDiscard(m: { type?: string; tag?: string | null }): boolean {
   return String(m.type) === 'IN' && String(m.tag || '').toUpperCase().includes('DESCARTE');
 }
@@ -171,7 +179,6 @@ async function loadEpiConsumableBalancesMap(
       const empId = String(row.employee_id);
       const itemId = String(row.item_id);
       const qty = Number(row.quantity) || 0;
-      const delta = row.type === 'OUT' ? qty : -qty;
       if (!byEmp.has(empId)) byEmp.set(empId, new Map());
       const m = byEmp.get(empId)!;
       const cur = m.get(itemId) || {
@@ -179,7 +186,7 @@ async function loadEpiConsumableBalancesMap(
         unit: String(row.items!.unit || 'un'),
         balance: 0,
       };
-      cur.balance += delta;
+      cur.balance = consumableEpiStep(cur.balance, row.type, qty);
       m.set(itemId, cur);
     }
     if (chunk.length < pageSize) break;
@@ -204,18 +211,20 @@ async function loadEpiConsumableBalancesMap(
 
 function aggregateEpiConsumableBalancesFromMovements(movements: any[]): EpiConsumableBalanceRow[] {
   const map = new Map<string, { description: string; unit: string; balance: number }>();
-  for (const movement of movements) {
+  const ordered = [...movements].sort(
+    (a, b) => String(a.created_at ?? '').localeCompare(String(b.created_at ?? '')) || String(a.id ?? '').localeCompare(String(b.id ?? ''))
+  );
+  for (const movement of ordered) {
     const item = movement.items;
     if (!isEpiConsumableItem(item)) continue;
     const itemId = String(movement.item_id);
     const qty = Number(movement.quantity) || 0;
-    const delta = movement.type === 'OUT' ? qty : -qty;
     const current = map.get(itemId) || {
       description: String(item.description || '—'),
       unit: String(item.unit || 'un'),
       balance: 0,
     };
-    current.balance += delta;
+    current.balance = consumableEpiStep(current.balance, movement.type, qty);
     map.set(itemId, current);
   }
   return Array.from(map.entries())

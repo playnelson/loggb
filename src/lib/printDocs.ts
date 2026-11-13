@@ -430,11 +430,12 @@ export async function buildEpiFichaHtml(
     const cur = balance.get(key) || { description: key, unit: it.unit || 'un', ca: '', qty: 0, last: m.created_at };
     const q = Number(m.quantity) || 0;
     if (m.type === 'OUT') {
-      cur.qty += q;
+      // Descartável (máscara, protetor auricular…): a nova entrega substitui a anterior, não soma.
+      cur.qty = it.consumable ? q : cur.qty + q;
       cur.last = m.created_at;
       cur.ca = (m.ca_number || it.ca_number || cur.ca || '').trim();
     } else {
-      cur.qty -= q;
+      cur.qty = Math.max(0, cur.qty - q);
     }
     balance.set(key, cur);
   }
