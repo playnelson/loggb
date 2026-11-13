@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { Boxes, Building2, Loader2, Mail, RefreshCw, ShieldCheck, Users } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/lib/workspace';
-import type { OrgCategory, OrgRoleRow, PersonRow, StockAreaRow } from '@/lib/permissions';
+import type { OrgCategory, OrgEmployee, OrgRoleRow, PersonRow, StockAreaRow } from '@/lib/permissions';
 import PeopleTab from '@/components/org/PeopleTab';
 import AreasTab from '@/components/org/AreasTab';
 import RolesTab from '@/components/org/RolesTab';
@@ -46,12 +46,14 @@ export default function OrganizacaoPage() {
   const [areaMembers, setAreaMembers] = useState<Map<string, string[]>>(new Map());
   const [categories, setCategories] = useState<OrgCategory[]>([]);
   const [invites, setInvites] = useState<InviteRow[]>([]);
+  /** Fichas de funcionário da organização (etapa 12). Nulo = banco ainda sem a etapa 12. */
+  const [employees, setEmployees] = useState<OrgEmployee[] | null>(null);
   const [loadedAt, setLoadedAt] = useState(0);
 
   const load = useCallback(async () => {
     if (!org) return;
     setLoading(true);
-    const [userRes, peopleRes, rolesRes, areasRes, membersRes, catRes, invRes] = await Promise.all([
+    const [userRes, peopleRes, rolesRes, areasRes, membersRes, catRes, invRes, empRes] = await Promise.all([
       supabase.auth.getUser(),
       supabase.rpc('organization_people', { p_org: org.id }),
       supabase
@@ -73,7 +75,9 @@ export default function OrganizacaoPage() {
         .eq('organization_id', org.id)
         .order('created_at', { ascending: false })
         .limit(50),
+      supabase.rpc('organization_employees', { p_org: org.id }),
     ]);
+    setEmployees(empRes.error ? null : ((empRes.data ?? []) as OrgEmployee[]));
     setMyUserId(userRes.data.user?.id ?? null);
     const firstErr = peopleRes.error || rolesRes.error || areasRes.error || membersRes.error || catRes.error || invRes.error;
     if (firstErr) {
@@ -103,6 +107,9 @@ export default function OrganizacaoPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [status, isAdm, load]);
+
+  const addEmployee = (emp: OrgEmployee) =>
+    setEmployees((prev) => [...(prev ?? []), emp].sort((a, b) => a.full_name.localeCompare(b.full_name, 'pt-BR')));
 
   if (status === 'loading') {
     return (
@@ -204,6 +211,9 @@ export default function OrganizacaoPage() {
           roles={roles}
           areas={areas}
           workspaces={orgWorkspaces}
+          employees={employees}
+          onEmployeeCreated={addEmployee}
+          currentWorkspaceName={currentWorkspace?.name ?? null}
           loadedAt={loadedAt}
           onChanged={load}
         />
@@ -227,6 +237,9 @@ export default function OrganizacaoPage() {
           areas={areas}
           workspaces={orgWorkspaces}
           currentWorkspaceId={currentWorkspace?.id ?? null}
+          currentWorkspaceName={currentWorkspace?.name ?? null}
+          employees={employees}
+          onEmployeeCreated={addEmployee}
           loadedAt={loadedAt}
           onChanged={load}
         />

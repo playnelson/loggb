@@ -1,10 +1,12 @@
 'use client';
 
 import { useMemo, useState, type FormEvent } from 'react';
-import { Check, Copy, KeyRound, Link2, Loader2, MessageCircle, Trash2, UserPlus } from 'lucide-react';
+import { Check, Copy, IdCard, KeyRound, Link2, Loader2, MessageCircle, Trash2, UserPlus } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { formatDateTimeBR, type Workspace } from '@/lib/workspace';
-import type { OrgRoleRow, StockAreaRow } from '@/lib/permissions';
+import type { OrgEmployee, OrgRoleRow, StockAreaRow } from '@/lib/permissions';
+import EmployeePicker from '@/components/org/EmployeePicker';
+import { formatEmployeeName } from '@/lib/employeeName';
 import { formatInviteCode } from '@/lib/inviteCode';
 import {
   AreaPicker,
@@ -28,6 +30,8 @@ export type InviteRow = {
   all_areas: boolean;
   area_ids: string[];
   label: string | null;
+  /** Ficha do funcionário que vai usar o convite (etapa 12). */
+  employee_id: string | null;
   workspace_scope: string[] | null;
   invite_expires_at: string;
   access_expires_at: string | null;
@@ -38,7 +42,7 @@ export type InviteRow = {
 };
 
 export const INVITE_COLUMNS =
-  'id, token, code, role, cargo_id, all_areas, area_ids, label, workspace_scope, invite_expires_at, access_expires_at, max_uses, uses, revoked_at, created_at';
+  'id, token, code, role, cargo_id, all_areas, area_ids, label, employee_id, workspace_scope, invite_expires_at, access_expires_at, max_uses, uses, revoked_at, created_at';
 
 const DURATIONS: { value: string; label: string; days: number | null }[] = [
   { value: '1', label: '1 dia', days: 1 },
@@ -90,6 +94,9 @@ export default function InvitesTab({
   areas,
   workspaces,
   currentWorkspaceId,
+  currentWorkspaceName,
+  employees,
+  onEmployeeCreated,
   loadedAt,
   onChanged,
 }: {
@@ -100,12 +107,17 @@ export default function InvitesTab({
   areas: StockAreaRow[];
   workspaces: Workspace[];
   currentWorkspaceId: string | null;
+  currentWorkspaceName: string | null;
+  /** Nulo = banco ainda sem a etapa 12 (convite sem funcionário). */
+  employees: OrgEmployee[] | null;
+  onEmployeeCreated: (emp: OrgEmployee) => void;
   loadedAt: number;
   onChanged: () => Promise<void>;
 }) {
   const names = useMemo(() => new Map(workspaces.map((w) => [w.id, w.name])), [workspaces]);
   const roleById = useMemo(() => new Map(roles.map((r) => [r.id, r])), [roles]);
   const areaById = useMemo(() => new Map(areas.map((a) => [a.id, a])), [areas]);
+  const employeeById = useMemo(() => new Map((employees ?? []).map((e) => [e.id, e])), [employees]);
   const active = useMemo(() => workspaces.filter((w) => !w.archived_at), [workspaces]);
   const [formOpen, setFormOpen] = useState(false);
   const [created, setCreated] = useState<InviteRow | null>(null);
@@ -134,9 +146,9 @@ export default function InvitesTab({
     <div className="space-y-3">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <p className="text-xs text-slate-600 max-w-2xl">
-          O convite vale para <strong>1 pessoa</strong> e tem um link e uma <strong>chave</strong> (ex.: K7QM-3XPA). A pessoa
-          cria a conta no LoggB, cola a chave na tela de boas-vindas e já começa com o cargo, as áreas e os workspaces que você
-          escolher. Depois dá para mudar tudo na aba Pessoas.
+          O convite vale para <strong>1 pessoa</strong>, fica ligado à <strong>ficha de um funcionário</strong> e tem um link e
+          uma <strong>chave</strong> (ex.: K7QM-3XPA). A pessoa cria a conta no LoggB, cola a chave na tela de boas-vindas e já
+          começa com o cargo, as áreas e os workspaces que você escolher. Depois dá para mudar tudo na aba Pessoas.
         </p>
         <button
           type="button"
@@ -177,6 +189,15 @@ export default function InvitesTab({
                     inv.area_ids.map((id) => <Chip key={id}>{areaById.get(id)?.name ?? 'Área removida'}</Chip>)
                   )}
                 </span>
+                {inv.employee_id ? (
+                  <span className="flex items-center gap-1 text-xs text-slate-600">
+                    <IdCard size={13} className="text-secondary" />
+                    {employeeById.get(inv.employee_id)
+                      ? formatEmployeeName(employeeById.get(inv.employee_id)!.full_name)
+                      : 'Funcionário'}
+                    {employeeById.get(inv.employee_id)?.role ? ` · ${employeeById.get(inv.employee_id)!.role}` : ''}
+                  </span>
+                ) : null}
                 <span className="block text-[11px] text-slate-500">
                   {scopeText(inv.workspace_scope, names)} · acesso{' '}
                   {inv.access_expires_at ? `até ${formatDateTimeBR(inv.access_expires_at)}` : 'sem prazo'} · link vale até{' '}
@@ -210,6 +231,9 @@ export default function InvitesTab({
           defaultWorkspaceId={
             currentWorkspaceId && active.some((w) => w.id === currentWorkspaceId) ? currentWorkspaceId : active[0]?.id ?? null
           }
+          employees={employees}
+          onEmployeeCreated={onEmployeeCreated}
+          currentWorkspaceName={currentWorkspaceName}
           created={created}
           cargoName={created ? cargoName(created) : ''}
           onCreated={(row) => {
@@ -233,6 +257,9 @@ function InviteModal({
   roles,
   areas,
   defaultWorkspaceId,
+  employees,
+  onEmployeeCreated,
+  currentWorkspaceName,
   created,
   cargoName,
   onCreated,
@@ -244,6 +271,9 @@ function InviteModal({
   roles: OrgRoleRow[];
   areas: StockAreaRow[];
   defaultWorkspaceId: string | null;
+  employees: OrgEmployee[] | null;
+  onEmployeeCreated: (emp: OrgEmployee) => void;
+  currentWorkspaceName: string | null;
   created: InviteRow | null;
   cargoName: string;
   onCreated: (row: InviteRow) => void;
@@ -253,6 +283,7 @@ function InviteModal({
   const [allAreas, setAllAreas] = useState(false);
   const [areaIds, setAreaIds] = useState<string[]>([]);
   const [label, setLabel] = useState('');
+  const [employeeId, setEmployeeId] = useState<string | null>(null);
   const [allWs, setAllWs] = useState(false);
   const [selected, setSelected] = useState<string[]>(defaultWorkspaceId ? [defaultWorkspaceId] : []);
   const [duration, setDuration] = useState('sem');
@@ -262,6 +293,10 @@ function InviteModal({
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    if (employees && !employeeId) {
+      setError('Escolha o funcionário que vai usar este acesso (ou cadastre).');
+      return;
+    }
     if (!cargo) {
       setError('Escolha o cargo da pessoa.');
       return;
@@ -286,6 +321,7 @@ function InviteModal({
           all_areas: allAreas,
           area_ids: allAreas ? [] : areaIds,
           label: label.trim() || null,
+          ...(employees ? { employee_id: employeeId } : {}),
           workspace_scope: allWs ? null : selected,
           access_expires_at: accessUntil,
           invite_expires_at: new Date(Date.now() + linkDays * 86_400_000).toISOString(),
@@ -363,18 +399,38 @@ function InviteModal({
       ) : (
         <form onSubmit={submit} className="p-4 space-y-4">
           <ErrorBox message={error} />
-          <div>
-            <FieldLabel htmlFor="inv-label">Para quem é (opcional)</FieldLabel>
-            <input
-              id="inv-label"
-              className="w-full p-2.5 border border-slate-300 rounded"
-              value={label}
-              onChange={(e) => setLabel(e.target.value)}
-              placeholder="Ex.: Gabriel – técnico de segurança"
-              maxLength={120}
-              autoFocus
-            />
-          </div>
+          {employees ? (
+            <div>
+              <span className="block text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-1">
+                Funcionário que vai usar o acesso
+              </span>
+              <EmployeePicker
+                employees={employees}
+                value={employeeId}
+                onChange={(id, emp) => {
+                  setEmployeeId(id);
+                  // O nome do convite segue o funcionário (dá para mudar depois).
+                  if (emp && (!label.trim() || employees.some((x) => formatEmployeeName(x.full_name) === label.trim())))
+                    setLabel(formatEmployeeName(emp.full_name));
+                }}
+                onCreated={onEmployeeCreated}
+                currentWorkspaceName={currentWorkspaceName}
+              />
+            </div>
+          ) : (
+            <div>
+              <FieldLabel htmlFor="inv-label">Para quem é (opcional)</FieldLabel>
+              <input
+                id="inv-label"
+                className="w-full p-2.5 border border-slate-300 rounded"
+                value={label}
+                onChange={(e) => setLabel(e.target.value)}
+                placeholder="Ex.: Gabriel – técnico de segurança"
+                maxLength={120}
+                autoFocus
+              />
+            </div>
+          )}
           <div>
             <FieldLabel htmlFor="inv-cargo">Cargo</FieldLabel>
             <CargoSelect id="inv-cargo" roles={roles} value={cargo} onChange={setCargo} />

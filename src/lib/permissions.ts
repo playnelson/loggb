@@ -71,6 +71,23 @@ export type PersonRow = {
   workspace_scope: string[] | null;
   expires_at: string | null;
   created_at: string;
+  /** Etapa 12: ficha de funcionário ligada a esta pessoa. */
+  employee_id?: string | null;
+  employee_name?: string | null;
+  employee_role?: string | null;
+  employee_workspace?: string | null;
+};
+
+/** Funcionário da organização (RPC organization_employees), para ligar a uma pessoa. */
+export type OrgEmployee = {
+  id: string;
+  full_name: string;
+  role: string | null;
+  status: string | null;
+  workspace_id: string;
+  workspace_name: string | null;
+  linked_user_id: string | null;
+  linked_email: string | null;
 };
 
 export type OrgCategory = { name: string; items: number; spellings: string[] };

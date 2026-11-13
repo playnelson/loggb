@@ -1,10 +1,12 @@
 'use client';
 
 import { useMemo, useState, type FormEvent } from 'react';
-import { Loader2, Pencil, Save, ShieldCheck, UserMinus } from 'lucide-react';
+import { IdCard, Loader2, Pencil, Save, ShieldCheck, UserMinus } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { formatDateTimeBR, type Workspace } from '@/lib/workspace';
-import type { OrgRoleRow, PersonRow, StockAreaRow } from '@/lib/permissions';
+import type { OrgEmployee, OrgRoleRow, PersonRow, StockAreaRow } from '@/lib/permissions';
+import EmployeePicker from '@/components/org/EmployeePicker';
+import { formatEmployeeName } from '@/lib/employeeName';
 import {
   AreaPicker,
   CargoSelect,
@@ -33,11 +35,18 @@ export default function PeopleTab({
   roles,
   areas,
   workspaces,
+  employees,
+  onEmployeeCreated,
+  currentWorkspaceName,
   loadedAt,
   onChanged,
 }: {
   orgId: string;
   myUserId: string | null;
+  /** Nulo = banco ainda sem a etapa 12. */
+  employees: OrgEmployee[] | null;
+  onEmployeeCreated: (emp: OrgEmployee) => void;
+  currentWorkspaceName: string | null;
   /** Momento da última leitura: base para mostrar acessos vencidos. */
   loadedAt: number;
   people: PersonRow[];
@@ -67,9 +76,28 @@ export default function PeopleTab({
     await onChanged();
   };
 
+  const me = people.find((p) => p.user_id === myUserId) ?? null;
+
   return (
     <div className="space-y-3">
       <ErrorBox message={error} />
+      {employees && me && !me.employee_id ? (
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 p-3 bg-amber-50 border border-amber-200 rounded">
+          <IdCard size={20} className="text-amber-700 shrink-0" />
+          <p className="text-sm text-amber-900 flex-1">
+            Sua conta ainda não está ligada a uma <strong>ficha de funcionário</strong>. Se você também é funcionário, ligue
+            agora (ou cadastre a sua ficha).
+          </p>
+          <button
+            type="button"
+            onClick={() => setEditing(me)}
+            className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-bold text-white bg-secondary rounded hover:opacity-95 shrink-0"
+          >
+            <IdCard size={16} />
+            Ligar minha ficha
+          </button>
+        </div>
+      ) : null}
       <div className="bg-white border border-slate-200 overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -93,6 +121,22 @@ export default function PeopleTab({
                     <span className="font-semibold text-primary break-all">{p.email}</span>
                     {isMe ? <span className="ml-1 text-[11px] text-slate-400">(você)</span> : null}
                     {p.is_creator ? <span className="block text-[11px] text-slate-500">Criou a organização</span> : null}
+                    {employees ? (
+                      p.employee_id ? (
+                        <span className="flex items-start gap-1 mt-0.5 text-xs text-slate-600">
+                          <IdCard size={13} className="text-secondary shrink-0 mt-px" />
+                          <span>
+                            <span className="font-semibold">{formatEmployeeName(p.employee_name ?? '')}</span>
+                            {p.employee_role ? ` · ${p.employee_role}` : ''}
+                            {p.employee_workspace ? <span className="text-slate-400"> · {p.employee_workspace}</span> : null}
+                          </span>
+                        </span>
+                      ) : (
+                        <span className="block mt-1">
+                          <Chip tone="amber">Sem ficha de funcionário</Chip>
+                        </span>
+                      )
+                    ) : null}
                   </td>
                   <td className="px-3 py-2">
                     {p.is_adm ? (
@@ -131,7 +175,7 @@ export default function PeopleTab({
                   </td>
                   <td className="px-3 py-2">
                     <span className="flex justify-end gap-1.5">
-                      {!p.is_creator ? (
+                      {!p.is_creator || employees ? (
                         <button
                           type="button"
                           onClick={() => setEditing(p)}
@@ -161,8 +205,8 @@ export default function PeopleTab({
         </table>
       </div>
       <p className="text-[11px] text-slate-500">
-        Para colocar alguém novo, use a aba <strong>Convites</strong>: a pessoa recebe um link e já entra com o cargo e as áreas
-        escolhidos. Quem criou a organização é sempre ADM.
+        Para colocar alguém novo, use a aba <strong>Convites</strong>: a pessoa recebe um link e já entra ligada à ficha do
+        funcionário, com o cargo e as áreas escolhidos. Quem criou a organização é sempre ADM.
       </p>
 
       {editing ? (
@@ -173,6 +217,9 @@ export default function PeopleTab({
           roles={roles}
           areas={areas}
           workspaces={workspaces}
+          employees={employees}
+          onEmployeeCreated={onEmployeeCreated}
+          currentWorkspaceName={currentWorkspaceName}
           onClose={() => setEditing(null)}
           onSaved={async () => {
             setEditing(null);
@@ -191,6 +238,9 @@ function PersonModal({
   roles,
   areas,
   workspaces,
+  employees,
+  onEmployeeCreated,
+  currentWorkspaceName,
   onClose,
   onSaved,
 }: {
@@ -200,6 +250,9 @@ function PersonModal({
   roles: OrgRoleRow[];
   areas: StockAreaRow[];
   workspaces: Workspace[];
+  employees: OrgEmployee[] | null;
+  onEmployeeCreated: (emp: OrgEmployee) => void;
+  currentWorkspaceName: string | null;
   onClose: () => void;
   onSaved: () => Promise<void>;
 }) {
@@ -211,11 +264,30 @@ function PersonModal({
   const [allWs, setAllWs] = useState(person.workspace_scope === null);
   const [wsIds, setWsIds] = useState<string[]>(person.workspace_scope ?? []);
   const [until, setUntil] = useState(toDateInput(person.expires_at));
+  const [employeeId, setEmployeeId] = useState<string | null>(person.employee_id ?? null);
+  // Quem criou a organização: só a ficha muda aqui (o acesso é sempre ADM).
+  const onlyEmployee = person.is_creator;
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    if (onlyEmployee) {
+      setSaving(true);
+      setError(null);
+      const { error: empErr } = await supabase.rpc('set_member_employee', {
+        p_org: orgId,
+        p_user: person.user_id,
+        p_employee: employeeId,
+      });
+      setSaving(false);
+      if (empErr) {
+        setError(empErr.message);
+        return;
+      }
+      await onSaved();
+      return;
+    }
     if (!isAdm && !cargo) {
       setError('Escolha um cargo.');
       return;
@@ -242,11 +314,24 @@ function PersonModal({
       p_scope: isAdm || allWs ? null : wsIds,
       p_expires_at: expires,
     });
-    setSaving(false);
     if (rpcErr) {
+      setSaving(false);
       setError(rpcErr.message);
       return;
     }
+    if (employees && employeeId !== (person.employee_id ?? null)) {
+      const { error: empErr } = await supabase.rpc('set_member_employee', {
+        p_org: orgId,
+        p_user: person.user_id,
+        p_employee: employeeId,
+      });
+      if (empErr) {
+        setSaving(false);
+        setError(`Acesso salvo, mas a ficha não: ${empErr.message}`);
+        return;
+      }
+    }
+    setSaving(false);
     await onSaved();
   };
 
@@ -255,6 +340,23 @@ function PersonModal({
       <form onSubmit={submit} className="p-4 space-y-4">
         <ErrorBox message={error} />
 
+        {employees ? (
+          <div>
+            <span className="block text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-1">Ficha de funcionário</span>
+            <EmployeePicker
+              employees={employees}
+              value={employeeId}
+              onChange={(id) => setEmployeeId(id)}
+              onCreated={onEmployeeCreated}
+              personUserId={person.user_id}
+              allowNone
+              currentWorkspaceName={currentWorkspaceName}
+            />
+          </div>
+        ) : null}
+
+        {!onlyEmployee ? (
+        <>
         <fieldset>
           <legend className="block text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-1">Tipo de acesso</legend>
           <div className="grid gap-2 sm:grid-cols-2">
@@ -310,11 +412,15 @@ function PersonModal({
           />
           <p className="text-[11px] text-slate-400 mt-1">Deixe em branco para não ter prazo.</p>
         </div>
+        </>
+        ) : (
+          <p className="text-[11px] text-slate-500">Quem criou a organização é sempre ADM; aqui só muda a ficha de funcionário.</p>
+        )}
 
         <ModalActions
           onCancel={onClose}
           saving={saving}
-          submitLabel="Salvar acesso"
+          submitLabel={onlyEmployee ? 'Salvar ficha' : 'Salvar acesso'}
           icon={saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
         />
       </form>

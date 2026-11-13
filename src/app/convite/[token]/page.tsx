@@ -8,6 +8,7 @@ import { CheckCircle2, Eye, Loader2, MailWarning, Users } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { formatDateTimeBR } from '@/lib/workspace';
 import { OrgLogo } from '@/components/OrganizationSetup';
+import { formatEmployeeName } from '@/lib/employeeName';
 
 type InviteInfo = {
   status: 'valido' | 'invalido' | 'cancelado' | 'expirado' | 'usado';
@@ -20,6 +21,8 @@ type InviteInfo = {
   organization_name?: string;
   logo_data?: string | null;
   label?: string | null;
+  /** Etapa 12: ficha de funcionário ligada ao convite. */
+  employee_name?: string | null;
   access_expires_at?: string | null;
   invite_expires_at?: string | null;
   all_workspaces?: boolean;
@@ -99,7 +102,13 @@ export default function ConvitePage() {
               <div className="min-w-0">
                 <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Convite para acessar</p>
                 <h1 className="text-xl font-bold text-primary truncate">{info.organization_name}</h1>
-                {info.label ? <p className="text-xs text-slate-500 truncate">Para: {info.label}</p> : null}
+                {info.employee_name ? (
+                  <p className="text-xs text-slate-500 truncate">
+                    Para: <strong className="text-primary">{formatEmployeeName(info.employee_name)}</strong>
+                  </p>
+                ) : info.label ? (
+                  <p className="text-xs text-slate-500 truncate">Para: {info.label}</p>
+                ) : null}
               </div>
             </div>
             <div className="p-6 space-y-4">
