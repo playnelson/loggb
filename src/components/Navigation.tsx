@@ -23,11 +23,13 @@ import {
   Layers,
   Eye,
   Building2,
+  ShieldCheck,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useRouter, usePathname } from 'next/navigation';
 import WorkspaceSwitcher from '@/components/WorkspaceSwitcher';
 import { useWorkspace } from '@/lib/workspace';
+import { usePendingDeletionCount } from '@/lib/deletion';
 
 type IconType = ComponentType<{ size?: number; className?: string; strokeWidth?: number }>;
 type NavLinkItem = { name: string; href: string; icon: IconType; hint?: string };
@@ -63,6 +65,7 @@ const NAV: NavEntry[] = [
       { name: 'Sedes e canteiros', href: '/sites', icon: MapPin, hint: 'Locais e o que está em cada um' },
     ],
   },
+  { name: 'Aprovações', href: '/aprovacoes', icon: ShieldCheck },
   { name: 'Workspaces', href: '/workspaces', icon: Layers },
   { name: 'Configurações', href: '/settings', icon: Settings },
 ];
@@ -118,6 +121,7 @@ export function Header({
   const signOut = useSignOut();
   const nav = useNavEntries();
   const { readOnly } = useWorkspace();
+  const pendingDeletions = usePendingDeletionCount();
   const [openGroup, setOpenGroup] = useState<string | null>(null);
   const navRef = useRef<HTMLElement>(null);
 
@@ -182,15 +186,30 @@ export function Header({
           </span>
         ) : null}
 
-        <button
-          type="button"
-          onClick={() => void signOut()}
-          title="Sair"
-          className="hidden lg:inline-flex items-center gap-2 px-3 py-1.5 rounded text-[13px] font-semibold text-slate-300 hover:text-white hover:bg-white/10 ml-auto shrink-0"
-        >
-          <LogOut size={16} />
-          Sair
-        </button>
+        <div className="ml-auto flex items-center gap-1 shrink-0">
+          {pendingDeletions > 0 ? (
+            <Link
+              href="/aprovacoes"
+              title={`${pendingDeletions} pedido(s) de exclusão aguardando sua aprovação`}
+              className="inline-flex items-center gap-1.5 min-h-[40px] px-2 sm:px-3 rounded text-[13px] font-semibold text-slate-200 hover:text-white hover:bg-white/10"
+            >
+              <ShieldCheck size={17} />
+              <span className="hidden sm:inline">Aprovações</span>
+              <span className="min-w-[20px] h-5 px-1 rounded-full bg-red-600 text-white text-[11px] font-bold inline-flex items-center justify-center">
+                {pendingDeletions > 99 ? '99+' : pendingDeletions}
+              </span>
+            </Link>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => void signOut()}
+            title="Sair"
+            className="hidden lg:inline-flex items-center gap-2 px-3 py-1.5 rounded text-[13px] font-semibold text-slate-300 hover:text-white hover:bg-white/10"
+          >
+            <LogOut size={16} />
+            Sair
+          </button>
+        </div>
       </div>
 
       <nav

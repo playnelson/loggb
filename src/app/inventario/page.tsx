@@ -4,6 +4,7 @@ export const dynamic = 'force-dynamic';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { useWorkspace } from '@/lib/workspace';
 import { formatProductLabelDisplay } from '@/lib/productDisplayText';
 import { normalizeSearchText } from '@/lib/employeeName';
 import { formatQty, parseQty } from '@/lib/movements';
@@ -64,6 +65,8 @@ function diffOf(l: LineRow) {
 }
 
 export default function InventarioPage() {
+  const { can } = useWorkspace();
+  const canCount = can('inventario');
   const [counts, setCounts] = useState<CountRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
@@ -153,6 +156,7 @@ export default function InventarioPage() {
             Conte o estoque físico, compare com o sistema e ajuste tudo de uma vez, com histórico.
           </p>
         </div>
+        {canCount ? (
         <button
           type="button"
           onClick={() => setShowNew(true)}
@@ -161,6 +165,7 @@ export default function InventarioPage() {
           <Plus size={18} />
           Nova contagem
         </button>
+        ) : null}
       </div>
 
       {showNew && (
@@ -283,6 +288,8 @@ export default function InventarioPage() {
 }
 
 function CountSheet({ countId, onBack }: { countId: string; onBack: () => void }) {
+  const { can } = useWorkspace();
+  const canCount = can('inventario');
   const [count, setCount] = useState<CountRow | null>(null);
   const [lines, setLines] = useState<LineRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -489,7 +496,7 @@ function CountSheet({ countId, onBack }: { countId: string; onBack: () => void }
                 <Printer size={16} />
                 Folha de contagem
               </button>
-              {isOpen && (
+              {isOpen && canCount && (
                 <>
                   <button
                     type="button"

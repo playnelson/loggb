@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { useWorkspace } from '@/lib/workspace';
 import { Loader2, Plus, StickyNote, Trash2 } from 'lucide-react';
 
 type NoteColor = 'yellow' | 'mint' | 'pink' | 'sky';
@@ -37,6 +38,8 @@ function isMissingMuralTable(err: { message?: string; code?: string } | null): b
 }
 
 export function MuralPostIts() {
+  const { can } = useWorkspace();
+  const canMural = can('mural');
   const [notes, setNotes] = useState<MuralNote[]>([]);
   const [loading, setLoading] = useState(true);
   const [schemaError, setSchemaError] = useState<string | null>(null);
@@ -152,6 +155,7 @@ export function MuralPostIts() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
+      {canMural ? (
       <div className="bg-white p-4 rounded-xl border border-border shadow-sm space-y-3">
         <div className="flex items-center gap-2 text-primary font-bold text-sm">
           <StickyNote size={18} className="text-secondary" />
@@ -190,6 +194,7 @@ export function MuralPostIts() {
           </button>
         </div>
       </div>
+      ) : null}
 
       <div
         className="rounded-2xl border border-slate-200 bg-slate-50 min-h-[360px] p-4 md:p-6 shadow-sm"
@@ -210,7 +215,8 @@ export function MuralPostIts() {
                 key={n.id}
                 className={`w-[200px] min-h-[160px] rounded-xl border shadow-md p-3 flex flex-col transition-all hover:-translate-y-0.5 ${COLOR_STYLES[n.color]}`}
               >
-                <div className="flex justify-end mb-1">
+                <div className="flex justify-end mb-1 min-h-[22px]">
+                  {canMural ? (
                   <button
                     type="button"
                     onClick={() => void remove(n.id)}
@@ -219,13 +225,15 @@ export function MuralPostIts() {
                   >
                     <Trash2 size={14} />
                   </button>
+                  ) : null}
                 </div>
                 <textarea
                   className="flex-1 w-full bg-transparent border-none text-xs font-bold leading-snug outline-none resize-none placeholder:opacity-50"
                   defaultValue={n.body}
+                  readOnly={!canMural}
                   onBlur={(e) => {
                     const v = e.target.value.trim();
-                    if (v !== n.body) void updateBody(n.id, v);
+                    if (canMural && v !== n.body) void updateBody(n.id, v);
                   }}
                 />
               </div>

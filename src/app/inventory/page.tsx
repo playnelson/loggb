@@ -28,6 +28,9 @@ import { downloadInventoryImportTemplate } from '@/lib/inventoryImportTemplate';
 import { downloadInventoryWorkbookFromTemplate } from '@/lib/inventoryExportTemplate';
 import { CatalogProductAutocomplete } from '@/components/CatalogProductAutocomplete';
 import { formatEmployeeName, normalizeSearchText } from '@/lib/employeeName';
+import { useWorkspace } from '@/lib/workspace';
+import { useCanApproveDeletion } from '@/lib/deletion';
+import DeletionDialog from '@/components/DeletionDialog';
 
 function possessionEmployeeName(
   employees: { full_name: string } | { full_name: string }[] | null | undefined
@@ -172,6 +175,11 @@ function InventoryContent() {
   const searchParams = useSearchParams();
   /** Item aberto pelo QR da etiqueta (?item=<id>): a lista mostra só ele. */
   const focusItemId = searchParams.get('item');
+  const { can, canManageCategory, managesAnyArea } = useWorkspace();
+  const approver = useCanApproveDeletion();
+  const canCategories = can('cadastros');
+  /** Excluir: quem aprova exclui na hora; os outros pedem (página Aprovações). */
+  const [deleting, setDeleting] = useState<{ product: Product; note: string } | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
   const [loading, setLoading] = useState(true);
@@ -556,12 +564,6 @@ function InventoryContent() {
    */
   const handleDelete = async (p: Product) => {
     const name = formatProductLabelDisplay(p.description);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      alert('Usuário não autenticado.');
-      return;
-    }
-
     const withEmployees = (p.possession || []).reduce((s, pos) => s + Number(pos.quantity || 0), 0);
     const atSites = sitePossessionTotal(p);
     if (withEmployees > 0 || atSites > 0) {
@@ -583,34 +585,15 @@ function InventoryContent() {
     }
     const movCount = movRes.count ?? 0;
     const rentCount = rentRes.error ? 0 : rentRes.count ?? 0;
-
-    if (movCount === 0 && rentCount === 0) {
-      if (!confirm(`Excluir "${name}"? O item não tem nenhuma movimentação, então será apagado de vez.`)) return;
-      const { error } = await supabase.from('items').delete().eq('id', p.id);
-      if (error) alert('Erro ao excluir: ' + error.message);
-      else void fetchProducts();
-      return;
-    }
-
     const stockWarn =
       Number(p.quantity_current) > 0
-        ? `\n\nAtenção: ainda há ${formatQty(p.quantity_current)} ${p.unit} em estoque. Se o material não existe mais, faça um ajuste antes.`
+        ? ` Ainda há ${formatQty(p.quantity_current)} ${p.unit} em estoque; se o material não existe mais, faça um ajuste antes.`
         : '';
-    const ok = confirm(
-      `"${name}" tem ${movCount} movimentação(ões) no histórico, então será ARQUIVADO em vez de apagado.\n\n` +
-        `Ele sai da lista e não pode mais ser movimentado, mas o histórico continua guardado. ` +
-        `Para reativar, use o filtro "Arquivados".${stockWarn}`
-    );
-    if (!ok) return;
-    const { error } = await supabase
-      .from('items')
-      .update({ archived_at: new Date().toISOString() })
-      .eq('id', p.id);
-    if (error) alert('Erro ao arquivar: ' + error.message);
-    else {
-      setCart((prev) => prev.filter((l) => l.itemId !== p.id));
-      void fetchProducts();
-    }
+    const note =
+      movCount === 0 && rentCount === 0
+        ? `O item não tem nenhuma movimentação, então será apagado de vez.${stockWarn}`
+        : `O item tem ${movCount} movimentação(ões) no histórico, então será ARQUIVADO em vez de apagado: sai da lista e não pode mais ser movimentado, mas o histórico continua guardado (filtro "Arquivados").${stockWarn}`;
+    setDeleting({ product: p, note });
   };
 
   const handleRestore = async (p: Product) => {
@@ -1244,6 +1227,7 @@ function InventoryContent() {
             <QrCode size={18} className="text-secondary shrink-0" />
             <span className="truncate">Etiquetas QR</span>
           </button>
+          {canCategories ? (
           <button
             type="button"
             onClick={openCategoryManager}
@@ -1253,6 +1237,7 @@ function InventoryContent() {
             <Tags size={18} className="text-secondary shrink-0" />
             Categorias
           </button>
+          ) : null}
           <button
             type="button"
             onClick={() => downloadInventoryImportTemplate()}
@@ -1265,7 +1250,9 @@ function InventoryContent() {
               <span className="hidden md:inline">Modelo importação</span>
             </span>
           </button>
-          <button 
+          {managesAnyArea ? (
+          <>
+          <button
             onClick={() => setIsImportModalOpen(true)}
             className="flex w-full md:w-auto items-center justify-center gap-2 bg-slate-100 text-primary border border-slate-200 px-3 py-3 md:px-4 md:py-2 rounded-lg hover:bg-slate-200 transition-all font-medium text-sm min-h-[48px] md:min-h-[36px]"
           >
@@ -1275,7 +1262,12 @@ function InventoryContent() {
           <button 
             onClick={() => {
               setEditingItem(null);
-              setFormData(emptyItemForm());
+              const blank = emptyItemForm();
+              if (!canManageCategory(blank.category)) {
+                const mine = categoryOptions.find((c) => canManageCategory(c));
+                if (mine) blank.category = mine;
+              }
+              setFormData(blank);
               setIsModalOpen(true);
             }}
             className="flex w-full md:w-auto items-center justify-center gap-2 bg-primary text-white px-3 py-3 md:px-4 md:py-2 rounded-lg hover:bg-bar-2 transition-all font-medium text-sm min-h-[48px] md:min-h-[36px]"
@@ -1283,6 +1275,8 @@ function InventoryContent() {
             <Plus size={18} />
             Novo Material
           </button>
+          </>
+          ) : null}
         </div>
       </div>
 
@@ -1803,7 +1797,7 @@ function InventoryContent() {
                       <td className="px-4 py-2.5 text-center border-x border-slate-50/80">
                         <button
                           type="button"
-                          disabled={p.quantity_current <= 0 || Boolean(p.archived_at)}
+                          disabled={p.quantity_current <= 0 || Boolean(p.archived_at) || !canManageCategory(p.category)}
                           onClick={() => addItemToCartFromRow(p)}
                           className="inline-flex items-center justify-center p-2.5 rounded-xl bg-teal-50 text-teal-700 border border-teal-200/80 hover:bg-teal-100 hover:border-teal-300 disabled:opacity-35 disabled:pointer-events-none transition-colors"
                           title={
@@ -1816,7 +1810,23 @@ function InventoryContent() {
                         </button>
                       </td>
                       <td className="px-4 py-2.5 text-right">
-                        {p.archived_at ? (
+                        {!canManageCategory(p.category) ? (
+                          <div className="flex justify-end items-center gap-1">
+                            <span
+                              className="text-[10px] font-bold uppercase text-slate-400 mr-1"
+                              title="Este item é de uma área do estoque que você não gerencia. Peça ao ADM para incluir você na área."
+                            >
+                              Só consulta
+                            </span>
+                            <button
+                              onClick={() => openHistory(p)}
+                              className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-secondary"
+                              title="Histórico"
+                            >
+                              <History size={16} />
+                            </button>
+                          </div>
+                        ) : p.archived_at ? (
                           <div className="flex justify-end items-center gap-1">
                             <span className="text-[10px] font-bold uppercase text-slate-400 mr-1">Arquivado</span>
                             <button
@@ -1894,7 +1904,7 @@ function InventoryContent() {
                           <button
                             onClick={() => void handleDelete(p)}
                             className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-red-500"
-                            title="Excluir ou arquivar (itens com histórico são arquivados)"
+                            title={approver ? 'Excluir ou arquivar (itens com histórico são arquivados)' : 'Pedir exclusão (o ADM ou o gestor aprova)'}
                           >
                             <Trash2 size={16} />
                           </button>
@@ -2034,7 +2044,21 @@ function InventoryContent() {
                     </div>
                   ) : null}
 
-                  {p.archived_at ? (
+                  {!canManageCategory(p.category) ? (
+                  <div className="grid grid-cols-1 gap-2">
+                    <p className="text-[11px] text-slate-500 text-center">
+                      Só consulta: este item é de uma área do estoque que você não gerencia.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => openHistory(p)}
+                      className="min-h-[48px] flex items-center justify-center gap-2 rounded-xl bg-slate-50 text-slate-700 border border-slate-200 font-bold text-sm"
+                    >
+                      <History size={18} />
+                      Histórico
+                    </button>
+                  </div>
+                  ) : p.archived_at ? (
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
@@ -2126,7 +2150,7 @@ function InventoryContent() {
                       className="min-h-[48px] flex items-center justify-center gap-2 rounded-xl bg-slate-50 text-red-600 border border-slate-200 font-bold text-sm"
                     >
                       <Trash2 size={18} />
-                      Excluir
+                      {approver ? 'Excluir' : 'Pedir exclusão'}
                     </button>
                   </div>
                   )}
@@ -2327,9 +2351,11 @@ function InventoryContent() {
                     value={formData.category}
                     onChange={(e) => setFormData({...formData, category: e.target.value})}
                   >
-                    {categoryOptions.map((c) => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
+                    {categoryOptions
+                      .filter((c) => c === formData.category || canManageCategory(c))
+                      .map((c) => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
                   </select>
                 </div>
                 <div className="space-y-1">
@@ -2781,6 +2807,22 @@ function InventoryContent() {
           </div>
         </div>
       )}
+
+      {deleting ? (
+        <DeletionDialog
+          entity="item"
+          id={deleting.product.id}
+          label={formatProductLabelDisplay(deleting.product.description)}
+          note={deleting.note}
+          onClose={() => setDeleting(null)}
+          onDone={(outcome) => {
+            const id = deleting.product.id;
+            setDeleting(null);
+            if (outcome.kind === 'done') setCart((prev) => prev.filter((l) => l.itemId !== id));
+            void fetchProducts();
+          }}
+        />
+      ) : null}
 
       <QuickMovementModal 
         isOpen={isQuickMovementOpen}

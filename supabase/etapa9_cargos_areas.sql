@@ -747,3 +747,11 @@ grant execute on function public.area_denied(text) to authenticated;
 grant select, insert, update, delete on public.organization_roles to authenticated;
 grant select, insert, update, delete on public.stock_areas to authenticated;
 grant select, insert, delete on public.stock_area_members to authenticated;
+
+-- Ajuste de segurança (avisos do Supabase): funções de gatilho não podem ser chamadas direto pela API.
+alter function public.area_denied(text) set search_path = public;
+revoke all on function public.enforce_item_area() from public, anon, authenticated;
+revoke all on function public.enforce_item_area_child() from public, anon, authenticated;
+revoke all on function public.enforce_module_permission() from public, anon, authenticated;
+revoke all on function public.item_categories_rename_area_trg() from public, anon, authenticated;
+revoke all on function public.organizations_default_roles_trg() from public, anon, authenticated;

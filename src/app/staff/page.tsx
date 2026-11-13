@@ -13,6 +13,8 @@ import ImportSpreadsheet from '@/components/ImportSpreadsheet';
 import { DocFileField, EquipmentDocsModal, useEquipmentDocCounts, type PossessionOption } from '@/components/EquipmentDocuments';
 import { uploadEquipmentDoc } from '@/lib/equipmentDocs';
 import { useWorkspace } from '@/lib/workspace';
+import { useCanApproveDeletion } from '@/lib/deletion';
+import DeletionDialog from '@/components/DeletionDialog';
 import {
   downloadFerramentasFichaTxt,
   type FichaPossessionRow,
@@ -273,7 +275,11 @@ export default function StaffPage() {
     possessionItems?: PossessionOption[];
   } | null>(null);
   const docCounts = useEquipmentDocCounts();
-  const { currentWorkspace } = useWorkspace();
+  const { currentWorkspace, can, managesAnyArea } = useWorkspace();
+  /** Cargo libera cadastrar e editar colaboradores? */
+  const canEmployees = can('colaboradores');
+  const approver = useCanApproveDeletion();
+  const [deletingEmployee, setDeletingEmployee] = useState<Employee | null>(null);
 
   /** Itens não consumíveis com o colaborador (os que costumam ter termo assinado). */
   const docPossessionOptions = (emp: Employee): PossessionOption[] =>
@@ -867,20 +873,24 @@ export default function StaffPage() {
           <p className="text-slate-500 text-sm">Monitoramento de ativos e histórico por colaborador.</p>
         </div>
         <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
-          <button 
+          {managesAnyArea ? (
+          <button
             onClick={() => setIsImportModalOpen(true)}
             className="flex w-full sm:w-auto items-center justify-center gap-2 bg-slate-100 text-primary border border-slate-200 px-4 py-3 md:py-2 rounded-lg hover:bg-slate-200 transition-all font-medium text-sm min-h-[48px] md:min-h-[36px]"
           >
             <FileUp size={16} className="text-secondary" />
             Importar Histórico
           </button>
-          <button 
+          ) : null}
+          {canEmployees ? (
+          <button
             onClick={openNewEmployeeModal}
             className="flex w-full sm:w-auto items-center justify-center gap-2 bg-primary text-white px-4 py-3 md:py-2 rounded-lg hover:bg-bar-2 transition-all font-medium text-sm min-h-[48px] md:min-h-[36px]"
           >
             <UserPlus size={16} />
             Novo Colaborador
           </button>
+          ) : null}
         </div>
       </div>
 
@@ -1114,6 +1124,7 @@ export default function StaffPage() {
                       </td>
                       <td className="px-4 py-2.5 text-right">
                         <div className="flex items-center justify-end gap-1.5">
+                          {canEmployees ? (
                           <button
                             type="button"
                             onClick={() => openEditEmployeeModal(e)}
@@ -1122,6 +1133,7 @@ export default function StaffPage() {
                           >
                             <Pencil size={16} />
                           </button>
+                          ) : null}
                           <button 
                             type="button"
                             onClick={() => openEpiFichaModal(e)}
@@ -1376,6 +1388,7 @@ export default function StaffPage() {
                       <Paperclip size={18} />
                       Documentos{docCounts.byEmployee.get(e.id) ? ` (${docCounts.byEmployee.get(e.id)})` : ''}
                     </button>
+                    {canEmployees ? (
                     <button
                       type="button"
                       onClick={() => openEditEmployeeModal(e)}
@@ -1384,6 +1397,7 @@ export default function StaffPage() {
                       <Pencil size={18} />
                       Editar
                     </button>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => openEpiFichaModal(e)}
@@ -2328,10 +2342,38 @@ export default function StaffPage() {
                   {isSubmitting ? 'Salvando...' : editingEmployee ? 'Salvar' : 'Cadastrar'}
                 </button>
               </div>
+              {editingEmployee ? (
+                <div className="pt-3 border-t border-slate-100 flex justify-center">
+                  <button
+                    type="button"
+                    onClick={() => setDeletingEmployee(editingEmployee)}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-red-600 rounded hover:bg-red-50"
+                  >
+                    <Trash2 size={14} />
+                    {approver ? 'Excluir colaborador' : 'Pedir exclusão do colaborador'}
+                  </button>
+                </div>
+              ) : null}
             </form>
           </div>
         </div>
       )}
+
+      {deletingEmployee ? (
+        <DeletionDialog
+          entity="colaborador"
+          id={deletingEmployee.id}
+          label={formatEmployeeName(deletingEmployee.full_name)}
+          note="Se tiver movimentações ou pedidos de compra, o colaborador fica como Desligado (o histórico continua). Sem histórico, é apagado. Com itens em posse, registre a devolução antes."
+          onClose={() => setDeletingEmployee(null)}
+          onDone={() => {
+            setDeletingEmployee(null);
+            setIsModalOpen(false);
+            setEditingEmployee(null);
+            void fetchEmployees();
+          }}
+        />
+      ) : null}
     </div>
   );
 }

@@ -96,6 +96,8 @@ type WorkspaceContextValue = {
   can: (perm: Permission) => boolean;
   /** Gerencia a área deste item (pela categoria)? */
   canManageCategory: (category: string | null | undefined) => boolean;
+  /** Gerencia alguma parte do estoque (pode cadastrar e movimentar itens)? */
+  managesAnyArea: boolean;
 };
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
@@ -277,6 +279,9 @@ export function WorkspaceProvider({ children, enabled }: { children: ReactNode; 
       },
       canManageCategory: (category: string | null | undefined) =>
         access ? accessManagesCategory(access, category) : currentOrganization?.role !== 'gestor',
+      managesAnyArea: access
+        ? access.is_adm || access.all_areas || access.areas.length > 0
+        : currentOrganization?.role !== 'gestor',
     };
   }, [status, organizations, workspaces, currentId, reload, switchWorkspace, access]);
 

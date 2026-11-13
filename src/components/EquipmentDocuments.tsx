@@ -4,12 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { Download, ExternalLink, FileText, Image as ImageIcon, Loader2, Paperclip, Trash2, Upload, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { formatDateTimeBR, useWorkspace } from '@/lib/workspace';
+import { useCanApproveDeletion } from '@/lib/deletion';
+import DeletionDialog from '@/components/DeletionDialog';
 import {
   EQUIPMENT_DOC_ACCEPT,
   EQUIPMENT_DOC_COLUMNS,
   EQUIPMENT_DOC_KIND_LABEL,
   checkEquipmentDocFile,
-  deleteEquipmentDoc,
   equipmentDocItemLabel,
   formatFileSize,
   openEquipmentDoc,
@@ -45,6 +46,8 @@ export function EquipmentDocRow({
   onDeleted?: () => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const approver = useCanApproveDeletion();
   const isPdf = doc.mime_type === 'application/pdf';
   const Icon = isPdf ? FileText : ImageIcon;
   const run = async (fn: () => Promise<string | null>) => {
@@ -94,22 +97,28 @@ export function EquipmentDocRow({
           <button
             type="button"
             disabled={busy}
-            title="Apagar documento"
-            aria-label="Apagar documento"
-            onClick={() => {
-              if (!window.confirm(`Apagar "${doc.file_name}"? O arquivo some para todos do workspace.`)) return;
-              void run(async () => {
-                const err = await deleteEquipmentDoc(supabase, doc);
-                if (!err) onDeleted?.();
-                return err;
-              });
-            }}
+            title={approver ? 'Apagar documento' : 'Pedir exclusão do documento'}
+            aria-label={approver ? 'Apagar documento' : 'Pedir exclusão do documento'}
+            onClick={() => setConfirming(true)}
             className="inline-flex items-center px-2 py-1.5 text-xs text-red-600 border border-red-200 rounded hover:bg-red-50 disabled:opacity-60"
           >
             {busy ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
           </button>
         ) : null}
       </span>
+      {confirming ? (
+        <DeletionDialog
+          entity="documento"
+          id={doc.id}
+          label={doc.file_name}
+          note="O arquivo some para todos do workspace."
+          onClose={() => setConfirming(false)}
+          onDone={(outcome) => {
+            setConfirming(false);
+            if (outcome.kind === 'done') onDeleted?.();
+          }}
+        />
+      ) : null}
     </li>
   );
 }

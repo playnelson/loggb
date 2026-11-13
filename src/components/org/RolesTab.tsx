@@ -110,7 +110,8 @@ export default function RolesTab({
         </table>
       </div>
       <p className="text-[11px] text-slate-500">
-        &quot;Aprovar exclusões&quot; passa a valer na próxima etapa, quando os pedidos de exclusão forem criados.
+        Quem tem &quot;Aprovar exclusões&quot; exclui na hora e decide os pedidos dos outros na página Aprovações. Os demais só
+        pedem a exclusão.
       </p>
 
       {editing ? (

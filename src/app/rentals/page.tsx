@@ -8,6 +8,9 @@ import { supabase } from '@/lib/supabase';
 import { formatProductLabelDisplay } from '@/lib/productDisplayText';
 import { formatEmployeeName } from '@/lib/employeeName';
 import { isLikelyMissingColumn } from '@/lib/tenantItems';
+import { useWorkspace } from '@/lib/workspace';
+import { useCanApproveDeletion } from '@/lib/deletion';
+import DeletionDialog from '@/components/DeletionDialog';
 import { ArrowLeft, Building2, Loader2, ReceiptText, ShieldCheck, X } from 'lucide-react';
 
 type RentalStatus = 'ativo' | 'encerrado';
@@ -101,6 +104,10 @@ function rowIsDraft(row: RentalListRow): row is RentalDraftRow {
 }
 
 export default function RentalsPage() {
+  const { can } = useWorkspace();
+  const canRentals = can('alugueis');
+  const approver = useCanApproveDeletion();
+  const [deletingRental, setDeletingRental] = useState<{ id: string; label: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [supplierSaving, setSupplierSaving] = useState(false);
@@ -474,6 +481,11 @@ export default function RentalsPage() {
           </div>
         </div>
         <div className="flex gap-2">
+          {!canRentals ? (
+            <span className="self-center text-xs font-semibold text-slate-500 bg-slate-100 border border-slate-200 rounded px-3 py-2">
+              Só consulta: seu cargo não altera aluguéis.
+            </span>
+          ) : null}
           <button
             type="button"
             onClick={() => setSupplierModalOpen(true)}
@@ -581,7 +593,7 @@ export default function RentalsPage() {
                       </td>
                       <td className="px-4 py-2 text-right">
                         <div className="flex justify-end gap-2">
-                          {rowIsDraft(r) ? (
+                          {!canRentals ? null : rowIsDraft(r) ? (
                             <button
                               type="button"
                               onClick={() => openFromDraft(r.item_id)}
@@ -614,6 +626,19 @@ export default function RentalsPage() {
                                   Encerrar
                                 </button>
                               ) : null}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setDeletingRental({
+                                    id: r.id,
+                                    label: `${formatProductLabelDisplay(it?.description || 'Item')} · ${sup?.name || r.supplier}`,
+                                  })
+                                }
+                                className="px-3 py-1.5 text-xs font-bold text-red-600 border border-red-200 rounded-lg hover:bg-red-50"
+                                title={approver ? 'Excluir aluguel cadastrado por engano' : 'Pedir exclusão (o ADM ou o gestor aprova)'}
+                              >
+                                {approver ? 'Excluir' : 'Pedir exclusão'}
+                              </button>
                             </>
                           )}
                         </div>
@@ -894,6 +919,20 @@ export default function RentalsPage() {
           </div>
         </div>
       )}
+
+      {deletingRental ? (
+        <DeletionDialog
+          entity="aluguel"
+          id={deletingRental.id}
+          label={deletingRental.label}
+          note="Use para aluguel cadastrado por engano. Se o equipamento foi devolvido à locadora, prefira Encerrar: o registro fica no histórico."
+          onClose={() => setDeletingRental(null)}
+          onDone={() => {
+            setDeletingRental(null);
+            void load();
+          }}
+        />
+      ) : null}
     </div>
   );
 }

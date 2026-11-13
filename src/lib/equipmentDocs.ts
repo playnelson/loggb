@@ -146,14 +146,6 @@ export async function openEquipmentDoc(supabase: SupabaseClient, doc: EquipmentD
   return null;
 }
 
-/** Apaga o registro e o arquivo. */
-export async function deleteEquipmentDoc(supabase: SupabaseClient, doc: EquipmentDoc): Promise<string | null> {
-  const { error } = await supabase.from('equipment_documents').delete().eq('id', doc.id);
-  if (error) return error.message;
-  await supabase.storage.from(EQUIPMENT_DOCS_BUCKET).remove([doc.storage_path]);
-  return null;
-}
-
 export function equipmentDocItemLabel(doc: EquipmentDoc): string {
   const it = Array.isArray(doc.items) ? doc.items[0] : doc.items;
   return it?.description ?? 'Item removido';

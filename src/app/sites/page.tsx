@@ -8,6 +8,7 @@ import { supabase } from '@/lib/supabase';
 import type { WorkSiteKind, WorkSiteRow } from '@/lib/workSites';
 import { isWorkSiteKind } from '@/lib/workSites';
 import { formatEmployeeName } from '@/lib/employeeName';
+import { useWorkspace } from '@/lib/workspace';
 import { ArrowLeft, Building2, HardHat, Loader2, MapPin, Pencil, Plus, X } from 'lucide-react';
 
 type EmployeeOpt = { id: string; full_name: string };
@@ -36,6 +37,9 @@ const emptyForm = () => ({
 });
 
 export default function SitesPage() {
+  const { can } = useWorkspace();
+  /** Cargo libera cadastrar e editar locais? */
+  const canSites = can('cadastros');
   const [sites, setSites] = useState<WorkSiteRow[]>([]);
   const [employees, setEmployees] = useState<EmployeeOpt[]>([]);
   const [loading, setLoading] = useState(true);
@@ -187,6 +191,7 @@ export default function SitesPage() {
             </p>
           </div>
         </div>
+        {canSites ? (
         <button
           type="button"
           onClick={openNew}
@@ -195,6 +200,7 @@ export default function SitesPage() {
           <Plus size={18} />
           Novo local
         </button>
+        ) : null}
       </div>
 
       {error && !modalOpen && (
@@ -250,6 +256,7 @@ export default function SitesPage() {
                       </span>
                     </td>
                     <td className="px-4 py-2 text-right">
+                      {canSites ? (
                       <button
                         type="button"
                         onClick={() => openEdit(s)}
@@ -258,6 +265,7 @@ export default function SitesPage() {
                         <Pencil size={14} />
                         Editar
                       </button>
+                      ) : null}
                     </td>
                   </tr>
                 ))}

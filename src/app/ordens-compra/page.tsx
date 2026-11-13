@@ -37,6 +37,11 @@ import {
 import ReceivePoLineModal, { type ReceivePoLine } from '@/components/ReceivePoLineModal';
 import { receivePoItem, type ReceivePoItemResult } from '@/lib/purchaseReceiving';
 import { formatQty } from '@/lib/movements';
+import { useWorkspace } from '@/lib/workspace';
+import { useCanApproveDeletion } from '@/lib/deletion';
+import DeletionDialog from '@/components/DeletionDialog';
+
+const NO_COMPRAS = 'Seu cargo não permite alterar compras. Peça ao ADM.';
 
 interface OrderRow {
   id: string;
@@ -140,6 +145,10 @@ function lateDaysCount(iso: string | null): number {
 }
 
 export default function OrdensCompraPage() {
+  const { can } = useWorkspace();
+  const canCompras = can('compras');
+  const approver = useCanApproveDeletion();
+  const [deletingOrder, setDeletingOrder] = useState<OrderRow | null>(null);
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -343,38 +352,15 @@ export default function OrdensCompraPage() {
 
   const deleteOrder = async (row: OrderRow) => {
     if (busyOrderId) return;
-    const ok = window.confirm(
-      `Apagar a OC ${row.oc_number || row.title || row.id}? Essa ação não pode ser desfeita. O que já entrou no estoque por esta OC continua no estoque.`
-    );
-    if (!ok) return;
-
-    setBusyOrderId(row.id);
-    setParseError(null);
-    try {
-      if (ORDENS_COMPRA_DEV_LOCAL && typeof window !== 'undefined') {
-        const list = devLocalOrdersRead();
-        devLocalOrdersWrite(list.filter((o) => o.id !== row.id));
-        await fetchOrders();
-        return;
-      }
-
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) throw new Error('Sessão expirada.');
-
-      const { error } = await supabase
-        .from('purchase_orders')
-        .delete()
-        .eq('id', row.id);
-      if (error) throw error;
-
-      await fetchOrders();
-    } catch (e) {
-      setParseError(e instanceof Error ? e.message : 'Erro ao apagar ordem.');
-    } finally {
-      setBusyOrderId(null);
+    if (!(ORDENS_COMPRA_DEV_LOCAL && typeof window !== 'undefined')) {
+      setDeletingOrder(row);
+      return;
     }
+    const ok = window.confirm(`Apagar a OC ${row.oc_number || row.title || row.id}? Essa ação não pode ser desfeita.`);
+    if (!ok) return;
+    const list = devLocalOrdersRead();
+    devLocalOrdersWrite(list.filter((o) => o.id !== row.id));
+    await fetchOrders();
   };
 
   const openNewManual = () => {
@@ -449,6 +435,10 @@ export default function OrdensCompraPage() {
     item: NonNullable<OrderRow['purchase_order_items']>[number]
   ) => {
     if (busyItemId || busyOrderId) return;
+    if (!canCompras) {
+      alert(NO_COMPRAS);
+      return;
+    }
     const next = !item.delivered;
     const nowIso = new Date().toISOString();
     const fullQty = item.quantity ?? 0;
@@ -499,6 +489,10 @@ export default function OrdensCompraPage() {
     item: NonNullable<OrderRow['purchase_order_items']>[number]
   ) => {
     if (busyItemId || busyOrderId) return;
+    if (!canCompras) {
+      alert(NO_COMPRAS);
+      return;
+    }
     if (!(ORDENS_COMPRA_DEV_LOCAL && typeof window !== 'undefined')) {
       openReceive(orderId, item);
       return;
@@ -763,6 +757,7 @@ export default function OrdensCompraPage() {
             </div>
           )}
         </div>
+        {canCompras ? (
         <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
           <label className="flex flex-1 sm:flex-initial items-center justify-center gap-2 bg-white text-primary border border-slate-200 px-4 py-3 sm:py-2 rounded-lg hover:bg-slate-50 cursor-pointer font-medium text-sm min-h-[48px]">
             {parseLoading ? <Loader2 className="animate-spin" size={18} /> : <FileUp size={18} className="text-secondary" />}
@@ -784,6 +779,11 @@ export default function OrdensCompraPage() {
             Nova OC manual
           </button>
         </div>
+        ) : (
+          <span className="text-xs font-semibold text-slate-500 bg-slate-100 border border-slate-200 rounded px-3 py-2">
+            Só consulta: seu cargo não altera compras.
+          </span>
+        )}
       </div>
 
       <div className="bg-white rounded-xl border border-border shadow-sm p-4 space-y-3">
@@ -1005,6 +1005,8 @@ export default function OrdensCompraPage() {
                             >
                               Abrir
                             </Link>
+                            {canCompras ? (
+                            <>
                             <button
                               type="button"
                               disabled={rowBusy}
@@ -1026,11 +1028,13 @@ export default function OrdensCompraPage() {
                                 void deleteOrder(o);
                               }}
                               className="inline-flex items-center gap-1 text-xs font-bold text-red-600 hover:underline disabled:opacity-50"
-                              title="Apagar ordem"
+                              title={approver ? 'Apagar ordem' : 'Pedir exclusão (o ADM ou o gestor aprova)'}
                             >
                               <Trash2 size={13} />
-                              Apagar
+                              {approver ? 'Apagar' : 'Pedir exclusão'}
                             </button>
+                            </>
+                            ) : null}
                           </div>
                         </td>
                       </tr>
@@ -1285,6 +1289,19 @@ export default function OrdensCompraPage() {
           </div>
         </div>
       )}
+      {deletingOrder ? (
+        <DeletionDialog
+          entity="ordem_compra"
+          id={deletingOrder.id}
+          label={deletingOrder.oc_number ? `OC ${deletingOrder.oc_number}` : deletingOrder.title || 'Ordem de compra'}
+          note="A ordem e as linhas dela são apagadas. O que já entrou no estoque por esta OC continua no estoque."
+          onClose={() => setDeletingOrder(null)}
+          onDone={() => {
+            setDeletingOrder(null);
+            void fetchOrders();
+          }}
+        />
+      ) : null}
       {receiveTarget && (
         <ReceivePoLineModal
           line={receiveTarget.line}

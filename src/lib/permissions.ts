@@ -21,7 +21,7 @@ export const PERMISSIONS: { key: Permission; label: string; hint: string }[] = [
   { key: 'cadastros', label: 'Locais e categorias', hint: 'Sedes, canteiros e categorias de itens' },
   { key: 'inventario', label: 'Inventário', hint: 'Abrir e fazer contagens de estoque' },
   { key: 'mural', label: 'Mural', hint: 'Recados no mural da tela inicial' },
-  { key: 'exclusoes_aprovar', label: 'Aprovar exclusões', hint: 'Aprova ou recusa pedidos de exclusão (próxima etapa)' },
+  { key: 'exclusoes_aprovar', label: 'Aprovar exclusões', hint: 'Exclui na hora e aprova ou recusa os pedidos de exclusão da equipe' },
 ];
 
 export const PERMISSION_LABEL: Record<Permission, string> = Object.fromEntries(
