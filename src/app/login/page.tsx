@@ -33,6 +33,27 @@ function isInviteNext(): boolean {
   return safeNextPath().startsWith('/convite/');
 }
 
+/** Mensagens do login em português (o Supabase responde em inglês). */
+function authMessage(msg: string): string {
+  const m = msg.toLowerCase();
+  if (m.includes('anonymous sign-ins are disabled') || m.includes('missing email')) return 'Preencha o e-mail.';
+  if (m.includes('invalid login credentials')) return 'E-mail ou senha incorretos.';
+  if (m.includes('email not confirmed')) return 'Confirme o e-mail pelo link que enviamos antes de entrar.';
+  if (m.includes('user already registered') || m.includes('already been registered'))
+    return 'Este e-mail já tem conta. Use "Entrar" com a sua senha.';
+  if (m.includes('password should be at least') || m.includes('weak password')) return 'A senha precisa ter pelo menos 6 caracteres.';
+  if (m.includes('unable to validate email') || m.includes('invalid email') || m.includes('email address') && m.includes('invalid'))
+    return 'E-mail inválido. Confira o endereço digitado.';
+  return msg;
+}
+
+function checkFields(email: string, password: string): string | null {
+  if (!email.trim()) return 'Preencha o e-mail.';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) return 'E-mail inválido. Confira o endereço digitado.';
+  if (password.length < 6) return 'A senha precisa ter pelo menos 6 caracteres.';
+  return null;
+}
+
 export default function LoginPage() {
   const [fromInvite, setFromInvite] = useState(false);
   useEffect(() => {
@@ -47,17 +68,22 @@ export default function LoginPage() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    const invalid = checkFields(email, password);
+    if (invalid) {
+      setError(invalid);
+      return;
+    }
     setLoading(true);
     setError(null);
 
     const { error: loginError } = await supabase.auth.signInWithPassword({
-      email,
+      email: email.trim(),
       password,
     });
 
     if (loginError) {
       console.error('Login error details:', loginError);
-      setError(`Erro no login: ${loginError.message}`);
+      setError(authMessage(loginError.message));
       setLoading(false);
     } else {
       // Force a tiny delay for cookies to settle on client before hitting the edge proxy
@@ -68,20 +94,27 @@ export default function LoginPage() {
   };
 
   const handleSignUp = async () => {
+    const invalid = checkFields(email, password);
+    if (invalid) {
+      setError(invalid);
+      return;
+    }
     setLoading(true);
     setError(null);
 
     let signUpError: { message: string } | null = null;
+    let hasSession = false;
     const maxAttempts = 3;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const { error } = await supabase.auth.signUp({
-        email,
+      const { data, error } = await supabase.auth.signUp({
+        email: email.trim(),
         password,
       });
 
       if (!error) {
         signUpError = null;
+        hasSession = !!data.session;
         break;
       }
 
@@ -99,10 +132,14 @@ export default function LoginPage() {
       if (isLimitExceededMessage(signUpError.message)) {
         setError('Limite temporário de criação atingido. Aguarde 1 minuto e tente novamente.');
       } else {
-        setError(signUpError.message);
+        setError(authMessage(signUpError.message));
       }
+    } else if (hasSession) {
+      // Conta criada e já logada: segue direto (ex.: abre o convite).
+      window.location.replace(safeNextPath());
+      return;
     } else {
-      setError('Cadastro realizado. Verifique seu e-mail (se habilitado) ou tente entrar.');
+      setError('Conta criada. Abra o link que enviamos para o seu e-mail e depois clique em "Entrar".');
     }
     setLoading(false);
   };
