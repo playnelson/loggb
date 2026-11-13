@@ -272,6 +272,8 @@ export default function ImportSpreadsheet({
 
         // 2. Process Items
         const itemMap = new Map<string, string>();
+        // Consumíveis (disco de corte, PFF2…) não vão para a carteira: só ficam no histórico.
+        const consumableIds = new Set<string>();
         const uniqueItems = new Map<string, any>();
 
         /**
@@ -409,6 +411,7 @@ export default function ImportSpreadsheet({
             existingQty = 0;
           }
           if (itemId) itemMap.set(key, itemId);
+          if (itemId && itm.consumable) consumableIds.add(itemId);
 
           if (mode === 'inventory' && itemId) {
             const target = Math.round(Number(itm.qty || 0) * 1000) / 1000;
@@ -449,7 +452,7 @@ export default function ImportSpreadsheet({
             
             const targetQty = qtyIdx !== -1 ? parseNumericValue(row[qtyIdx]) : 0;
 
-            if (empId && itemId) {
+            if (empId && itemId && !consumableIds.has(itemId)) {
               // Get current possession
               const { data: currentPos } = await supabase
                 .from('possession')
