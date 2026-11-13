@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Loader2, ExternalLink } from 'lucide-react';
 import {
   fetchCatalogSearchSuggestions,
@@ -16,6 +16,20 @@ function useDebounced<T>(value: T, ms: number): T {
   }, [value, ms]);
   return debounced;
 }
+
+const STOPWORDS = new Set(['DE', 'DA', 'DO', 'DAS', 'DOS', 'E', 'COM', 'PARA', 'P', 'C', 'EM']);
+
+/** Palavras do nome sem acento/caixa/pontuação e sem "de", "para"… ("Luva vaqueta" = "LUVA DE VAQUETA"). */
+function nameTokens(s: string): string[] {
+  return s
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .split(/[^A-Z0-9]+/)
+    .filter((t) => t && !STOPWORDS.has(t));
+}
+
+type MenuEntry = { key: string; title: string; local: boolean; hit?: CatalogSearchHit };
 
 function sourceLabel(hit: CatalogSearchHit): string {
   switch (hit.source) {
@@ -35,12 +49,15 @@ export function CatalogProductAutocomplete({
   onChange,
   required,
   placeholder = 'Buscar em CATMAT / SINAPI…',
+  existing = [],
 }: {
   label: string;
   value: string;
   onChange: (next: string) => void;
   required?: boolean;
   placeholder?: string;
+  /** Nomes já cadastrados: aparecem primeiro, para não criar o mesmo item com outro nome. */
+  existing?: string[];
 }) {
   const listId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -53,6 +70,40 @@ export function CatalogProductAutocomplete({
   const [menuStyle, setMenuStyle] = useState<{ top: number; left: number; width: number } | null>(null);
 
   const debouncedQuery = useDebounced(value.trim(), 380);
+
+  const existingIndex = useMemo(
+    () => existing.map((name) => ({ name, tokens: nameTokens(name) })),
+    [existing]
+  );
+  const queryTokens = useMemo(() => nameTokens(value), [value]);
+  /** Já cadastrados cujo nome contém todas as palavras digitadas (no começo das palavras). */
+  const localMatches = useMemo(() => {
+    if (queryTokens.length === 0 || value.trim().length < 2) return [];
+    return existingIndex
+      .filter((e) => queryTokens.every((q) => e.tokens.some((t) => t.startsWith(q))))
+      .slice(0, 6)
+      .map((e) => e.name);
+  }, [existingIndex, queryTokens, value]);
+  /** Mesmo item com outro jeito de escrever (mesmas palavras). */
+  const sameAs = useMemo(() => {
+    if (queryTokens.length === 0) return null;
+    const key = [...queryTokens].sort().join(' ');
+    const typed = value.trim().toUpperCase();
+    const hit = existingIndex.find((e) => [...e.tokens].sort().join(' ') === key);
+    return hit && hit.name.trim().toUpperCase() !== typed ? hit.name : null;
+  }, [existingIndex, queryTokens, value]);
+  const exactExists = useMemo(
+    () => existing.some((n) => n.trim().toUpperCase() === value.trim().toUpperCase() && value.trim() !== ''),
+    [existing, value]
+  );
+
+  const entries: MenuEntry[] = useMemo(
+    () => [
+      ...localMatches.map((title) => ({ key: `local:${title}`, title, local: true })),
+      ...results.map((hit) => ({ key: hit.id, title: hit.title, local: false, hit })),
+    ],
+    [localMatches, results]
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -112,8 +163,6 @@ export function CatalogProductAutocomplete({
       if (res.results.length > 0) {
         setOpen(true);
         updateMenuPosition();
-      } else {
-        setOpen(false);
       }
     })();
 
@@ -123,7 +172,7 @@ export function CatalogProductAutocomplete({
   }, [debouncedQuery, updateMenuPosition]);
 
   const pick = useCallback(
-    (hit: CatalogSearchHit) => {
+    (hit: { title: string }) => {
       onChange(hit.title);
       setOpen(false);
       setResults([]);
@@ -134,15 +183,15 @@ export function CatalogProductAutocomplete({
   );
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (!open || results.length === 0) return;
+    if (!open || entries.length === 0) return;
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setHighlight((i) => Math.min(i + 1, results.length - 1));
+      setHighlight((i) => Math.min(i + 1, entries.length - 1));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setHighlight((i) => Math.max(i - 1, 0));
     } else if (e.key === 'Enter') {
-      const hit = results[highlight];
+      const hit = entries[highlight];
       if (hit) {
         e.preventDefault();
         pick(hit);
@@ -171,10 +220,14 @@ export function CatalogProductAutocomplete({
           value={value}
           onChange={(e) => {
             onChange(e.target.value);
-            if (e.target.value.trim().length >= 3) setOpen(true);
+            setHighlight(0);
+            if (e.target.value.trim().length >= 2) {
+              setOpen(true);
+              updateMenuPosition();
+            }
           }}
           onFocus={() => {
-            if (results.length > 0) {
+            if (entries.length > 0) {
               setOpen(true);
               updateMenuPosition();
             }
@@ -210,8 +263,18 @@ export function CatalogProductAutocomplete({
         (SINAPI). Escolha uma sugestão para copiar a descrição.
       </p>
       {error && <p className="text-xs text-amber-700 font-bold">{error}</p>}
+      {exactExists ? (
+        <p className="text-xs text-amber-800 font-bold">Já existe um item cadastrado com esse nome.</p>
+      ) : sameAs ? (
+        <p className="text-xs text-amber-800">
+          Parece o mesmo item que <span className="font-bold">{sameAs}</span>.{' '}
+          <button type="button" className="font-bold text-secondary hover:underline" onClick={() => onChange(sameAs)}>
+            Usar esse nome
+          </button>
+        </p>
+      ) : null}
 
-      {open && results.length > 0 && menuStyle && (
+      {open && entries.length > 0 && menuStyle && (
         <div
           ref={menuRef}
           id={listId}
@@ -223,7 +286,31 @@ export function CatalogProductAutocomplete({
             width: menuStyle.width,
           }}
         >
-          {results.map((hit, idx) => (
+          {localMatches.length > 0 ? (
+            <div className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase text-slate-400">Já cadastrados</div>
+          ) : null}
+          {localMatches.map((title, idx) => (
+            <button
+              key={`local:${title}`}
+              type="button"
+              role="option"
+              aria-selected={idx === highlight}
+              className={`block w-full px-3 py-2 text-left text-sm font-bold text-primary border-b border-slate-100 hover:bg-teal-50/70 ${
+                idx === highlight ? 'bg-teal-50' : ''
+              }`}
+              onMouseEnter={() => setHighlight(idx)}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => pick({ title })}
+            >
+              {title}
+            </button>
+          ))}
+          {localMatches.length > 0 && results.length > 0 ? (
+            <div className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase text-slate-400">Catálogo</div>
+          ) : null}
+          {results.map((hit, i) => {
+            const idx = localMatches.length + i;
+            return (
             <button
               key={hit.id}
               type="button"
@@ -266,7 +353,8 @@ export function CatalogProductAutocomplete({
                 )}
               </div>
             </button>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

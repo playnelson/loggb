@@ -150,7 +150,12 @@ interface CartLine {
   consumable: boolean;
   unique_item: boolean;
   tag?: string;
+  /** EPI: o CA é informado na entrega (mesmo item pode ter CAs diferentes). */
+  epi?: boolean;
+  ca?: string;
 }
+
+const isEpiCategory = (c: string | null | undefined) => String(c ?? '').trim().toUpperCase().startsWith('EPI');
 
 const FALLBACK_CATEGORIES = ['Ferramenta', 'EPI', 'Tubulação', 'Consumível'] as const;
 const ITEMS_PAGE_SIZE = 30;
@@ -213,6 +218,11 @@ function InventoryContent() {
   
   // Modals for actions
   const [editingItem, setEditingItem] = useState<Product | null>(null);
+  /** Nomes já cadastrados (sugestão no cadastro; evita o mesmo item com dois nomes). */
+  const existingItemNames = useMemo(
+    () => [...new Set(products.filter((p) => p.id !== editingItem?.id).map((p) => p.description).filter(Boolean))],
+    [products, editingItem]
+  );
   const [historyItem, setHistoryItem] = useState<Product | null>(null);
   const [itemMovements, setItemMovements] = useState<ItemMovement[]>([]);
   const [activePopover, setActivePopover] = useState<string | null>(null);
@@ -271,9 +281,12 @@ function InventoryContent() {
       locked: Boolean(c.locked),
     })) as ItemCategory[];
 
-    // Ensure defaults (client-side seed per user)
+    // Categorias padrão só na primeira vez (lista vazia). Depois disso, a categoria que o
+    // usuário apagou não volta sozinha — só a EPI (travada) é garantida.
     const existingLower = new Set(list.map((c) => c.name.trim().toLowerCase()));
-    const missingDefaults = FALLBACK_CATEGORIES.filter((n) => !existingLower.has(n.toLowerCase()));
+    const missingDefaults = FALLBACK_CATEGORIES.filter(
+      (n) => !existingLower.has(n.toLowerCase()) && (list.length === 0 || n === 'EPI')
+    );
     if (missingDefaults.length) {
       await supabase.from('item_categories').insert(
         missingDefaults.map((name) => ({
@@ -657,7 +670,7 @@ function InventoryContent() {
       quantity_min: parseQty(formData.quantity_min),
       unit: formData.unit,
       ca_number: formData.ca_number.trim() || null,
-      code: itemCodeFromDescription(descNorm),
+      code: itemCodeFromDescription(descNorm, formData.unique_item ? formData.tag : null),
     };
     const tagVal = formData.tag.trim() || null;
 
@@ -718,7 +731,7 @@ function InventoryContent() {
     }
 
     const descNew = normalizeProductLabelForSave(formData.description);
-    const code = itemCodeFromDescription(descNew);
+    const code = itemCodeFromDescription(descNew, formData.unique_item ? formData.tag : null);
     const initialQty = parseQty(formData.quantity_current);
     if (initialQty < 0) {
       alert('O saldo inicial não pode ser negativo.');
@@ -1010,6 +1023,8 @@ function InventoryContent() {
           consumable: product.consumable,
           unique_item: true,
           tag: t,
+          epi: isEpiCategory(product.category),
+          ca: product.ca_number ?? '',
         },
       ]);
       return true;
@@ -1028,6 +1043,8 @@ function InventoryContent() {
             unit: product.unit,
             consumable: product.consumable,
             unique_item: false,
+            epi: isEpiCategory(product.category),
+            ca: product.ca_number ?? '',
           },
         ];
       }
@@ -1151,6 +1168,7 @@ function InventoryContent() {
         quantity: line.quantity,
         type: 'OUT',
         tag: line.tag || null,
+        ca_number: line.epi ? line.ca?.trim() || null : null,
         stock_delta: -line.quantity,
         possession_delta: !toSite && !isConsumableNow ? line.quantity : 0,
         site_delta: toSite ? line.quantity : 0,
@@ -2307,6 +2325,7 @@ function InventoryContent() {
               <div className="grid grid-cols-2 gap-4">
                 <CatalogProductAutocomplete
                   label="Descrição do Produto"
+                  existing={existingItemNames}
                   value={formData.description}
                   onChange={(v) => setFormData({ ...formData, description: v })}
                   required
@@ -2770,6 +2789,20 @@ function InventoryContent() {
                             </span>
                           )}
                         </div>
+                        {line.epi ? (
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            maxLength={40}
+                            value={line.ca ?? ''}
+                            onChange={(e) =>
+                              setCart((prev) => prev.map((x) => (x.lineId === line.lineId ? { ...x, ca: e.target.value } : x)))
+                            }
+                            placeholder="Nº do CA (opcional)"
+                            title="CA do EPI entregue. Se não souber agora, dá para corrigir depois no Histórico."
+                            className="mt-1 w-40 px-2 py-1 text-xs bg-slate-50 border border-slate-200 rounded-md outline-none focus:border-secondary"
+                          />
+                        ) : null}
                       </div>
                       <div className="flex items-center gap-1">
                         {!line.unique_item && (

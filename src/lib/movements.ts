@@ -81,6 +81,8 @@ export type RegisterMovementInput = {
   document?: string | null;
   /** Agrupa as linhas de uma mesma retirada (um recibo). */
   batch_id?: string | null;
+  /** CA do EPI entregue (preenchido na entrega). Vazio = usa o CA do cadastro do item. */
+  ca_number?: string | null;
 };
 
 export type RegisterMovementResult =
@@ -130,6 +132,7 @@ export async function registerMovement(
     p_note: input.note?.trim() || null,
     p_document: input.document?.trim() || null,
     p_batch_id: input.batch_id ?? null,
+    ...(input.ca_number?.trim() ? { p_ca_number: input.ca_number.trim() } : {}),
   });
 
   if (error) {

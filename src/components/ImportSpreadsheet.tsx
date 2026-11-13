@@ -115,6 +115,9 @@ export default function ImportSpreadsheet({
         const consumableKeywords = ['CONSUMÍVEL', 'CONSUMIVEL', 'CONSUMABLE'];
         // A planilha pode vir como "Qtd. Mínimo" OU "Qtd. Mínima"
         const minKeywords = ['MÍNIMO', 'MINIMO', 'MÍNIMA', 'MINIMA', 'MIN', 'LIMIT', 'ALERTA'];
+        const uniqueKeywords = ['ITEM ÚNICO', 'ITEM UNICO', 'ÚNICO', 'UNICO'];
+        const tagKeywords = ['TAG', 'PATRIMÔNIO', 'PATRIMONIO', 'Nº SÉRIE', 'N° SÉRIE', 'NUMERO DE SERIE', 'NÚMERO DE SÉRIE'];
+        const caHeaders = ['Nº CA', 'N° CA', 'NO CA', 'N CA', 'CA', 'Nº DO CA', 'NÚMERO DO CA', 'NUMERO DO CA', 'CERTIFICADO DE APROVAÇÃO'];
 
         const allKeywords = [
           ...nameKeywords, ...cpfKeywords, ...roleKeywords, ...deptKeywords,
@@ -139,8 +142,10 @@ export default function ImportSpreadsheet({
 
         console.log(`Found header at row ${headerRowIndex}:`, headers);
 
-        const findBestIdx = (keywords: string[]) => {
-          return headers.findIndex(h => keywords.some(k => h.includes(k)));
+        // "ITEM ÚNICO" contém "ITEM"/"UN": não pode ser confundida com descrição ou unidade.
+        const isUniqueHeader = (h: string) => uniqueKeywords.some(k => h.includes(k));
+        const findBestIdx = (keywords: string[], skipUnique = false) => {
+          return headers.findIndex(h => (!skipUnique || !isUniqueHeader(h)) && keywords.some(k => h.includes(k)));
         };
 
         const mapping = {
@@ -151,8 +156,11 @@ export default function ImportSpreadsheet({
           statusIdx: findBestIdx(statusKeywords),
           
           codeIdx: findBestIdx(codeKeywords),
-          descIdx: findBestIdx(descKeywords),
-          unitIdx: findBestIdx(unitKeywords),
+          descIdx: findBestIdx(descKeywords, true),
+          unitIdx: findBestIdx(unitKeywords, true),
+          uniqueIdx: findBestIdx(uniqueKeywords),
+          tagIdx: findBestIdx(tagKeywords),
+          caIdx: headers.findIndex(h => caHeaders.includes(h)),
           
           possessionIdx: findBestIdx(possessionKeywords),
           stockIdx: findBestIdx(stockKeywords),
@@ -266,16 +274,35 @@ export default function ImportSpreadsheet({
         const itemMap = new Map<string, string>();
         const uniqueItems = new Map<string, any>();
 
+        /**
+         * Descrição com vírgulas = kit: a 1ª parte é o item, o resto é o que acompanha
+         * (sem saldo próprio). A TAG separa unidades de um item único com a mesma descrição.
+         */
+        const readItemCell = (row: (typeof rows)[number]) => {
+          const code: string = mapping.codeIdx !== -1 ? row[mapping.codeIdx]?.toString().trim() ?? '' : '';
+          const desc: string = mapping.descIdx !== -1 ? row[mapping.descIdx]?.toString().trim() ?? '' : '';
+          const raw = desc || code;
+          if (!raw) return null;
+          const parts = raw.split(',').map((x) => x.trim()).filter(Boolean);
+          const description = normalizeProductLabelForSave(parts[0] || raw) || 'SEM DESCRICAO';
+          const accessories = parts.slice(1).map((x) => normalizeProductLabelForSave(x)).filter(Boolean);
+          const tag: string = mapping.tagIdx !== -1 ? (row[mapping.tagIdx]?.toString().trim() ?? '').toUpperCase() : '';
+          const unique = Boolean(tag) || (mapping.uniqueIdx !== -1 && parseBooleanValue(row[mapping.uniqueIdx]));
+          const key = `${description.toLowerCase()}|${tag.toLowerCase()}`;
+          return { code, description, accessories, tag, unique, key };
+        };
+
         if (mapping.codeIdx !== -1 || mapping.descIdx !== -1) {
           rows.forEach(row => {
-            const code = mapping.codeIdx !== -1 ? row[mapping.codeIdx]?.toString().trim() : '';
-            const desc = mapping.descIdx !== -1 ? row[mapping.descIdx]?.toString().trim() : '';
-            
-            if (code || desc) {
-              const description = normalizeProductLabelForSave((desc || code || 'Sem descricao').trim()) || 'SEM DESCRICAO';
-              const itemKey = description.toLowerCase();
+            const cell = readItemCell(row);
+            if (cell) {
+              const { code, description, accessories, tag, unique } = cell;
+              const itemKey = cell.key;
               if (!uniqueItems.has(itemKey)) {
-                const qty = qtyIdx !== -1 ? parseNumericValue(row[qtyIdx]) : 0;
+                const rawQty = qtyIdx !== -1 ? parseNumericValue(row[qtyIdx]) : 0;
+                // Unidade com TAG é sempre 1.
+                const qty = tag ? Math.min(rawQty, 1) : rawQty;
+                const caNumber: string = mapping.caIdx !== -1 ? row[mapping.caIdx]?.toString().trim() ?? '' : '';
                 const min = mapping.minIdx !== -1 ? parseNumericValue(row[mapping.minIdx]) : 1;
                 const category = mapping.categoryIdx !== -1 ? row[mapping.categoryIdx]?.toString().trim() : 'Material';
                 const location = mapping.locationIdx !== -1 ? row[mapping.locationIdx]?.toString().trim() : 'Almoxarifado';
@@ -286,6 +313,10 @@ export default function ImportSpreadsheet({
                 uniqueItems.set(itemKey, {
                   sheetCode: sheetCode || null,
                   description,
+                  accessories,
+                  tag,
+                  unique,
+                  caNumber,
                   qty,
                   min,
                   category,
@@ -305,7 +336,7 @@ export default function ImportSpreadsheet({
           
           let existingId: string | null = null;
           let existingQty = 0;
-          const code = itemCodeFromDescription(itm.description);
+          const code = itemCodeFromDescription(itm.description, itm.tag || null);
           if (itm.description) {
             // Mesmo código = mesma descrição (o código é derivado dela). Busca exata, sem curingas.
             const { data: byDesc } = await supabase
@@ -319,11 +350,13 @@ export default function ImportSpreadsheet({
             } else {
               // Itens antigos podem ter a descrição com outra caixa: busca sem diferenciar maiúsculas.
               const escaped = itm.description.replace(/[\\%_]/g, (c: string) => `\\${c}`);
-              const { data: byLike } = await supabase
+              let likeQuery = supabase
                 .from('items')
                 .select('id, quantity_current')
-                .ilike('description', escaped)
-                .limit(1);
+                .ilike('description', escaped);
+              // Item único: só é o mesmo item se a TAG também for a mesma.
+              if (itm.tag) likeQuery = likeQuery.ilike('tag', itm.tag.replace(/[\\%_]/g, (c: string) => `\\${c}`));
+              const { data: byLike } = await likeQuery.limit(1);
               if (byLike && byLike[0]) {
                 existingId = String(byLike[0].id);
                 existingQty = Number(byLike[0].quantity_current ?? 0);
@@ -354,6 +387,10 @@ export default function ImportSpreadsheet({
             quantity_min: itm.min,
             archived_at: null,
             user_id: user.id,
+            ...(itm.unique ? { unique_item: true } : {}),
+            ...(itm.tag ? { tag: itm.tag } : {}),
+            ...(itm.accessories.length ? { accessories: itm.accessories } : {}),
+            ...(itm.caNumber ? { ca_number: itm.caNumber } : {}),
           };
 
           let itemId: string | null = null;
@@ -407,11 +444,8 @@ export default function ImportSpreadsheet({
                 : normalizeSearchText(normalizeEmployeeNameForSave(nameValue));
             const empId = employeeMap.get(empKey);
             
-            const code = row[mapping.codeIdx]?.toString().trim();
-            const desc = row[mapping.descIdx]?.toString().trim();
-            const description = normalizeProductLabelForSave((desc || code || '').trim());
-            const itemKey = description.toLowerCase();
-            const itemId = itemKey ? itemMap.get(itemKey) : null;
+            const cell = readItemCell(row);
+            const itemId = cell ? itemMap.get(cell.key) : null;
             
             const targetQty = qtyIdx !== -1 ? parseNumericValue(row[qtyIdx]) : 0;
 

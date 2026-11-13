@@ -45,20 +45,24 @@ export function downloadInventoryImportTemplate(): void {
   } as const;
 
   const headers = [
-    'CÓDIGO',
     'DESCRIÇÃO DO ITEM',
     'CATEGORIA',
-    'LOCAL',
     'UNIDADE',
     'CONSUMÍVEL',
+    'ITEM ÚNICO',
+    'TAG',
     'QUANTIDADE EM ESTOQUE',
     'QTD MÍNIMO',
+    'LOCAL',
   ];
+  /** Colunas numéricas (alinhadas à direita). */
+  const numCols = new Set([6, 7]);
 
   const examples = [
-    ['FUR-001', 'Furadeira de impacto 110V', 'Ferramenta', 'Prateleira B2', 'un', 'Não', 3, 1],
-    ['LV-NIT-GG', 'Luva nitrílica tamanho GG', 'EPI', 'Gaveta EPI', 'par', 'Sim', 80, 15],
-    ['', 'Martelo de borracha 40mm', 'Ferramenta', 'Caixa 12', 'un', 'Não', 12, 2],
+    ['Luva nitrílica tamanho GG', 'EPI', 'par', 'Sim', 'Não', '', 80, 15, 'Gaveta EPI'],
+    ['Furadeira de impacto 110V', 'Ferramenta', 'un', 'Não', 'Não', '', 3, 1, 'Prateleira B2'],
+    ['Rádio Motorola DEP450, carregador, bateria, antena', 'Equipamento', 'un', 'Não', 'Sim', 'RAD-001', 1, 0, 'Armário rádios'],
+    ['Rádio Motorola DEP450, carregador, bateria, antena', 'Equipamento', 'un', 'Não', 'Sim', 'RAD-002', 1, 0, 'Armário rádios'],
   ];
 
   const headerRowIndex = 4;
@@ -80,17 +84,19 @@ export function downloadInventoryImportTemplate(): void {
 
   ws['!freeze'] = { xSplit: 0, ySplit: headerRowIndex + 1 };
   const lastDataRow = headerRowIndex + examples.length + 20;
-  ws['!autofilter'] = { ref: `A${headerRowIndex + 1}:H${lastDataRow}` };
+  const lastCol = XLSX.utils.encode_col(headers.length - 1);
+  ws['!autofilter'] = { ref: `A${headerRowIndex + 1}:${lastCol}${lastDataRow}` };
 
   ws['!cols'] = [
+    { wch: 52 },
     { wch: 14 },
-    { wch: 38 },
-    { wch: 14 },
-    { wch: 18 },
     { wch: 10 },
+    { wch: 12 },
+    { wch: 11 },
     { wch: 12 },
     { wch: 22 },
     { wch: 12 },
+    { wch: 18 },
   ];
 
   const titleCell = XLSX.utils.encode_cell({ r: 0, c: 0 });
@@ -110,7 +116,7 @@ export function downloadInventoryImportTemplate(): void {
       const addr = XLSX.utils.encode_cell({ r: rowIdx, c });
       const cell = ws[addr];
       if (!cell) continue;
-      cell.s = c >= 6 ? numStyle : exampleStyle;
+      cell.s = numCols.has(c) ? numStyle : exampleStyle;
     }
   }
 
@@ -134,14 +140,22 @@ export function downloadInventoryImportTemplate(): void {
       'Esta pasta contém duas abas. O sistema importa apenas a primeira aba ("Materiais"). Mantenha o cabeçalho (linha 5) e substitua ou apague as linhas de exemplo.',
     ],
     [],
-    ['• CÓDIGO: opcional; se vazio, o sistema gera referência a partir da descrição.'],
-    ['• DESCRIÇÃO DO ITEM: obrigatória para cada linha nova.'],
-    ['• CATEGORIA: ex. Ferramenta, EPI, Consumível.'],
-    ['• LOCAL: prateleira, depósito ou endereço interno.'],
+    ['• Não existe coluna de código: o LoggB gera o código de cada item sozinho.'],
+    ['• DESCRIÇÃO DO ITEM: obrigatória. Item com a mesma descrição de um já cadastrado atualiza o cadastro e o saldo.'],
+    [
+      '• KIT: se a descrição tiver vírgulas, é um kit. A primeira parte é o item; o resto é o que acompanha. Ex.: "Rádio Motorola DEP450, carregador, bateria, antena" = rádio que acompanha carregador, bateria e antena. Os acessórios não têm saldo próprio: saem e voltam junto com o item.',
+    ],
+    ['• CATEGORIA: ex. EPI, Ferramenta, Equipamento. A categoria define em qual almoxarifado o item aparece.'],
     ['• UNIDADE: un, par, m, kg, cx, etc.'],
     ['• CONSUMÍVEL: Sim ou Não (também aceita S, 1, TRUE).'],
+    [
+      '• ITEM ÚNICO: Sim para itens controlados um a um (rádio, furadeira com patrimônio). Use uma linha para cada unidade, com quantidade 1 e a TAG dela.',
+    ],
+    ['• TAG: identificação da unidade (patrimônio, nº de série). Preencher a TAG já marca a linha como item único.'],
     ['• QUANTIDADE EM ESTOQUE: saldo atual no almoxarifado ao importar.'],
     ['• QTD MÍNIMO: ponto de alerta de reposição.'],
+    ['• LOCAL: prateleira, armário ou endereço interno.'],
+    ['• CA do EPI: não vai na planilha. Ele é preenchido na hora da entrega ao colaborador (e pode ser corrigido depois no Histórico).'],
     [],
     ['Depois de salvar o arquivo (.xlsx), use Almoxarifado → Importar e selecione esta planilha.'],
   ];

@@ -23,7 +23,7 @@ import { useWorkspace } from '@/lib/workspace';
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { currentWorkspace, currentOrganization, isOrgAdmin } = useWorkspace();
+  const { currentWorkspace, currentOrganization, isOrgAdmin, isAdm } = useWorkspace();
   const wsName = currentWorkspace ? `"${currentWorkspace.name}"` : 'atual';
   const canReset = currentOrganization ? isOrgAdmin(currentOrganization.id) : true;
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -260,6 +260,9 @@ export default function SettingsPage() {
             </div>
           </section>
 
+          {/* Backup e zona de perigo: só o ADM da organização. */}
+          {isAdm ? (
+          <>
           <section className="bg-blue-50/40 rounded-2xl border border-blue-100 shadow-sm overflow-hidden">
             <div className="p-6 border-b border-blue-100 bg-blue-50 flex items-center gap-2 text-blue-900 font-bold">
               <FileArchive size={18} />
@@ -372,6 +375,8 @@ export default function SettingsPage() {
               </div>
             </div>
           </section>
+          </>
+          ) : null}
       </div>
 
       {/* Confirmation Modal */}

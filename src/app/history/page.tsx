@@ -44,6 +44,7 @@ interface Movement {
   items: {
     description: string;
     unit: string;
+    category?: string | null;
   } | null;
   employees?: {
     full_name: string;
@@ -81,6 +82,8 @@ function defaultFromDate(): string {
   return isoDay(d);
 }
 
+const isEpiCategory = (c: string | null | undefined) => String(c ?? '').trim().toUpperCase().startsWith('EPI');
+
 function movementCounterpartyLabel(m: Movement): string {
   const emp = m.employees?.full_name;
   if (emp) return formatEmployeeName(emp);
@@ -94,6 +97,19 @@ function movementCounterpartyLabel(m: Movement): string {
 
 export default function HistoryPage() {
   const [movements, setMovements] = useState<Movement[]>([]);
+
+  /** CA do EPI informado depois da entrega. */
+  const editCa = async (m: Movement) => {
+    const v = window.prompt('Nº do CA desta entrega (deixe vazio para tirar):', m.ca_number ?? '');
+    if (v === null) return;
+    const ca = v.trim().slice(0, 40) || null;
+    const { data, error } = await supabase.from('movements').update({ ca_number: ca }).eq('id', m.id).select('id');
+    if (error || !data?.length) {
+      alert(`Não foi possível salvar o CA${error ? `: ${error.message}` : ' (sem permissão).'}`);
+      return;
+    }
+    setMovements((prev) => prev.map((x) => (x.id === m.id ? { ...x, ca_number: ca } : x)));
+  };
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -122,7 +138,7 @@ export default function HistoryPage() {
       let q = supabase
         .from('movements')
         .select(
-          'id, created_at, quantity, type, reason, tag, note, document, batch_id, ca_number, employee_id, work_site_id, items(description, unit), employees(full_name), work_sites(name, kind)'
+          'id, created_at, quantity, type, reason, tag, note, document, batch_id, ca_number, employee_id, work_site_id, items(description, unit, category), employees(full_name), work_sites(name, kind)'
         )
         .order('created_at', { ascending: false })
         .order('id', { ascending: false });
@@ -396,8 +412,15 @@ export default function HistoryPage() {
                             {move.tag && reason !== 'descarte' ? (
                               <span className="text-[10px] font-mono text-slate-400">TAG {move.tag}</span>
                             ) : null}
-                            {move.ca_number ? (
-                              <span className="text-[10px] font-mono text-slate-400">CA {move.ca_number}</span>
+                            {move.ca_number || (move.employee_id && isEpiCategory(move.items?.category)) ? (
+                              <button
+                                type="button"
+                                onClick={() => void editCa(move)}
+                                title="Corrigir o CA desta entrega"
+                                className="self-start text-[10px] font-mono text-slate-400 hover:text-secondary hover:underline"
+                              >
+                                {move.ca_number ? `CA ${move.ca_number}` : '+ informar CA'}
+                              </button>
                             ) : null}
                             {move.document || move.note ? (
                               <span className="text-[11px] text-slate-500 max-w-xs">
