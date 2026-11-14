@@ -7,6 +7,7 @@ import { formatEmployeeName } from '@/lib/employeeName';
 import { registerMovement, receiptNumber, MOVEMENT_DOCUMENT_MAX, MOVEMENT_NOTE_MAX } from '@/lib/movements';
 import { openPrintable, buildReceiptHtml, loadCompanyInfo } from '@/lib/printDocs';
 import { MovementDocAttach } from '@/components/EquipmentDocuments';
+import { TagPlate } from '@/components/TagPlate';
 import {
   X,
   ArrowUpRight,
@@ -592,7 +593,7 @@ export default function QuickMovementModal({
                     TAG cadastrada do item
                   </label>
                   <div className="w-full p-3 bg-slate-100 border border-slate-200 rounded-lg font-bold tracking-wide text-primary">
-                    {registeredTag || 'Sem TAG cadastrada'}
+                    {registeredTag ? <TagPlate size="md">{registeredTag}</TagPlate> : 'Sem TAG cadastrada'}
                   </div>
                   <div className="text-[10px] text-slate-400 font-bold">
                     A TAG é definida somente no cadastro do item e será usada automaticamente no histórico da movimentação.

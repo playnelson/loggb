@@ -16,6 +16,7 @@ import {
   type MovementReason,
 } from '@/lib/movements';
 import { EQUIPMENT_DOC_COLUMNS, openEquipmentDoc, type EquipmentDoc } from '@/lib/equipmentDocs';
+import { TagPlate } from '@/components/TagPlate';
 import {
   Users,
   Paperclip,
@@ -476,7 +477,7 @@ export default function HistoryPage() {
                               {formatProductLabelDisplay(move.items?.description)}
                             </p>
                             {movementTag(move) ? (
-                              <span className="text-[10px] font-mono text-slate-400">TAG {movementTag(move)}</span>
+                              <TagPlate size="xs">{movementTag(move)}</TagPlate>
                             ) : null}
                             {readOnly ? (
                               move.ca_number ? <span className="text-[10px] font-mono text-slate-400">CA {move.ca_number}</span> : null

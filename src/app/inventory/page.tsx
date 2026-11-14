@@ -29,6 +29,8 @@ import { downloadInventoryImportTemplate } from '@/lib/inventoryImportTemplate';
 import { downloadInventoryWorkbookFromTemplate } from '@/lib/inventoryExportTemplate';
 import { SuggestInput } from '@/components/SuggestInput';
 import { PhotoField, PhotoThumb } from '@/components/PhotoThumb';
+import { TagPlate } from '@/components/TagPlate';
+import { compareSizes, sizeLabel, sizeRange, splitSize, type ItemSize } from '@/lib/itemSizes';
 import { ITEM_PHOTOS_BUCKET, signedPhotoUrls, uploadPhoto } from '@/lib/photos';
 import { formatEmployeeName, normalizeSearchText } from '@/lib/employeeName';
 import { useWorkspace } from '@/lib/workspace';
@@ -121,7 +123,15 @@ interface Product {
 
 type ListEntry =
   | { kind: 'item'; p: Product; nested: boolean }
-  | { kind: 'group'; key: string; items: Product[]; open: boolean };
+  | { kind: 'group'; key: string; items: Product[]; open: boolean; sizes: ItemSize[] | null; title: string };
+
+/** Texto da plaquinha do item: a TAG cadastrada ou, em botas e fardamentos, o tamanho. */
+function plateText(p: { tag?: string | null; description: string }): string {
+  const tag = p.tag?.trim();
+  if (tag) return tag;
+  const s = splitSize(p.description);
+  return s ? sizeLabel(s) : '';
+}
 
 interface ItemCategory {
   id: string;
@@ -970,10 +980,15 @@ function InventoryContent() {
     uma linha com o total ("12 unidades") e, ao abrir, uma linha por tag.
   */
   const listEntries = useMemo(() => {
+    const keyOf = (p: Product): string | null => {
+      if (p.unique_item) return `u:${normalizeSearchText(p.description)}`;
+      const s = splitSize(p.description);
+      return s ? `s:${normalizeSearchText(s.base)}` : null;
+    };
     const groups = new Map<string, Product[]>();
     for (const p of filteredProducts) {
-      if (!p.unique_item) continue;
-      const k = normalizeSearchText(p.description);
+      const k = keyOf(p);
+      if (!k) continue;
       const g = groups.get(k);
       if (g) g.push(p);
       else groups.set(k, [p]);
@@ -982,20 +997,26 @@ function InventoryContent() {
     const out: ListEntry[] = [];
     const done = new Set<string>();
     for (const p of filteredProducts) {
-      const k = p.unique_item ? normalizeSearchText(p.description) : '';
+      const k = keyOf(p);
       const g = k ? groups.get(k) : undefined;
       if (!g || g.length < 2) {
         out.push({ kind: 'item', p, nested: false });
         continue;
       }
-      if (done.has(k)) continue;
+      if (!k || done.has(k)) continue;
       done.add(k);
       // Abre sozinho quando a busca é por uma tag (e não pela descrição).
       const byTag =
         !!q && !normalizeSearchText(p.description).includes(q) && g.some((x) => normalizeSearchText(x.tag || '').includes(q));
       const open = openGroups.has(k) || byTag || !!focusItemId;
-      out.push({ kind: 'group', key: k, items: g, open });
-      if (open) for (const x of g) out.push({ kind: 'item', p: x, nested: true });
+      const sized = k.startsWith('s:');
+      const items = sized
+        ? [...g].sort((a, b) => compareSizes(splitSize(a.description), splitSize(b.description)))
+        : g;
+      const sizes = sized ? items.map((x) => splitSize(x.description)).filter((x): x is ItemSize => !!x) : null;
+      const title = sized ? (sizes?.[0]?.base ?? p.description) : p.description;
+      out.push({ kind: 'group', key: k, items, open, sizes, title });
+      if (open) for (const x of items) out.push({ kind: 'item', p: x, nested: true });
     }
     return out;
   }, [filteredProducts, filterDescription, openGroups, focusItemId]);
@@ -1862,15 +1883,24 @@ function InventoryContent() {
                             {entry.open ? <ChevronDown size={18} className="shrink-0 text-primary" /> : <ChevronRight size={18} className="shrink-0 text-primary" />}
                             {photo ? <PhotoThumb url={photo} size={44} /> : null}
                             <div className="min-w-0">
-                              <div className="font-bold text-primary text-base">{formatProductLabelDisplay(first.description)}</div>
+                              <div className="font-bold text-primary text-base">{formatProductLabelDisplay(entry.title)}</div>
                               <div className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-primary text-white text-[10px] font-bold">
-                                <Layers size={11} /> {entry.items.length} unidades com tag
+                                <Layers size={11} />
+                                {entry.sizes
+                                  ? `${entry.items.length} tamanhos · ${sizeRange(entry.sizes)}`
+                                  : `${entry.items.length} unidades com tag`}
                               </div>
                             </div>
                           </div>
                         </td>
                         <td className="px-4 py-2.5 text-xs text-center border-x border-slate-50">
-                          <span className="px-2 py-1 rounded-md font-bold text-[10px] uppercase tracking-tighter bg-slate-50 text-slate-400">Não</span>
+                          <span
+                            className={`px-2 py-1 rounded-md font-bold text-[10px] uppercase tracking-tighter ${
+                              first.consumable ? 'bg-green-50 text-green-600' : 'bg-slate-50 text-slate-400'
+                            }`}
+                          >
+                            {first.consumable ? 'Sim' : 'Não'}
+                          </span>
                         </td>
                         <td className="px-4 py-2.5 text-center bg-slate-50/30">
                           <span className="font-bold text-sm text-primary">{formatQty(g.estoque)}</span>
@@ -1904,7 +1934,7 @@ function InventoryContent() {
                         <td className="px-4 py-2.5" />
                         <td className="px-4 py-2.5 text-right">
                           <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-500 whitespace-nowrap">
-                            {entry.open ? 'Fechar' : 'Ver as tags'}
+                            {entry.open ? 'Fechar' : entry.sizes ? 'Ver tamanhos' : 'Ver as tags'}
                           </span>
                         </td>
                       </tr>
@@ -1929,10 +1959,9 @@ function InventoryContent() {
                         <div className="min-w-0">
                         <div className="font-bold text-primary text-base">{formatProductLabelDisplay(p.description)}</div>
                         <div className="text-[10px] text-slate-400 uppercase font-bold tracking-tight">{p.location || 'Sem local definido'} • {p.unit}</div>
-                        {p.tag ? (
-                          <div className="text-[10px] text-slate-500 font-mono mt-1 flex items-center gap-1">
-                            <Tag size={10} className="shrink-0 text-slate-400" />
-                            {p.tag}
+                        {plateText(p) ? (
+                          <div className="mt-1">
+                            <TagPlate>{plateText(p)}</TagPlate>
                           </div>
                         ) : null}
                         {p.is_rented ? (
@@ -2202,10 +2231,11 @@ function InventoryContent() {
                   >
                     <div className="flex items-start gap-2">
                       {entry.open ? <ChevronDown size={18} className="mt-0.5 shrink-0" /> : <ChevronRight size={18} className="mt-0.5 shrink-0" />}
-                      <span className="font-bold text-primary text-base leading-snug">{formatProductLabelDisplay(entry.items[0].description)}</span>
+                      <span className="font-bold text-primary text-base leading-snug">{formatProductLabelDisplay(entry.title)}</span>
                     </div>
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-primary text-white text-[11px] font-bold">
-                      <Layers size={12} /> {entry.items.length} unidades com tag
+                      <Layers size={12} />
+                      {entry.sizes ? `${entry.items.length} tamanhos · ${sizeRange(entry.sizes)}` : `${entry.items.length} unidades com tag`}
                     </span>
                     {groupChips(entry.items)}
                   </button>
@@ -2230,11 +2260,10 @@ function InventoryContent() {
                     <p className="text-[11px] text-slate-500 font-bold mt-1 uppercase tracking-tight">
                       {p.location || 'Sem local'} · {p.unit}
                     </p>
-                    {p.tag ? (
-                      <p className="text-[11px] text-slate-500 font-mono mt-1 flex items-center gap-1">
-                        <Tag size={12} className="shrink-0" />
-                        {p.tag}
-                      </p>
+                    {plateText(p) ? (
+                      <div className="mt-1.5">
+                        <TagPlate>{plateText(p)}</TagPlate>
+                      </div>
                     ) : null}
                     <div className="flex flex-wrap gap-2 mt-2">
                       <span
@@ -2502,7 +2531,7 @@ function InventoryContent() {
                           </span>{' '}
                           {historyItem.unit}
                           {move.tag && reason !== 'descarte' ? (
-                            <span className="ml-2 text-[10px] font-mono text-slate-400">TAG {move.tag}</span>
+                            <TagPlate size="xs" className="ml-2">{move.tag}</TagPlate>
                           ) : null}
                         </p>
                         {move.document || move.note ? (
@@ -3007,9 +3036,8 @@ function InventoryContent() {
                     />
                   )}
                   {cartPickedItem?.unique_item && cartPickedItem.tag?.trim() && (
-                    <div className="md:col-span-3 p-3 bg-white border border-slate-200 rounded-lg text-sm font-bold text-secondary flex items-center gap-2">
-                      <Tag size={14} />
-                      {cartPickedItem.tag.trim()}
+                    <div className="md:col-span-3 p-3 bg-white border border-slate-200 rounded-lg flex items-center">
+                      <TagPlate size="md">{cartPickedItem.tag.trim()}</TagPlate>
                     </div>
                   )}
                   <button
@@ -3037,12 +3065,7 @@ function InventoryContent() {
                         </div>
                         <div className="text-[10px] text-slate-400 font-bold uppercase flex items-center gap-2">
                           {line.unit}
-                          {line.tag && (
-                            <span className="inline-flex items-center gap-1 text-secondary">
-                              <Tag size={10} />
-                              {line.tag}
-                            </span>
-                          )}
+                          {line.tag && <TagPlate size="xs">{line.tag}</TagPlate>}
                         </div>
                         {line.epi ? (
                           <input

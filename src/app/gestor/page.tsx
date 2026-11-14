@@ -11,6 +11,7 @@ import { formatDateTimeBR, useWorkspace, workspaceKindLabel } from '@/lib/worksp
 import { OrgLogo } from '@/components/OrganizationSetup';
 import AlmoxarifadoTabs, { itemInAlmox, useAlmoxSelection, useAlmoxarifados } from '@/components/AlmoxarifadoTabs';
 
+import { TagPlate } from '@/components/TagPlate';
 type StockItem = {
   id: string;
   code: string | null;
@@ -275,7 +276,12 @@ export default function GestorPage() {
                     <div className="flex items-start justify-between gap-3">
                       <span className="font-bold text-primary text-sm">
                         {i.description}
-                        {i.tag ? <span className="block text-[11px] font-mono font-normal text-slate-500">TAG {i.tag}{holdersOf(i) ? ` · com ${holdersOf(i)}` : ''}</span> : null}
+                        {i.tag ? (
+                          <span className="flex flex-wrap items-center gap-1.5 mt-0.5 text-[11px] font-normal text-slate-500">
+                            <TagPlate size="xs">{i.tag}</TagPlate>
+                            {holdersOf(i) ? `com ${holdersOf(i)}` : ''}
+                          </span>
+                        ) : null}
                       </span>
                       <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full shrink-0 ${st.cls}`}>{st.label}</span>
                     </div>
@@ -315,9 +321,9 @@ export default function GestorPage() {
                         <td className="px-3 py-2.5 font-bold text-primary">
                           {i.description}
                           {i.tag ? (
-                            <span className="block text-[11px] font-mono font-normal text-slate-500">
-                              TAG {i.tag}
-                              {holdersOf(i) ? <span className="font-sans font-semibold text-secondary"> · com {holdersOf(i)}</span> : null}
+                            <span className="flex flex-wrap items-center gap-1.5 mt-0.5 text-[11px] font-normal text-slate-500">
+                              <TagPlate size="xs">{i.tag}</TagPlate>
+                              {holdersOf(i) ? <span className="font-semibold text-secondary">com {holdersOf(i)}</span> : null}
                             </span>
                           ) : null}
                         </td>

@@ -21,6 +21,7 @@ import { type FichaPossessionRow } from '@/lib/carteiraFichasTxt';
 import { downloadEmployeeWalletWorkbook } from '@/lib/employeeWalletExcel';
 import { downloadEpiFichaExcel } from '@/lib/carteiraFichasExcel';
 
+import { TagPlate } from '@/components/TagPlate';
 interface Possession {
   item_id: string;
   quantity: number;
@@ -1688,8 +1689,7 @@ export default function StaffPage() {
                             </h4>
                             {m.tag && (
                               <div className="mt-2 inline-flex items-center gap-2 bg-secondary/10 border border-secondary/20 px-2 py-1 rounded-lg">
-                                <span className="text-[9px] font-bold text-secondary uppercase tracking-wider">TAG</span>
-                                <span className="text-[11px] font-bold text-primary font-mono tracking-wide">{String(m.tag)}</span>
+                                <TagPlate size="xs">{String(m.tag)}</TagPlate>
                               </div>
                             )}
                             <div className="flex items-center justify-between mt-3 pt-2 border-t border-slate-100">
@@ -1981,8 +1981,7 @@ export default function StaffPage() {
                               </div>
                               {m.tag && (
                                 <div className="mt-1 inline-flex items-center gap-2 bg-secondary/10 border border-secondary/20 px-2 py-1 rounded-lg">
-                                  <span className="text-[9px] font-bold text-secondary uppercase tracking-wider">TAG</span>
-                                  <span className="text-[11px] font-bold text-primary font-mono tracking-wide">{String(m.tag)}</span>
+                                  <TagPlate size="xs">{String(m.tag)}</TagPlate>
                                 </div>
                               )}
                             </div>

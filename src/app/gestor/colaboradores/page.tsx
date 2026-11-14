@@ -10,6 +10,7 @@ import { useWorkspace } from '@/lib/workspace';
 import { EQUIPMENT_DOC_COLUMNS, type EquipmentDoc } from '@/lib/equipmentDocs';
 import { EquipmentDocRow } from '@/components/EquipmentDocuments';
 
+import { TagPlate } from '@/components/TagPlate';
 type PossessionItem = { description: string; unit: string | null; tag?: string | null; category?: string | null };
 
 type PossessionRow = {
@@ -283,7 +284,7 @@ export default function GestorColaboradoresPage() {
                                 <li key={i} className="flex justify-between gap-3 border-b border-slate-200/70 py-1">
                                   <span className="truncate">
                                     {it?.description ?? 'Item removido'}
-                                    {it?.tag ? <span className="ml-1 font-mono text-[10px] text-slate-400">TAG {it.tag}</span> : null}
+                                    {it?.tag ? <TagPlate size="xs" className="ml-1">{it.tag}</TagPlate> : null}
                                   </span>
                                   <span className="font-semibold text-primary whitespace-nowrap">
                                     {num(p.quantity)} {it?.unit ?? ''}
