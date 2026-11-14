@@ -36,7 +36,10 @@ export function splitSize(description: string | null | undefined): ItemSize | nu
   const base = m[1].replace(/[\s\-–:,]+$/, '').trim();
   if (!base || !WEAR.test(base)) return null;
   const size = m[2];
-  return { base, size, numeric: /^\d+$/.test(size) };
+  // Nome para mostrar com os acentos de volta (ex.: SEGURANÇA); mesmo tamanho de texto que `d`.
+  const shown = String(description).normalize('NFC').toUpperCase().replace(/\s+/g, ' ').trim();
+  const withAccents = shown.length === d.length ? shown.slice(0, base.length) : base;
+  return { base: withAccents, size, numeric: /^\d+$/.test(size) };
 }
 
 /** Texto da plaquinha: "Nº 40" ou "TAM GG". */
