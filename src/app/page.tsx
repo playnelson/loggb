@@ -8,11 +8,14 @@ import { BarChart3, StickyNote } from 'lucide-react';
 import { AlmoxHomeDashboard } from '@/components/AlmoxHomeDashboard';
 import { HomeAlertsFeed } from '@/components/HomeAlertsFeed';
 import { MuralPostIts } from '@/components/MuralPostIts';
+import { useWorkspace } from '@/lib/workspace';
 
 type HomeSection = 'resumo' | 'mural';
 
 export default function Home() {
   const [homeSection, setHomeSection] = useState<HomeSection>('resumo');
+  // Lembretes (aferição, validade, aluguéis) só para quem administra almoxarifado.
+  const { managesAnyArea } = useWorkspace();
 
   const sectionTabs: { id: HomeSection; label: string; icon: ReactNode }[] = [
     { id: 'resumo', label: 'Resumo', icon: <BarChart3 size={16} /> },
@@ -52,7 +55,7 @@ export default function Home() {
 
       {homeSection === 'resumo' && (
         <>
-          <HomeAlertsFeed />
+          {managesAnyArea ? <HomeAlertsFeed /> : null}
           <AlmoxHomeDashboard />
         </>
       )}

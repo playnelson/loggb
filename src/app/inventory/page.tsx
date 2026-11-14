@@ -8,7 +8,7 @@ import AlmoxarifadoTabs, { itemInAlmox, useAlmoxSelection, useAlmoxarifados } fr
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { formatProductLabelDisplay, normalizeProductLabelForSave } from '@/lib/productDisplayText';
-import { Plus, AlertCircle, X, FileUp, Users, History, Edit, Trash2, Loader2, ArrowUpRight, ArrowDownLeft, Tags, ShoppingCart, User, Minus, Tag, Download, MapPin, FilterX, Printer, QrCode } from 'lucide-react';
+import { Plus, AlertCircle, X, FileUp, Users, History, Edit, Trash2, Loader2, ArrowUpRight, ArrowDownLeft, Tags, ShoppingCart, User, Minus, Tag, Download, MapPin, FilterX, Printer, QrCode, ChevronDown, ChevronRight, Layers } from 'lucide-react';
 import ImportSpreadsheet from '@/components/ImportSpreadsheet';
 import QuickMovementModal from '@/components/QuickMovementModal';
 import { itemCodeFromDescription } from '@/lib/itemCode';
@@ -114,6 +114,10 @@ interface Product {
   possession?: PossessionDetail[];
   site_possession?: SitePossessionDetail[];
 }
+
+type ListEntry =
+  | { kind: 'item'; p: Product; nested: boolean }
+  | { kind: 'group'; key: string; items: Product[]; open: boolean };
 
 interface ItemCategory {
   id: string;
@@ -226,6 +230,8 @@ function InventoryContent() {
   const [historyItem, setHistoryItem] = useState<Product | null>(null);
   const [itemMovements, setItemMovements] = useState<ItemMovement[]>([]);
   const [activePopover, setActivePopover] = useState<string | null>(null);
+  /** Grupos de itens com tag (mesma descrição) abertos na lista. */
+  const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set());
   const [adjustItem, setAdjustItem] = useState<Product | null>(null);
   const [adjustQty, setAdjustQty] = useState<number>(0);
 
@@ -913,8 +919,73 @@ function InventoryContent() {
     filterCart,
   ].join('|');
   const visibleCount = visibleState.key === filterKey ? visibleState.count : ITEMS_PAGE_SIZE;
-  const visibleProducts = filteredProducts.slice(0, visibleCount);
-  const hasMoreToShow = filteredProducts.length > visibleCount;
+  /*
+    Itens com tag (únicos) que têm a mesma descrição viram um grupo:
+    uma linha com o total ("12 unidades") e, ao abrir, uma linha por tag.
+  */
+  const listEntries = useMemo(() => {
+    const groups = new Map<string, Product[]>();
+    for (const p of filteredProducts) {
+      if (!p.unique_item) continue;
+      const k = normalizeSearchText(p.description);
+      const g = groups.get(k);
+      if (g) g.push(p);
+      else groups.set(k, [p]);
+    }
+    const q = normalizeSearchText(filterDescription);
+    const out: ListEntry[] = [];
+    const done = new Set<string>();
+    for (const p of filteredProducts) {
+      const k = p.unique_item ? normalizeSearchText(p.description) : '';
+      const g = k ? groups.get(k) : undefined;
+      if (!g || g.length < 2) {
+        out.push({ kind: 'item', p, nested: false });
+        continue;
+      }
+      if (done.has(k)) continue;
+      done.add(k);
+      // Abre sozinho quando a busca é por uma tag (e não pela descrição).
+      const byTag =
+        !!q && !normalizeSearchText(p.description).includes(q) && g.some((x) => normalizeSearchText(x.tag || '').includes(q));
+      const open = openGroups.has(k) || byTag || !!focusItemId;
+      out.push({ kind: 'group', key: k, items: g, open });
+      if (open) for (const x of g) out.push({ kind: 'item', p: x, nested: true });
+    }
+    return out;
+  }, [filteredProducts, filterDescription, openGroups, focusItemId]);
+  const visibleEntries = listEntries.slice(0, visibleCount);
+  const hasMoreToShow = listEntries.length > visibleCount;
+
+  const toggleGroup = (key: string) =>
+    setOpenGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
+  const groupSummary = (items: Product[]) => {
+    let estoque = 0;
+    let posse = 0;
+    let locais = 0;
+    for (const x of items) {
+      estoque += Number(x.quantity_current) || 0;
+      posse += possessionTotalForProduct(x);
+      locais += sitePossessionTotal(x);
+    }
+    return { estoque, posse, locais, total: estoque + posse + locais };
+  };
+
+  const groupChips = (items: Product[]) => {
+    const g = groupSummary(items);
+    return (
+      <div className="flex flex-wrap gap-1.5 text-[10px] font-bold uppercase tracking-tight">
+        <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700">{formatQty(g.estoque)} no estoque</span>
+        {g.posse > 0 ? <span className="px-2 py-0.5 rounded-md bg-sky-50 text-sky-800">{formatQty(g.posse)} com colaboradores</span> : null}
+        {g.locais > 0 ? <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-800">{formatQty(g.locais)} em locais</span> : null}
+      </div>
+    );
+  };
 
   useEffect(() => {
     const anchor = loadMoreAnchorRef.current;
@@ -1722,7 +1793,30 @@ function InventoryContent() {
                   <td colSpan={9} className="px-4 py-12 text-center text-slate-400">Nenhum item encontrado.</td>
                 </tr>
               ) : (
-                visibleProducts.map((p) => {
+                visibleEntries.map((entry) => {
+                  if (entry.kind === 'group') {
+                    const first = entry.items[0];
+                    return (
+                      <tr key={`g-${entry.key}`} className="bg-slate-50/70 hover:bg-slate-100 cursor-pointer" onClick={() => toggleGroup(entry.key)}>
+                        <td colSpan={9} className="px-4 py-2.5">
+                          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+                            <span className="inline-flex items-center gap-2 font-bold text-primary text-base">
+                              {entry.open ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+                              {formatProductLabelDisplay(first.description)}
+                            </span>
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-primary text-white text-[11px] font-bold">
+                              <Layers size={12} /> {entry.items.length} unidades com tag
+                            </span>
+                            {groupChips(entry.items)}
+                            <span className="ml-auto text-[11px] font-bold text-slate-500">
+                              {entry.open ? 'Fechar' : 'Ver as tags'}
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  }
+                  const p = entry.p;
                   const isLowStock = p.quantity_min > 0 && p.quantity_current <= p.quantity_min;
                   const totalInPossession = possessionTotalForProduct(p);
                   const totalAtSites = sitePossessionTotal(p);
@@ -1731,8 +1825,11 @@ function InventoryContent() {
                   const popoverSitesKey = `sites-${p.id}`;
                   
                   return (
-                    <tr key={p.id} className="hover:bg-slate-50 transition-colors group">
-                      <td className="px-4 py-2.5">
+                    <tr
+                      key={p.id}
+                      className={`hover:bg-slate-50 transition-colors group ${entry.nested ? 'bg-slate-50/40' : ''}`}
+                    >
+                      <td className={`px-4 py-2.5 ${entry.nested ? 'pl-10 border-l-4 border-l-slate-200' : ''}`}>
                         <div className="font-bold text-primary text-base">{formatProductLabelDisplay(p.description)}</div>
                         <div className="text-[10px] text-slate-400 uppercase font-bold tracking-tight">{p.location || 'Sem local definido'} • {p.unit}</div>
                         {p.tag ? (
@@ -1995,7 +2092,27 @@ function InventoryContent() {
           ) : filteredProducts.length === 0 ? (
             <p className="text-center text-slate-400 py-12">Nenhum item encontrado.</p>
           ) : (
-            visibleProducts.map((p) => {
+            visibleEntries.map((entry) => {
+              if (entry.kind === 'group') {
+                return (
+                  <button
+                    key={`g-${entry.key}`}
+                    type="button"
+                    onClick={() => toggleGroup(entry.key)}
+                    className="w-full text-left rounded-2xl border border-slate-300 bg-slate-50 p-4 shadow-sm space-y-2"
+                  >
+                    <div className="flex items-start gap-2">
+                      {entry.open ? <ChevronDown size={18} className="mt-0.5 shrink-0" /> : <ChevronRight size={18} className="mt-0.5 shrink-0" />}
+                      <span className="font-bold text-primary text-base leading-snug">{formatProductLabelDisplay(entry.items[0].description)}</span>
+                    </div>
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-primary text-white text-[11px] font-bold">
+                      <Layers size={12} /> {entry.items.length} unidades com tag
+                    </span>
+                    {groupChips(entry.items)}
+                  </button>
+                );
+              }
+              const p = entry.p;
               const isLowStock = p.quantity_min > 0 && p.quantity_current <= p.quantity_min;
               const totalInPossession = possessionTotalForProduct(p);
               const totalAtSites = sitePossessionTotal(p);
@@ -2003,7 +2120,7 @@ function InventoryContent() {
               return (
                 <div
                   key={p.id}
-                  className="rounded-2xl border border-border bg-white p-4 shadow-sm space-y-3"
+                  className={`rounded-2xl border border-border bg-white p-4 shadow-sm space-y-3 ${entry.nested ? 'ml-4 border-l-4 border-l-slate-300' : ''}`}
                 >
                   <div className="min-w-0">
                     <h3 className="font-bold text-primary text-base leading-snug">
@@ -2232,7 +2349,7 @@ function InventoryContent() {
                 ref={loadMoreAnchorRef}
                 className="py-4 text-center text-xs font-bold text-slate-500"
               >
-                Mostrando {visibleProducts.length} de {filteredProducts.length}. Role at&eacute; o final para ver mais.
+                Mostrando {visibleEntries.length} de {listEntries.length} linhas. Role at&eacute; o final para ver mais.
               </div>
             ) : filteredProducts.length > 0 ? (
               <div className="py-4 text-center text-xs font-bold text-slate-400">
