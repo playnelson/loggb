@@ -27,7 +27,9 @@ import { openPrintable, buildReceiptHtml, loadCompanyInfo, buildQrLabelsHtml } f
 import { fetchAllTenantItems, isLikelyMissingColumn } from '@/lib/tenantItems';
 import { downloadInventoryImportTemplate } from '@/lib/inventoryImportTemplate';
 import { downloadInventoryWorkbookFromTemplate } from '@/lib/inventoryExportTemplate';
-import { CatalogProductAutocomplete } from '@/components/CatalogProductAutocomplete';
+import { SuggestInput } from '@/components/SuggestInput';
+import { PhotoField, PhotoThumb } from '@/components/PhotoThumb';
+import { ITEM_PHOTOS_BUCKET, signedPhotoUrls, uploadPhoto } from '@/lib/photos';
 import { formatEmployeeName, normalizeSearchText } from '@/lib/employeeName';
 import { useWorkspace } from '@/lib/workspace';
 import { useCanApproveDeletion } from '@/lib/deletion';
@@ -101,6 +103,8 @@ interface Product {
   is_rented?: boolean;
   /** TAG / identificador fixo no cadastro do item */
   tag?: string | null;
+  /** Foto do item (pasta privada item-photos). */
+  photo_path?: string | null;
   calibration_due_date?: string | null;
   expiration_date?: string | null;
   /** Nº do Certificado de Aprovação (EPI). */
@@ -185,7 +189,11 @@ function InventoryContent() {
   const searchParams = useSearchParams();
   /** Item aberto pelo QR da etiqueta (?item=<id>): a lista mostra só ele. */
   const focusItemId = searchParams.get('item');
-  const { can, canManageCategory, managesAnyArea } = useWorkspace();
+  const { can, canManageCategory, managesAnyArea, currentWorkspace } = useWorkspace();
+  /** caminho da foto -> link temporário */
+  const [itemPhotos, setItemPhotos] = useState<Record<string, string>>({});
+  const [itemPhotoFile, setItemPhotoFile] = useState<File | null>(null);
+  const [dropItemPhoto, setDropItemPhoto] = useState(false);
   /** Almoxarifados (por categoria) que a pessoa enxerga e o escolhido nas abas. */
   const almox = useAlmoxarifados();
   const [almoxSel, setAlmoxSel] = useAlmoxSelection(almox.list);
@@ -344,6 +352,10 @@ function InventoryContent() {
         }))
       );
       setLoadError(null);
+      const photoPaths = all.map((p) => p.photo_path).filter((x): x is string => !!x);
+      void signedPhotoUrls(supabase, ITEM_PHOTOS_BUCKET, photoPaths).then((urls) => {
+        if (reqId === productsReqIdRef.current) setItemPhotos(urls);
+      });
     } catch (error) {
       console.error('Error fetching products:', error);
       if (reqId === productsReqIdRef.current) {
@@ -394,6 +406,12 @@ function InventoryContent() {
     }
     setWorkSites((data || []) as Array<{ id: string; name: string; kind: string }>);
   }, []);
+
+  // Cada vez que o cadastro abre ou fecha, começa sem foto nova escolhida.
+  useEffect(() => {
+    setItemPhotoFile(null);
+    setDropItemPhoto(false);
+  }, [isModalOpen, editingItem?.id]);
 
   useEffect(() => {
     if (hasBootstrappedRef.current) return;
@@ -719,10 +737,33 @@ function InventoryContent() {
           alert(`Item atualizado, mas houve erro ao limpar carteiras antigas: ${msg}`);
         }
       }
+      const photoErr = await saveItemPhoto(editingItem.id, editingItem.photo_path ?? null);
+      if (photoErr) alert(`Item atualizado, mas a foto não foi salva: ${photoErr}`);
       setEditingItem(null);
       fetchProducts();
     }
     setIsSubmitting(false);
+  };
+
+  /** Envia a foto nova (ou remove a antiga) depois de salvar o item. Devolve a mensagem de erro, se houver. */
+  const saveItemPhoto = async (itemId: string, oldPath: string | null): Promise<string | null> => {
+    if (!itemPhotoFile && !dropItemPhoto) return null;
+    let newPath: string | null = null;
+    if (itemPhotoFile) {
+      if (!currentWorkspace?.id) return 'obra não identificada.';
+      const up = await uploadPhoto(supabase, ITEM_PHOTOS_BUCKET, currentWorkspace.id, 'itens', itemId, itemPhotoFile);
+      if ('error' in up) return up.error;
+      newPath = up.path;
+    }
+    const { error } = await supabase.from('items').update({ photo_path: newPath }).eq('id', itemId);
+    if (error) {
+      if (newPath) await supabase.storage.from(ITEM_PHOTOS_BUCKET).remove([newPath]);
+      return error.message;
+    }
+    if (oldPath) await supabase.storage.from(ITEM_PHOTOS_BUCKET).remove([oldPath]);
+    setItemPhotoFile(null);
+    setDropItemPhoto(false);
+    return null;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -813,6 +854,11 @@ function InventoryContent() {
             'Use "Ajustar estoque" no item para lançar o saldo.'
         );
       }
+    }
+
+    if (created?.id) {
+      const photoErr = await saveItemPhoto(String(created.id), null);
+      if (photoErr) alert(`Item cadastrado, mas a foto não foi salva: ${photoErr}`);
     }
 
     setIsModalOpen(false);
@@ -974,6 +1020,12 @@ function InventoryContent() {
       locais += sitePossessionTotal(x);
     }
     return { estoque, posse, locais, total: estoque + posse + locais };
+  };
+
+  /** Primeira foto do grupo (para a linha do grupo). */
+  const groupPhoto = (items: Product[]) => {
+    const withPhoto = items.find((x) => x.photo_path && itemPhotos[x.photo_path]);
+    return withPhoto?.photo_path ? itemPhotos[withPhoto.photo_path] : undefined;
   };
 
   const groupChips = (items: Product[]) => {
@@ -1802,6 +1854,7 @@ function InventoryContent() {
                           <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
                             <span className="inline-flex items-center gap-2 font-bold text-primary text-base">
                               {entry.open ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+                              {groupPhoto(entry.items) ? <PhotoThumb url={groupPhoto(entry.items)} size={36} /> : null}
                               {formatProductLabelDisplay(first.description)}
                             </span>
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-primary text-white text-[11px] font-bold">
@@ -1830,6 +1883,9 @@ function InventoryContent() {
                       className={`hover:bg-slate-50 transition-colors group ${entry.nested ? 'bg-slate-50/40' : ''}`}
                     >
                       <td className={`px-4 py-2.5 ${entry.nested ? 'pl-10 border-l-4 border-l-slate-200' : ''}`}>
+                        <div className="flex items-start gap-3">
+                        {p.photo_path && itemPhotos[p.photo_path] ? <PhotoThumb url={itemPhotos[p.photo_path]} size={44} /> : null}
+                        <div className="min-w-0">
                         <div className="font-bold text-primary text-base">{formatProductLabelDisplay(p.description)}</div>
                         <div className="text-[10px] text-slate-400 uppercase font-bold tracking-tight">{p.location || 'Sem local definido'} • {p.unit}</div>
                         {p.tag ? (
@@ -1843,6 +1899,8 @@ function InventoryContent() {
                             Equipamento alugado
                           </div>
                         ) : null}
+                        </div>
+                        </div>
                       </td>
                       <td className="px-4 py-2.5 text-xs text-center border-x border-slate-50">
                         <span className={`px-2 py-1 rounded-md font-bold text-[10px] uppercase tracking-tighter ${p.consumable ? 'bg-green-50 text-green-600' : 'bg-slate-50 text-slate-400'}`}>
@@ -2122,7 +2180,9 @@ function InventoryContent() {
                   key={p.id}
                   className={`rounded-2xl border border-border bg-white p-4 shadow-sm space-y-3 ${entry.nested ? 'ml-4 border-l-4 border-l-slate-300' : ''}`}
                 >
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex items-start gap-3">
+                    {p.photo_path && itemPhotos[p.photo_path] ? <PhotoThumb url={itemPhotos[p.photo_path]} size={56} /> : null}
+                    <div className="min-w-0">
                     <h3 className="font-bold text-primary text-base leading-snug">
                       {formatProductLabelDisplay(p.description)}
                     </h3>
@@ -2159,6 +2219,7 @@ function InventoryContent() {
                           Alugado
                         </span>
                       ) : null}
+                    </div>
                     </div>
                   </div>
 
@@ -2457,13 +2518,32 @@ function InventoryContent() {
               </div>
 
               <div className="grid grid-cols-2 gap-4">
-                <CatalogProductAutocomplete
+                <SuggestInput
                   label="Descrição do Produto"
-                  existing={existingItemNames}
+                  options={existingItemNames}
+                  placeholder="Digite o nome do item…"
+                  exactWarning="Já existe um item cadastrado com esse nome."
                   value={formData.description}
                   onChange={(v) => setFormData({ ...formData, description: v })}
                   required
                 />
+                <div className="space-y-1 col-span-2">
+                  <label className="text-xs font-bold uppercase text-slate-400">Foto do item</label>
+                  <PhotoField
+                    currentUrl={
+                      editingItem?.photo_path && !dropItemPhoto ? itemPhotos[editingItem.photo_path] : undefined
+                    }
+                    file={itemPhotoFile}
+                    onPick={(f) => {
+                      setItemPhotoFile(f);
+                      setDropItemPhoto(false);
+                    }}
+                    onRemove={() => {
+                      setItemPhotoFile(null);
+                      setDropItemPhoto(true);
+                    }}
+                  />
+                </div>
                 <div className="col-span-2 flex flex-wrap items-center gap-x-8 gap-y-3 pt-1">
                   <div className="flex items-center gap-3">
                     <input 

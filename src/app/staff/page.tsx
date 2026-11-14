@@ -2,6 +2,8 @@
 
 export const dynamic = 'force-dynamic';
 
+import { SuggestInput } from '@/components/SuggestInput';
+import { cleanProfession, matchProfession, professionOptions } from '@/lib/professions';
 import { useCallback, useMemo, useRef, useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { formatProductLabelDisplay } from '@/lib/productDisplayText';
@@ -236,6 +238,7 @@ function aggregateEpiConsumableBalancesFromMovements(movements: any[]): EpiConsu
 
 export default function StaffPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const roleOptions = useMemo(() => professionOptions(employees.map((x) => x.role)), [employees]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('Todos');
@@ -806,11 +809,22 @@ export default function StaffPage() {
       return;
     }
 
+    // Profissão: usa a escrita da lista; se for nova, confirma antes (evita "SERVENTE" e "SERVENTI").
+    const typedRole = cleanProfession(formData.role);
+    const matchedRole = matchProfession(typedRole, roleOptions);
+    const role = matchedRole ?? typedRole;
+    if (
+      !matchedRole &&
+      !confirm(`"${typedRole}" não está na lista de profissões. Cadastrar como profissão nova?`)
+    ) {
+      setIsSubmitting(false);
+      return;
+    }
     const fullName = normalizeEmployeeNameForSave(formData.full_name);
     const cpfDigits = formData.cpf.replace(/\D/g, '');
     const payload = {
       full_name: fullName,
-      role: formData.role.trim(),
+      role,
       status: formData.status,
       cpf: cpfDigits.length === 11 ? cpfDigits : formData.cpf.trim() || null,
       department: formData.department.trim() || null,
@@ -2271,17 +2285,19 @@ export default function StaffPage() {
                 />
               </div>
 
-              <div className="space-y-1">
-                <label className="text-xs font-bold uppercase text-slate-500">Cargo / Função</label>
-                <input 
-                  required
-                  type="text" 
-                  placeholder="Ex: Téc. Eletricista"
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none"
-                  value={formData.role}
-                  onChange={(e) => setFormData({...formData, role: e.target.value})}
-                />
-              </div>
+              <SuggestInput
+                label="Profissão / função"
+                required
+                placeholder="Comece a digitar: SERVENTE, PEDREIRO…"
+                options={roleOptions}
+                showAllOnFocus
+                groupLabel="Profissões"
+                value={formData.role}
+                onChange={(v) => setFormData({ ...formData, role: v })}
+                className="space-y-1"
+                labelClassName="text-xs font-bold uppercase text-slate-500"
+                inputClassName="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none uppercase"
+              />
 
               <div className="space-y-1">
                 <label className="text-xs font-bold uppercase text-slate-500">CPF</label>

@@ -1,6 +1,7 @@
 import * as XLSXStyle from 'xlsx-js-style';
 import * as XLSX from 'xlsx';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { signedPhotoUrls, uploadPhoto } from './photos';
 
 /* Módulo de Abastecimentos: tipos, formatação e planilha modelo da frota. */
 
@@ -152,55 +153,14 @@ export function mapsUrl(location: string | null | undefined): string | null {
 
 export const FUEL_PHOTOS_BUCKET = 'fuel-photos';
 
-/** Diminui a foto do celular (máx. 1280 px, JPEG) antes de enviar. */
-async function shrinkPhoto(file: File): Promise<Blob> {
-  const url = URL.createObjectURL(file);
-  try {
-    const img = await new Promise<HTMLImageElement>((ok, fail) => {
-      const i = new Image();
-      i.onload = () => ok(i);
-      i.onerror = () => fail(new Error('decode'));
-      i.src = url;
-    });
-    const k = Math.min(1, 1280 / Math.max(img.naturalWidth, img.naturalHeight));
-    const c = document.createElement('canvas');
-    c.width = Math.round(img.naturalWidth * k);
-    c.height = Math.round(img.naturalHeight * k);
-    c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height);
-    const blob = await new Promise<Blob | null>((ok) => c.toBlob(ok, 'image/jpeg', 0.82));
-    if (!blob) throw new Error('encode');
-    return blob;
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
-
 /** Envia a foto do veículo e devolve o caminho salvo (ou a mensagem de erro). */
-export async function uploadVehiclePhoto(
-  client: SupabaseClient,
-  workspaceId: string,
-  vehicleId: string,
-  file: File
-): Promise<{ path: string } | { error: string }> {
-  let blob: Blob;
-  try {
-    blob = await shrinkPhoto(file);
-  } catch {
-    return { error: 'Não consegui abrir essa foto. Use JPG ou PNG.' };
-  }
-  const path = `${workspaceId}/veiculos/${vehicleId}-${Date.now()}.jpg`;
-  const up = await client.storage.from(FUEL_PHOTOS_BUCKET).upload(path, blob, { contentType: 'image/jpeg' });
-  if (up.error) return { error: `Não consegui enviar a foto: ${up.error.message}` };
-  return { path };
+export function uploadVehiclePhoto(client: SupabaseClient, workspaceId: string, vehicleId: string, file: File) {
+  return uploadPhoto(client, FUEL_PHOTOS_BUCKET, workspaceId, 'veiculos', vehicleId, file);
 }
 
 /** Links temporários (1 h) para mostrar as fotos. */
-export async function photoUrls(client: SupabaseClient, paths: string[]): Promise<Record<string, string>> {
-  const out: Record<string, string> = {};
-  if (paths.length === 0) return out;
-  const { data } = await client.storage.from(FUEL_PHOTOS_BUCKET).createSignedUrls(paths, 3600);
-  for (const r of data ?? []) if (r.path && r.signedUrl) out[r.path] = r.signedUrl;
-  return out;
+export function photoUrls(client: SupabaseClient, paths: string[]) {
+  return signedPhotoUrls(client, FUEL_PHOTOS_BUCKET, paths);
 }
 
 export function vehicleLabel(v: Pick<FuelVehicle, 'code' | 'description' | 'plate'> | null | undefined): string {

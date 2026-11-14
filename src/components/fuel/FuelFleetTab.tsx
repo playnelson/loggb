@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useMemo, useRef, useState, type FormEvent } from 'react';
+import { PhotoThumb } from '@/components/PhotoThumb';
 import { Camera, Download, MapPin, Pencil, Plus, Search, Trash2, Truck, Upload, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import {
@@ -422,36 +423,9 @@ export default function FuelFleetTab({ data }: { data: FuelData }) {
   );
 }
 
-/** Miniatura da foto do veículo (ou um ícone quando não tem). Clicar abre a foto grande. */
-export function VehiclePhoto({ url, file, size }: { url?: string; file?: File | null; size: number }) {
-  const [local, setLocal] = useState<string | null>(null);
-  useEffect(() => {
-    if (!file) return;
-    const u = URL.createObjectURL(file);
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLocal(u);
-    return () => {
-      URL.revokeObjectURL(u);
-      setLocal(null);
-    };
-  }, [file]);
-  const src = file ? local : url;
-  const box = { width: size, height: size };
-  if (!src) {
-    return (
-      <div style={box} className="rounded-lg bg-slate-100 text-slate-300 flex items-center justify-center shrink-0">
-        <Truck size={Math.round(size / 2.4)} />
-      </div>
-    );
-  }
-  // eslint-disable-next-line @next/next/no-img-element
-  const img = <img src={src} alt="" style={box} className="rounded-lg object-cover border border-border shrink-0" />;
-  if (file) return img;
-  return (
-    <a href={src} target="_blank" rel="noreferrer" title="Abrir foto">
-      {img}
-    </a>
-  );
+/** Miniatura da foto do veículo (ou um caminhão quando não tem). */
+export function VehiclePhoto(props: { url?: string; file?: File | null; size: number }) {
+  return <PhotoThumb {...props} icon={Truck} />;
 }
 
 export function FuelTypeInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
