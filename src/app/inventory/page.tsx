@@ -1479,7 +1479,7 @@ function InventoryContent() {
               setFormData(blank);
               setIsModalOpen(true);
             }}
-            className="flex w-full md:w-auto items-center justify-center gap-2 bg-primary text-white px-3 py-3 md:px-4 md:py-2 rounded-lg hover:bg-bar-2 transition-all font-medium text-sm min-h-[48px] md:min-h-[36px]"
+            className="flex w-full md:w-auto items-center justify-center gap-2 bg-primary text-white px-3 py-3 md:px-4 md:py-2 rounded-lg hover:bg-bar-2 transition-all font-medium text-sm whitespace-nowrap min-h-[48px] md:min-h-[36px]"
           >
             <Plus size={18} />
             Novo Material
@@ -1487,7 +1487,7 @@ function InventoryContent() {
           <button
             type="button"
             onClick={() => setGroupModal(null)}
-            className="flex w-full md:w-auto items-center justify-center gap-2 bg-white text-primary border border-slate-200 px-3 py-3 md:px-4 md:py-2 rounded-lg hover:bg-slate-50 transition-all font-medium text-sm min-h-[48px] md:min-h-[36px]"
+            className="flex w-full md:w-auto items-center justify-center gap-2 bg-white text-primary border border-slate-200 px-3 py-3 md:px-4 md:py-2 rounded-lg hover:bg-slate-50 transition-all font-medium text-sm whitespace-nowrap min-h-[48px] md:min-h-[36px]"
             title="Juntar itens num grupo (ex.: BOTAS, RÁDIOS)"
           >
             <Layers size={18} className="text-secondary shrink-0" />
