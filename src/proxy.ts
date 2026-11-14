@@ -92,6 +92,6 @@ export const config = {
   // Arquivos públicos ficam fora do login: o navegador precisa buscar sw.js, manifesto e ícones
   // sem ser redirecionado (um sw.js redirecionado impede a atualização do service worker).
   matcher: [
-    '/((?!api|_next/static|_next/image|favicon.ico|sw.js|manifest.webmanifest|icon.png|icons/|templates/).*)',
+    '/((?!api|_next/static|_next/image|favicon.ico|sw.js|manifest.webmanifest|icon.png|apple-icon.png|icons/|templates/).*)',
   ],
 };
