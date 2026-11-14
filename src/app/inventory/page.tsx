@@ -30,6 +30,7 @@ import { downloadInventoryWorkbookFromTemplate } from '@/lib/inventoryExportTemp
 import { SuggestInput } from '@/components/SuggestInput';
 import { PhotoField, PhotoThumb } from '@/components/PhotoThumb';
 import { TagPlate } from '@/components/TagPlate';
+import ItemGroupModal from '@/components/ItemGroupModal';
 import { compareSizes, sizeLabel, sizeRange, splitSize, type ItemSize } from '@/lib/itemSizes';
 import { ITEM_PHOTOS_BUCKET, signedPhotoUrls, uploadPhoto } from '@/lib/photos';
 import { formatEmployeeName, normalizeSearchText } from '@/lib/employeeName';
@@ -107,6 +108,8 @@ interface Product {
   tag?: string | null;
   /** Foto do item (pasta privada item-photos). */
   photo_path?: string | null;
+  /** Grupo criado pelo usuário (itens com o mesmo nome aparecem juntos). */
+  group_name?: string | null;
   calibration_due_date?: string | null;
   expiration_date?: string | null;
   /** Nº do Certificado de Aprovação (EPI). */
@@ -123,7 +126,13 @@ interface Product {
 
 type ListEntry =
   | { kind: 'item'; p: Product; nested: boolean }
-  | { kind: 'group'; key: string; items: Product[]; open: boolean; sizes: ItemSize[] | null; title: string };
+  | { kind: 'group'; key: string; items: Product[]; open: boolean; sizes: ItemSize[] | null; title: string; manual: boolean };
+
+/** Texto do selo do grupo. */
+function groupBadge(e: { items: unknown[]; sizes: ItemSize[] | null; manual: boolean }): string {
+  if (e.sizes) return `${e.items.length} tamanhos · ${sizeRange(e.sizes)}`;
+  return e.manual ? `${e.items.length} itens` : `${e.items.length} unidades com tag`;
+}
 
 /** Texto da plaquinha do item: a TAG cadastrada ou, em botas e fardamentos, o tamanho. */
 function plateText(p: { tag?: string | null; description: string }): string {
@@ -250,6 +259,8 @@ function InventoryContent() {
   const [activePopover, setActivePopover] = useState<string | null>(null);
   /** Grupos de itens com tag (mesma descrição) abertos na lista. */
   const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set());
+  /** Janela de grupo de itens: undefined = fechada; null = grupo novo; texto = editando esse grupo. */
+  const [groupModal, setGroupModal] = useState<string | null | undefined>(undefined);
   const [adjustItem, setAdjustItem] = useState<Product | null>(null);
   const [adjustQty, setAdjustQty] = useState<number>(0);
 
@@ -986,6 +997,7 @@ function InventoryContent() {
   */
   const listEntries = useMemo(() => {
     const keyOf = (p: Product): string | null => {
+      if (p.group_name?.trim()) return `m:${normalizeSearchText(p.group_name)}`;
       if (p.unique_item) return `u:${normalizeSearchText(p.description)}`;
       const s = splitSize(p.description);
       return s ? `s:${normalizeSearchText(s.base)}` : null;
@@ -1004,7 +1016,8 @@ function InventoryContent() {
     for (const p of filteredProducts) {
       const k = keyOf(p);
       const g = k ? groups.get(k) : undefined;
-      if (!g || g.length < 2) {
+      // Grupo criado pelo usuário aparece mesmo com um item só.
+      if (!g || (g.length < 2 && !k?.startsWith('m:'))) {
         out.push({ kind: 'item', p, nested: false });
         continue;
       }
@@ -1014,13 +1027,21 @@ function InventoryContent() {
       const byTag =
         !!q && !normalizeSearchText(p.description).includes(q) && g.some((x) => normalizeSearchText(x.tag || '').includes(q));
       const open = openGroups.has(k) || byTag || !!focusItemId;
-      const sized = k.startsWith('s:');
-      const items = sized
-        ? [...g].sort((a, b) => compareSizes(splitSize(a.description), splitSize(b.description)))
-        : g;
+      const manual = k.startsWith('m:');
+      const allSized = g.every((x) => splitSize(x.description));
+      const sized = k.startsWith('s:') || (manual && allSized);
+      const items = [...g].sort(
+        (a, b) =>
+          compareSizes(splitSize(a.description), splitSize(b.description)) ||
+          a.description.localeCompare(b.description, 'pt-BR')
+      );
       const sizes = sized ? items.map((x) => splitSize(x.description)).filter((x): x is ItemSize => !!x) : null;
-      const title = sized ? (sizes?.[0]?.base ?? p.description) : p.description;
-      out.push({ kind: 'group', key: k, items, open, sizes, title });
+      const title = manual
+        ? String(p.group_name).trim().toUpperCase()
+        : sized
+          ? (sizes?.[0]?.base ?? p.description)
+          : p.description;
+      out.push({ kind: 'group', key: k, items, open, sizes, title, manual });
       if (open) for (const x of items) out.push({ kind: 'item', p: x, nested: true });
     }
     return out;
@@ -1463,10 +1484,32 @@ function InventoryContent() {
             <Plus size={18} />
             Novo Material
           </button>
+          <button
+            type="button"
+            onClick={() => setGroupModal(null)}
+            className="flex w-full md:w-auto items-center justify-center gap-2 bg-white text-primary border border-slate-200 px-3 py-3 md:px-4 md:py-2 rounded-lg hover:bg-slate-50 transition-all font-medium text-sm min-h-[48px] md:min-h-[36px]"
+            title="Juntar itens num grupo (ex.: BOTAS, RÁDIOS)"
+          >
+            <Layers size={18} className="text-secondary shrink-0" />
+            Criar grupo
+          </button>
           </>
           ) : null}
         </div>
       </div>
+
+      {groupModal !== undefined ? (
+        <ItemGroupModal
+          editing={groupModal}
+          items={products.filter((p) => !p.archived_at && itemInAlmox(p.category, almoxSel, almox.list))}
+          canEdit={canManageCategory}
+          onClose={() => setGroupModal(undefined)}
+          onSaved={() => {
+            setGroupModal(undefined);
+            void fetchProducts();
+          }}
+        />
+      ) : null}
 
       <div className="-mt-3 px-1">
         <AlmoxarifadoTabs
@@ -1891,9 +1934,7 @@ function InventoryContent() {
                               <div className="font-bold text-primary text-base">{formatProductLabelDisplay(entry.title)}</div>
                               <div className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-primary text-white text-[10px] font-bold">
                                 <Layers size={11} />
-                                {entry.sizes
-                                  ? `${entry.items.length} tamanhos · ${sizeRange(entry.sizes)}`
-                                  : `${entry.items.length} unidades com tag`}
+                                {groupBadge(entry)}
                               </div>
                             </div>
                           </div>
@@ -1938,8 +1979,21 @@ function InventoryContent() {
                         </td>
                         <td className="px-4 py-2.5" />
                         <td className="px-4 py-2.5 text-right">
-                          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-500 whitespace-nowrap">
-                            {entry.open ? 'Fechar' : entry.sizes ? 'Ver tamanhos' : 'Ver as tags'}
+                          <span className="inline-flex items-center gap-2 text-[11px] font-bold text-slate-500 whitespace-nowrap">
+                            {entry.manual && managesAnyArea ? (
+                              <button
+                                type="button"
+                                className="p-1.5 rounded-lg text-slate-500 hover:text-primary hover:bg-white"
+                                title="Editar o grupo"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setGroupModal(entry.title);
+                                }}
+                              >
+                                <Edit size={16} />
+                              </button>
+                            ) : null}
+                            {entry.open ? 'Fechar' : entry.sizes ? 'Ver tamanhos' : entry.manual ? 'Ver itens' : 'Ver as tags'}
                           </span>
                         </td>
                       </tr>
@@ -2228,22 +2282,29 @@ function InventoryContent() {
             visibleEntries.map((entry) => {
               if (entry.kind === 'group') {
                 return (
-                  <button
-                    key={`g-${entry.key}`}
-                    type="button"
-                    onClick={() => toggleGroup(entry.key)}
-                    className="w-full text-left rounded-2xl border border-slate-300 bg-slate-50 p-4 shadow-sm space-y-2"
-                  >
-                    <div className="flex items-start gap-2">
-                      {entry.open ? <ChevronDown size={18} className="mt-0.5 shrink-0" /> : <ChevronRight size={18} className="mt-0.5 shrink-0" />}
-                      <span className="font-bold text-primary text-base leading-snug">{formatProductLabelDisplay(entry.title)}</span>
-                    </div>
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-primary text-white text-[11px] font-bold">
-                      <Layers size={12} />
-                      {entry.sizes ? `${entry.items.length} tamanhos · ${sizeRange(entry.sizes)}` : `${entry.items.length} unidades com tag`}
-                    </span>
-                    {groupChips(entry.items)}
-                  </button>
+                  <div key={`g-${entry.key}`} className="rounded-2xl border border-slate-300 bg-slate-50 shadow-sm flex items-start">
+                    <button type="button" onClick={() => toggleGroup(entry.key)} className="flex-1 min-w-0 text-left p-4 space-y-2">
+                      <div className="flex items-start gap-2">
+                        {entry.open ? <ChevronDown size={18} className="mt-0.5 shrink-0" /> : <ChevronRight size={18} className="mt-0.5 shrink-0" />}
+                        <span className="font-bold text-primary text-base leading-snug">{formatProductLabelDisplay(entry.title)}</span>
+                      </div>
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-primary text-white text-[11px] font-bold">
+                        <Layers size={12} />
+                        {groupBadge(entry)}
+                      </span>
+                      {groupChips(entry.items)}
+                    </button>
+                    {entry.manual && managesAnyArea ? (
+                      <button
+                        type="button"
+                        className="m-3 p-2 rounded-lg border border-slate-200 bg-white text-slate-500"
+                        aria-label="Editar o grupo"
+                        onClick={() => setGroupModal(entry.title)}
+                      >
+                        <Edit size={16} />
+                      </button>
+                    ) : null}
+                  </div>
                 );
               }
               const p = entry.p;

@@ -11,7 +11,7 @@ export const ITEMS_SELECT_WITHOUT_TAG =
 
 export const ITEMS_SELECT_WITH_TAG = ITEMS_SELECT_WITHOUT_TAG.replace(
   'unique_item,',
-  'unique_item, tag, photo_path,'
+  'unique_item, tag, photo_path, group_name,'
 );
 
 export const ITEMS_SELECT_LEGACY = ITEMS_SELECT_WITHOUT_TAG.replace('is_rented, ', '').replace(
