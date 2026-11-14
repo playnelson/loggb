@@ -36,10 +36,10 @@ export function PhotoThumb({
     );
   }
   // eslint-disable-next-line @next/next/no-img-element
-  const img = <img src={src} alt="" style={box} className="rounded-lg object-cover border border-border shrink-0" />;
+  const img = <img src={src} alt="" style={box} className="rounded-lg object-cover border border-border shrink-0 max-w-none" />;
   if (file) return img;
   return (
-    <a href={src} target="_blank" rel="noreferrer" title="Abrir foto" onClick={(e) => e.stopPropagation()}>
+    <a href={src} target="_blank" rel="noreferrer" title="Abrir foto" className="shrink-0" onClick={(e) => e.stopPropagation()}>
       {img}
     </a>
   );
