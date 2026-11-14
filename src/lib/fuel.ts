@@ -1,11 +1,12 @@
 import * as XLSXStyle from 'xlsx-js-style';
 import * as XLSX from 'xlsx';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 /* Módulo de Abastecimentos: tipos, formatação e planilha modelo da frota. */
 
 export type MeterType = 'km' | 'horas' | 'nenhum';
 export type FuelStatus = 'autorizado' | 'faturado' | 'cancelado';
-export type SourceKind = 'posto' | 'tanque';
+export type SourceKind = 'posto' | 'tanque' | 'comboio';
 
 export type FuelVehicle = {
   id: string;
@@ -16,6 +17,7 @@ export type FuelVehicle = {
   group_name: string | null;
   meter_type: MeterType;
   fuel_type: string | null;
+  photo_path: string | null;
   active: boolean;
 };
 
@@ -25,6 +27,7 @@ export type FuelSource = {
   kind: SourceKind;
   fuel_type: string | null;
   capacity: number | null;
+  location: string | null;
   active: boolean;
 };
 
@@ -51,6 +54,8 @@ export type FuelLog = {
 export type FuelTankEntry = {
   id: string;
   tank_id: string;
+  /** Preenchido = transferência de outro tanque/melosa; vazio = compra. */
+  from_source_id: string | null;
   entry_date: string;
   liters: number;
   unit_price: number | null;
@@ -59,6 +64,21 @@ export type FuelTankEntry = {
   invoice: string | null;
   notes: string | null;
 };
+
+export type FuelTankCount = {
+  id: string;
+  tank_id: string;
+  count_date: string;
+  measured_liters: number;
+  system_liters: number;
+  adjust: boolean;
+  notes: string | null;
+};
+
+export const KIND_LABEL: Record<SourceKind, string> = { posto: 'Posto', tanque: 'Tanque próprio', comboio: 'Melosa (comboio)' };
+
+/** Tanque e melosa guardam saldo; posto não. */
+export const isStorage = (k: SourceKind | undefined) => k === 'tanque' || k === 'comboio';
 
 export const FUEL_TYPES = ['DIESEL S10', 'DIESEL S500', 'GASOLINA COMUM', 'GASOLINA ADITIVADA', 'ETANOL', 'ARLA 32'];
 
@@ -71,11 +91,11 @@ export const METER_LABEL: Record<MeterType, string> = {
 export const METER_SHORT: Record<MeterType, string> = { km: 'km', horas: 'h', nenhum: '' };
 
 export const VEHICLE_COLS =
-  'id, code, description, plate, brand, group_name, meter_type, fuel_type, active';
-export const SOURCE_COLS = 'id, name, kind, fuel_type, capacity, active';
+  'id, code, description, plate, brand, group_name, meter_type, fuel_type, photo_path, active';
+export const SOURCE_COLS = 'id, name, kind, fuel_type, capacity, location, active';
 export const LOG_COLS =
   'id, control_no, log_date, source_id, vehicle_id, requester_employee_id, requester_name, authorized_by, fuel_type, meter_type, meter_reading, liters, unit_price, total, status, invoice, notes';
-export const ENTRY_COLS = 'id, tank_id, entry_date, liters, unit_price, total, supplier, invoice, notes';
+export const ENTRY_COLS = 'id, tank_id, from_source_id, entry_date, liters, unit_price, total, supplier, invoice, notes';
 
 export function asMeterType(v: unknown): MeterType {
   const s = String(v ?? '').trim().toLowerCase();
@@ -116,6 +136,71 @@ export function todayIso(): string {
   const d = new Date();
   const p = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+export const COUNT_COLS = 'id, tank_id, count_date, measured_liters, system_liters, adjust, notes';
+
+/** Link do mapa: usa o link colado ou procura o endereço no Google Maps. */
+export function mapsUrl(location: string | null | undefined): string | null {
+  const s = String(location ?? '').trim();
+  if (!s) return null;
+  if (/^https?:\/\//i.test(s)) return s;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(s)}`;
+}
+
+/* ------------------------------------------------------------ fotos */
+
+export const FUEL_PHOTOS_BUCKET = 'fuel-photos';
+
+/** Diminui a foto do celular (máx. 1280 px, JPEG) antes de enviar. */
+async function shrinkPhoto(file: File): Promise<Blob> {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise<HTMLImageElement>((ok, fail) => {
+      const i = new Image();
+      i.onload = () => ok(i);
+      i.onerror = () => fail(new Error('decode'));
+      i.src = url;
+    });
+    const k = Math.min(1, 1280 / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.naturalWidth * k);
+    c.height = Math.round(img.naturalHeight * k);
+    c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height);
+    const blob = await new Promise<Blob | null>((ok) => c.toBlob(ok, 'image/jpeg', 0.82));
+    if (!blob) throw new Error('encode');
+    return blob;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/** Envia a foto do veículo e devolve o caminho salvo (ou a mensagem de erro). */
+export async function uploadVehiclePhoto(
+  client: SupabaseClient,
+  workspaceId: string,
+  vehicleId: string,
+  file: File
+): Promise<{ path: string } | { error: string }> {
+  let blob: Blob;
+  try {
+    blob = await shrinkPhoto(file);
+  } catch {
+    return { error: 'Não consegui abrir essa foto. Use JPG ou PNG.' };
+  }
+  const path = `${workspaceId}/veiculos/${vehicleId}-${Date.now()}.jpg`;
+  const up = await client.storage.from(FUEL_PHOTOS_BUCKET).upload(path, blob, { contentType: 'image/jpeg' });
+  if (up.error) return { error: `Não consegui enviar a foto: ${up.error.message}` };
+  return { path };
+}
+
+/** Links temporários (1 h) para mostrar as fotos. */
+export async function photoUrls(client: SupabaseClient, paths: string[]): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  if (paths.length === 0) return out;
+  const { data } = await client.storage.from(FUEL_PHOTOS_BUCKET).createSignedUrls(paths, 3600);
+  for (const r of data ?? []) if (r.path && r.signedUrl) out[r.path] = r.signedUrl;
+  return out;
 }
 
 export function vehicleLabel(v: Pick<FuelVehicle, 'code' | 'description' | 'plate'> | null | undefined): string {
@@ -170,7 +255,7 @@ export function downloadFleetTemplate(): void {
   XLSXStyle.writeFile(wb, 'LoggB_modelo_frota.xlsx');
 }
 
-export type FleetImportRow = Omit<FuelVehicle, 'id' | 'active'>;
+export type FleetImportRow = Omit<FuelVehicle, 'id' | 'active' | 'photo_path'>;
 
 const norm = (s: unknown) =>
   String(s ?? '')

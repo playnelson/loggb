@@ -9,6 +9,9 @@ export type FuelData = {
   vehicles: FuelVehicle[];
   sources: FuelSource[];
   employees: { id: string; full_name: string; role: string | null }[];
+  workspaceId: string;
+  /** caminho da foto -> link temporário */
+  photos: Record<string, string>;
   reload: () => Promise<void>;
 };
 

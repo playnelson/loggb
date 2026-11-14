@@ -6,12 +6,14 @@ import { supabase } from '@/lib/supabase';
 import { formatEmployeeName } from '@/lib/employeeName';
 import { buildFuelAuthorizationHtml, openPrintable, type FuelAuthorizationData } from '@/lib/printDocs';
 import {
+  KIND_LABEL,
   LOG_COLS,
   METER_LABEL,
   METER_SHORT,
   fmtDay,
   fmtMoney,
   fmtNum,
+  isStorage,
   parseNumBr,
   todayIso,
   type FuelLog,
@@ -19,7 +21,7 @@ import {
   type FuelVehicle,
   type MeterType,
 } from '@/lib/fuel';
-import { FuelTypeInput } from './FuelFleetTab';
+import { FuelTypeInput, VehiclePhoto } from './FuelFleetTab';
 import { Field, Modal, btnGhost, btnPrimary, dbError, inputCls, thCls, type FuelData } from './FuelUi';
 
 const AUTH_KEY = 'loggb_fuel_autorizador';
@@ -143,7 +145,7 @@ export default function FuelLogsTab({ data, workspaceName, orgId }: { data: Fuel
   };
 
   const statusBadge = (l: FuelLog) => {
-    const tank = sourceById.get(l.source_id)?.kind === 'tanque';
+    const tank = isStorage(sourceById.get(l.source_id)?.kind);
     const [txt, cls] =
       l.status === 'cancelado'
         ? ['Cancelado', 'bg-slate-200 text-slate-600']
@@ -299,7 +301,7 @@ export default function FuelLogsTab({ data, workspaceName, orgId }: { data: Fuel
                       <button type="button" className={btnGhost} onClick={() => printLog(l)} title="Imprimir autorização">
                         <Printer size={13} />
                       </button>
-                      {l.status !== 'cancelado' && s?.kind !== 'tanque' ? (
+                      {l.status !== 'cancelado' && !isStorage(s?.kind) ? (
                         <button type="button" className={btnGhost} onClick={() => setBilling([l])} title="Lançar ou corrigir faturamento">
                           <ReceiptText size={13} /> {l.status === 'faturado' ? 'Corrigir' : 'Faturar'}
                         </button>
@@ -323,6 +325,7 @@ export default function FuelLogsTab({ data, workspaceName, orgId }: { data: Fuel
           vehicles={vehicles.filter((v) => v.active)}
           sources={sources.filter((s) => s.active)}
           employees={employees}
+          photos={data.photos}
           orgId={orgId}
           onClose={() => setCreating(false)}
           onSaved={async () => {
@@ -355,6 +358,7 @@ function NewAuthorization({
   vehicles,
   sources,
   employees,
+  photos,
   orgId,
   onClose,
   onSaved,
@@ -362,6 +366,7 @@ function NewAuthorization({
 }: {
   vehicles: FuelVehicle[];
   sources: FuelSource[];
+  photos: Record<string, string>;
   employees: FuelData['employees'];
   orgId: string;
   onClose: () => void;
@@ -384,7 +389,9 @@ function NewAuthorization({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const source = sources.find((s) => s.id === f.source_id);
-  const isTank = source?.kind === 'tanque';
+  const selPath = vehicles.find((v) => v.id === f.vehicle_id)?.photo_path;
+  const selPhoto = selPath ? photos[selPath] : undefined;
+  const isTank = isStorage(source?.kind);
 
   // Quem autoriza: o último usado neste aparelho ou o colaborador ligado ao usuário.
   useEffect(() => {
@@ -440,7 +447,7 @@ function NewAuthorization({
 
   const pickSource = (id: string) => {
     const s = sources.find((x) => x.id === id);
-    setF((x) => ({ ...x, source_id: id, fuel_type: s?.kind === 'tanque' && s.fuel_type ? s.fuel_type : x.fuel_type }));
+    setF((x) => ({ ...x, source_id: id, fuel_type: isStorage(s?.kind) && s?.fuel_type ? s.fuel_type : x.fuel_type }));
   };
 
   const grouped = useMemo(() => {
@@ -460,7 +467,7 @@ function NewAuthorization({
     if (!f.vehicle_id) return setError('Escolha o equipamento.');
     if (!f.fuel_type.trim()) return setError('Informe o combustível.');
     if (f.meter_type !== 'nenhum' && reading == null) return setError(`Informe ${f.meter_type === 'km' ? 'o km' : 'o horímetro'} atual.`);
-    if (isTank && (!liters || liters <= 0)) return setError('Saída do tanque: informe os litros abastecidos.');
+    if (isTank && (!liters || liters <= 0)) return setError(`Saída ${source?.kind === 'comboio' ? 'da melosa' : 'do tanque'}: informe os litros abastecidos.`);
     if (lastReading && reading != null && reading < lastReading.value) {
       if (!confirm(`A leitura (${fmtNum(reading)}) é menor que a última (${fmtNum(lastReading.value)}). Salvar mesmo assim?`)) return;
     }
@@ -530,14 +537,16 @@ function NewAuthorization({
               <select className={inputCls} value={f.source_id} onChange={(e) => pickSource(e.target.value)}>
                 {sources.map((s) => (
                   <option key={s.id} value={s.id}>
-                    {s.kind === 'tanque' ? 'Tanque próprio: ' : 'Posto: '}
-                    {s.name}
+                    {KIND_LABEL[s.kind]}: {s.name}
                   </option>
                 ))}
               </select>
             </Field>
           </div>
         </div>
+        <div className="flex items-end gap-3">
+        {selPhoto ? <VehiclePhoto url={selPhoto} size={56} /> : null}
+        <div className="flex-1 min-w-0">
         <Field label="Equipamento / veículo">
           <select className={inputCls} value={f.vehicle_id} onChange={(e) => pickVehicle(e.target.value)} required>
             <option value="">Escolha…</option>
@@ -552,6 +561,8 @@ function NewAuthorization({
             ))}
           </select>
         </Field>
+        </div>
+        </div>
         <div className="grid sm:grid-cols-3 gap-3">
           <Field label="Combustível">
             <FuelTypeInput value={f.fuel_type} onChange={(v) => setF({ ...f, fuel_type: v })} />

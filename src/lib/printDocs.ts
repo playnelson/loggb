@@ -813,7 +813,7 @@ export type FuelAuthorizationData = {
   /** yyyy-mm-dd */
   date: string;
   sourceName: string;
-  sourceKind: 'posto' | 'tanque';
+  sourceKind: 'posto' | 'tanque' | 'comboio';
   workspaceName: string;
   requester: string;
   vehicle: string;
@@ -852,7 +852,7 @@ export function buildFuelAuthorizationHtml(d: FuelAuthorizationData): string {
 
   const via = (label: string) => `<div class="fa">
 <table class="ct"><tr><td class="ct-logo">${logoCell}</td>
-<td class="ct-title">Autorização para abastecimento<small>${esc(d.sourceKind === 'tanque' ? 'Tanque' : 'Posto')}: ${esc(d.sourceName)}</small></td>
+<td class="ct-title">Autorização para abastecimento<small>${esc(d.sourceKind === 'tanque' ? 'Tanque' : d.sourceKind === 'comboio' ? 'Melosa' : 'Posto')}: ${esc(d.sourceName)}</small></td>
 <td class="fa-no">Controle<b>${esc(String(d.controlNo).padStart(4, '0'))}</b><span>${esc(label)}</span></td></tr></table>
 <table class="ct">
 <tr><td style="width:55%"><span class="lbl">Empresa:</span> ${esc(companyName)}</td><td><span class="lbl">Obra:</span> ${esc(d.workspaceName || '—')}</td></tr>
@@ -882,7 +882,7 @@ ${d.notes.trim() ? `<tr><td colspan="2"><span class="lbl">Observação:</span> $
 .fa-date{text-align:right;font-size:11px;margin-top:4px;color:#263238}
 .fa-cut{border:0;border-top:1px dashed #90a4ae;margin:0 0 6mm}
 </style>
-${via('1ª via – posto')}
+${via(d.sourceKind === 'posto' ? '1ª via – posto' : '1ª via – abastecedor')}
 <hr class="fa-cut">
 ${via('2ª via – obra')}`;
 }

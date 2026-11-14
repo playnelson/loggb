@@ -1,14 +1,20 @@
 'use client';
 
-import { useMemo, useRef, useState, type FormEvent } from 'react';
-import { Download, Pencil, Plus, Search, Trash2, Upload } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { Camera, Download, MapPin, Pencil, Plus, Search, Trash2, Truck, Upload, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import {
+  FUEL_PHOTOS_BUCKET,
   FUEL_TYPES,
+  KIND_LABEL,
   METER_LABEL,
+  isStorage,
+  mapsUrl,
+  uploadVehiclePhoto,
   downloadFleetTemplate,
   parseFleetFile,
   parseNumBr,
+  VEHICLE_COLS,
   type FleetImportRow,
   type FuelSource,
   type FuelVehicle,
@@ -31,13 +37,16 @@ const emptyVehicle = () => ({
 const up = (s: string) => s.trim().toUpperCase() || null;
 
 export default function FuelFleetTab({ data }: { data: FuelData }) {
-  const { vehicles, sources, reload } = data;
+  const { vehicles, sources, photos, workspaceId, reload } = data;
   const [q, setQ] = useState('');
   const [showInactive, setShowInactive] = useState(false);
   const [editing, setEditing] = useState<FuelVehicle | 'new' | null>(null);
   const [form, setForm] = useState(emptyVehicle());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [dropPhoto, setDropPhoto] = useState(false);
+  const photoRef = useRef<HTMLInputElement>(null);
   const [importRows, setImportRows] = useState<{ rows: FleetImportRow[]; skipped: number } | null>(null);
   const [msg, setMsg] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
@@ -53,6 +62,8 @@ export default function FuelFleetTab({ data }: { data: FuelData }) {
 
   const openVehicle = (v: FuelVehicle | 'new') => {
     setError('');
+    setPhotoFile(null);
+    setDropPhoto(false);
     setEditing(v);
     setForm(
       v === 'new'
@@ -86,10 +97,35 @@ export default function FuelFleetTab({ data }: { data: FuelData }) {
     };
     const res =
       editing === 'new'
-        ? await supabase.from('fuel_vehicles').insert(row)
-        : await supabase.from('fuel_vehicles').update(row).eq('id', (editing as FuelVehicle).id);
+        ? await supabase.from('fuel_vehicles').insert(row).select(VEHICLE_COLS).single()
+        : await supabase.from('fuel_vehicles').update(row).eq('id', (editing as FuelVehicle).id).select(VEHICLE_COLS).single();
+    if (res.error) {
+      setSaving(false);
+      return setError(dbError(res.error));
+    }
+    const saved = res.data as FuelVehicle;
+    if (photoFile || dropPhoto) {
+      let newPath: string | null = null;
+      if (photoFile) {
+        const upl = await uploadVehiclePhoto(supabase, workspaceId, saved.id, photoFile);
+        if ('error' in upl) {
+          // O cadastro ficou salvo; continua no formulário (já como edição) para tentar a foto de novo.
+          setSaving(false);
+          setEditing(saved);
+          await reload();
+          return setError(`${upl.error} O cadastro foi salvo sem a foto nova.`);
+        }
+        newPath = upl.path;
+      }
+      const { error: pe } = await supabase.from('fuel_vehicles').update({ photo_path: newPath }).eq('id', saved.id);
+      if (pe) {
+        if (newPath) await supabase.storage.from(FUEL_PHOTOS_BUCKET).remove([newPath]);
+        setSaving(false);
+        return setError(dbError(pe));
+      }
+      if (saved.photo_path) await supabase.storage.from(FUEL_PHOTOS_BUCKET).remove([saved.photo_path]);
+    }
     setSaving(false);
-    if (res.error) return setError(dbError(res.error));
     setEditing(null);
     await reload();
   };
@@ -98,6 +134,7 @@ export default function FuelFleetTab({ data }: { data: FuelData }) {
     if (!confirm(`Excluir ${v.description}?`)) return;
     const { error: err } = await supabase.from('fuel_vehicles').delete().eq('id', v.id);
     if (err) return alert(dbError(err));
+    if (v.photo_path) await supabase.storage.from(FUEL_PHOTOS_BUCKET).remove([v.photo_path]);
     await reload();
   };
 
@@ -149,6 +186,9 @@ export default function FuelFleetTab({ data }: { data: FuelData }) {
     await reload();
   };
 
+  // Foto que já está salva (some da tela se a pessoa mandou remover ou escolheu outra).
+  const currentPhoto = editing && editing !== 'new' && !dropPhoto && !photoFile ? editing.photo_path : null;
+
   const importPreview = importRows
     ? importRows.rows.reduce(
         (a, r) => (r.code && byCode.has(r.code.trim().toUpperCase()) ? { ...a, upd: a.upd + 1 } : { ...a, add: a.add + 1 }),
@@ -197,6 +237,7 @@ export default function FuelFleetTab({ data }: { data: FuelData }) {
             <table className="w-full text-left text-sm">
               <thead className="bg-slate-50 border-b border-border">
                 <tr>
+                  <th className={thCls} />
                   <th className={thCls}>Código</th>
                   <th className={thCls}>Descrição</th>
                   <th className={thCls}>Placa / patrimônio</th>
@@ -209,6 +250,9 @@ export default function FuelFleetTab({ data }: { data: FuelData }) {
               <tbody className="divide-y divide-border">
                 {list.map((v) => (
                   <tr key={v.id} className={v.active ? '' : 'opacity-50'}>
+                    <td className="pl-3 py-1.5 w-12">
+                      <VehiclePhoto url={v.photo_path ? photos[v.photo_path] : undefined} size={40} />
+                    </td>
                     <td className="px-3 py-2 font-mono text-xs">{v.code || '—'}</td>
                     <td className="px-3 py-2">
                       <div className="font-bold text-primary">{v.description}</div>
@@ -288,6 +332,41 @@ export default function FuelFleetTab({ data }: { data: FuelData }) {
             <Field label="Combustível padrão">
               <FuelTypeInput value={form.fuel_type} onChange={(v) => setForm({ ...form, fuel_type: v })} />
             </Field>
+            <Field label="Foto">
+              <div className="mt-1 flex items-center gap-3">
+                <VehiclePhoto url={currentPhoto ? photos[currentPhoto] : undefined} file={photoFile} size={64} />
+                <button type="button" className={btnGhost} onClick={() => photoRef.current?.click()}>
+                  <Camera size={14} /> {photoFile || currentPhoto ? 'Trocar foto' : 'Tirar ou escolher foto'}
+                </button>
+                {photoFile || currentPhoto ? (
+                  <button
+                    type="button"
+                    className={btnGhost}
+                    onClick={() => {
+                      setPhotoFile(null);
+                      setDropPhoto(true);
+                    }}
+                    aria-label="Remover a foto"
+                  >
+                    <X size={14} />
+                  </button>
+                ) : null}
+                <input
+                  ref={photoRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    e.target.value = '';
+                    if (!f) return;
+                    setPhotoFile(f);
+                    setDropPhoto(false);
+                  }}
+                />
+              </div>
+            </Field>
             <label className="flex items-center gap-2 text-sm text-slate-700">
               <input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} />
               Ativo (aparece nas autorizações)
@@ -343,6 +422,38 @@ export default function FuelFleetTab({ data }: { data: FuelData }) {
   );
 }
 
+/** Miniatura da foto do veículo (ou um ícone quando não tem). Clicar abre a foto grande. */
+export function VehiclePhoto({ url, file, size }: { url?: string; file?: File | null; size: number }) {
+  const [local, setLocal] = useState<string | null>(null);
+  useEffect(() => {
+    if (!file) return;
+    const u = URL.createObjectURL(file);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLocal(u);
+    return () => {
+      URL.revokeObjectURL(u);
+      setLocal(null);
+    };
+  }, [file]);
+  const src = file ? local : url;
+  const box = { width: size, height: size };
+  if (!src) {
+    return (
+      <div style={box} className="rounded-lg bg-slate-100 text-slate-300 flex items-center justify-center shrink-0">
+        <Truck size={Math.round(size / 2.4)} />
+      </div>
+    );
+  }
+  // eslint-disable-next-line @next/next/no-img-element
+  const img = <img src={src} alt="" style={box} className="rounded-lg object-cover border border-border shrink-0" />;
+  if (file) return img;
+  return (
+    <a href={src} target="_blank" rel="noreferrer" title="Abrir foto">
+      {img}
+    </a>
+  );
+}
+
 export function FuelTypeInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
     <>
@@ -356,7 +467,7 @@ export function FuelTypeInput({ value, onChange }: { value: string; onChange: (v
   );
 }
 
-const emptySource = () => ({ name: '', kind: 'posto' as SourceKind, fuel_type: 'DIESEL S10', capacity: '', active: true });
+const emptySource = () => ({ name: '', kind: 'posto' as SourceKind, fuel_type: 'DIESEL S10', capacity: '', location: '', active: true });
 
 function SourcesSection({ sources, reload }: { sources: FuelSource[]; reload: () => Promise<void> }) {
   const [editing, setEditing] = useState<FuelSource | 'new' | null>(null);
@@ -370,7 +481,14 @@ function SourcesSection({ sources, reload }: { sources: FuelSource[]; reload: ()
     setForm(
       s === 'new'
         ? emptySource()
-        : { name: s.name, kind: s.kind, fuel_type: s.fuel_type ?? '', capacity: s.capacity ? String(s.capacity) : '', active: s.active }
+        : {
+            name: s.name,
+            kind: s.kind,
+            fuel_type: s.fuel_type ?? '',
+            capacity: s.capacity ? String(s.capacity) : '',
+            location: s.location ?? '',
+            active: s.active,
+          }
     );
   };
 
@@ -382,8 +500,9 @@ function SourcesSection({ sources, reload }: { sources: FuelSource[]; reload: ()
     const row = {
       name: form.name.trim().toUpperCase(),
       kind: form.kind,
-      fuel_type: form.kind === 'tanque' ? up(form.fuel_type) : null,
-      capacity: form.kind === 'tanque' && cap > 0 ? cap : null,
+      fuel_type: isStorage(form.kind) ? up(form.fuel_type) : null,
+      capacity: isStorage(form.kind) && cap > 0 ? cap : null,
+      location: form.kind === 'posto' ? form.location.trim() || null : null,
       active: form.active,
     };
     const res =
@@ -406,9 +525,9 @@ function SourcesSection({ sources, reload }: { sources: FuelSource[]; reload: ()
   return (
     <section className="space-y-3">
       <div className="flex items-center gap-2">
-        <h2 className="font-bold text-primary mr-auto">Postos e tanques</h2>
+        <h2 className="font-bold text-primary mr-auto">Postos, tanques e melosas</h2>
         <button type="button" className={btnPrimary} onClick={() => open('new')}>
-          <Plus size={16} /> Novo posto ou tanque
+          <Plus size={16} /> Novo posto, tanque ou melosa
         </button>
       </div>
       <div className="bg-white rounded-xl border border-border shadow-sm overflow-x-auto">
@@ -420,7 +539,7 @@ function SourcesSection({ sources, reload }: { sources: FuelSource[]; reload: ()
               <tr>
                 <th className={thCls}>Nome</th>
                 <th className={thCls}>Tipo</th>
-                <th className={thCls}>Combustível / capacidade</th>
+                <th className={thCls}>Combustível / local</th>
                 <th className={`${thCls} text-right`}>Ações</th>
               </tr>
             </thead>
@@ -429,12 +548,33 @@ function SourcesSection({ sources, reload }: { sources: FuelSource[]; reload: ()
                 <tr key={s.id} className={s.active ? '' : 'opacity-50'}>
                   <td className="px-3 py-2 font-bold text-primary">{s.name}</td>
                   <td className="px-3 py-2">
-                    <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-full ${s.kind === 'tanque' ? 'bg-amber-100 text-amber-800' : 'bg-sky-100 text-sky-800'}`}>
-                      {s.kind === 'tanque' ? 'Tanque próprio' : 'Posto'}
+                    <span
+                      className={`text-[10px] font-bold uppercase px-2 py-1 rounded-full ${
+                        s.kind === 'tanque'
+                          ? 'bg-amber-100 text-amber-800'
+                          : s.kind === 'comboio'
+                            ? 'bg-orange-100 text-orange-800'
+                            : 'bg-sky-100 text-sky-800'
+                      }`}
+                    >
+                      {KIND_LABEL[s.kind]}
                     </span>
                   </td>
                   <td className="px-3 py-2 text-xs">
-                    {s.kind === 'tanque' ? `${s.fuel_type || '—'}${s.capacity ? ` · ${s.capacity.toLocaleString('pt-BR')} L` : ''}` : '—'}
+                    {isStorage(s.kind) ? (
+                      `${s.fuel_type || '—'}${s.capacity ? ` · ${s.capacity.toLocaleString('pt-BR')} L` : ''}`
+                    ) : mapsUrl(s.location) ? (
+                      <a
+                        href={mapsUrl(s.location)!}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-secondary font-bold hover:underline"
+                      >
+                        <MapPin size={13} /> Ver no mapa
+                      </a>
+                    ) : (
+                      '—'
+                    )}
                   </td>
                   <td className="px-3 py-2 text-right whitespace-nowrap space-x-1">
                     <button type="button" className={btnGhost} onClick={() => open(s)}>
@@ -452,13 +592,14 @@ function SourcesSection({ sources, reload }: { sources: FuelSource[]; reload: ()
       </div>
 
       {editing ? (
-        <Modal title={editing === 'new' ? 'Novo posto ou tanque' : 'Editar'} onClose={() => setEditing(null)}>
+        <Modal title={editing === 'new' ? 'Novo posto, tanque ou melosa' : 'Editar'} onClose={() => setEditing(null)}>
           <form onSubmit={save} className="space-y-3">
             {error ? <div className="text-sm text-red-600 font-medium">{error}</div> : null}
             <Field label="Tipo">
               <select className={inputCls} value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value as SourceKind })}>
                 <option value="posto">Posto (fornecedor)</option>
-                <option value="tanque">Tanque próprio / comboio</option>
+                <option value="tanque">Tanque próprio</option>
+                <option value="comboio">Melosa (caminhão comboio)</option>
               </select>
             </Field>
             <Field label="Nome">
@@ -467,10 +608,33 @@ function SourcesSection({ sources, reload }: { sources: FuelSource[]; reload: ()
                 required
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder={form.kind === 'tanque' ? 'Ex.: TANQUE CANTEIRO' : 'Ex.: POSTO ITAJAÓ'}
+                placeholder={form.kind === 'tanque' ? 'Ex.: TANQUE CANTEIRO' : form.kind === 'comboio' ? 'Ex.: MELOSA ABC1D23' : 'Ex.: POSTO ITAJAÓ'}
               />
             </Field>
-            {form.kind === 'tanque' ? (
+            {form.kind === 'posto' ? (
+              <Field label="Localização" hint="Endereço ou link do Google Maps. Vira o botão “Ver no mapa”.">
+                <div className="flex gap-2">
+                  <input
+                    className={inputCls}
+                    value={form.location}
+                    onChange={(e) => setForm({ ...form, location: e.target.value })}
+                    placeholder="Ex.: BR-381, km 450, Itajubá - MG"
+                  />
+                  {mapsUrl(form.location) ? (
+                    <a
+                      href={mapsUrl(form.location)!}
+                      target="_blank"
+                      rel="noreferrer"
+                      className={`${btnGhost} mt-1 shrink-0`}
+                      aria-label="Testar no mapa"
+                    >
+                      <MapPin size={14} />
+                    </a>
+                  ) : null}
+                </div>
+              </Field>
+            ) : null}
+            {isStorage(form.kind) ? (
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Combustível">
                   <FuelTypeInput value={form.fuel_type} onChange={(v) => setForm({ ...form, fuel_type: v })} />

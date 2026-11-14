@@ -7,7 +7,7 @@ import { Fuel, Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/lib/workspace';
 import { formatEmployeeName } from '@/lib/employeeName';
-import { SOURCE_COLS, VEHICLE_COLS, type FuelSource, type FuelVehicle } from '@/lib/fuel';
+import { SOURCE_COLS, VEHICLE_COLS, photoUrls, type FuelSource, type FuelVehicle } from '@/lib/fuel';
 import type { FuelData } from '@/components/fuel/FuelUi';
 import FuelLogsTab from '@/components/fuel/FuelLogsTab';
 import FuelTankTab from '@/components/fuel/FuelTankTab';
@@ -16,14 +16,14 @@ import FuelFleetTab from '@/components/fuel/FuelFleetTab';
 type Tab = 'lancamentos' | 'tanque' | 'frota';
 const TABS: { id: Tab; label: string }[] = [
   { id: 'lancamentos', label: 'Abastecimentos' },
-  { id: 'tanque', label: 'Tanque' },
+  { id: 'tanque', label: 'Tanques e melosas' },
   { id: 'frota', label: 'Frota e postos' },
 ];
 
 export default function AbastecimentosPage() {
   const { isAdm, status, currentWorkspace, currentOrganization } = useWorkspace();
   const [tab, setTab] = useState<Tab>('lancamentos');
-  const [data, setData] = useState<Omit<FuelData, 'reload'> | null>(null);
+  const [data, setData] = useState<Omit<FuelData, 'reload' | 'workspaceId'> | null>(null);
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
@@ -42,8 +42,11 @@ export default function AbastecimentosPage() {
       return;
     }
     setError('');
+    const vehicles = (v.data ?? []) as FuelVehicle[];
+    const photos = await photoUrls(supabase, vehicles.map((x) => x.photo_path).filter((x): x is string => !!x));
     setData({
-      vehicles: (v.data ?? []) as FuelVehicle[],
+      vehicles,
+      photos,
       sources: (s.data ?? []) as FuelSource[],
       employees: ((e.data ?? []) as { id: string; full_name: string; role: string | null; status?: string }[])
         .filter((x) => !x.status || x.status === 'Ativo')
@@ -67,7 +70,7 @@ export default function AbastecimentosPage() {
     return <div className="p-8 text-center text-slate-500">O módulo de abastecimentos está em teste e, por enquanto, só o ADM tem acesso.</div>;
   }
 
-  const fuelData: FuelData | null = data ? { ...data, reload: load } : null;
+  const fuelData: FuelData | null = data ? { ...data, workspaceId: currentWorkspace?.id ?? '', reload: load } : null;
 
   return (
     <div className="space-y-4">
@@ -113,7 +116,7 @@ export default function AbastecimentosPage() {
       ) : tab === 'tanque' ? (
         <FuelTankTab key={currentWorkspace?.id} data={fuelData} />
       ) : (
-        <FuelFleetTab data={fuelData} />
+        <FuelFleetTab key={currentWorkspace?.id} data={fuelData} />
       )}
     </div>
   );
