@@ -755,6 +755,11 @@ function InventoryContent() {
     setIsSubmitting(false);
   };
 
+  const pickItemPhoto = useCallback((f: File) => {
+    setItemPhotoFile(f);
+    setDropItemPhoto(false);
+  }, []);
+
   /** Envia a foto nova (ou remove a antiga) depois de salvar o item. Devolve a mensagem de erro, se houver. */
   const saveItemPhoto = async (itemId: string, oldPath: string | null): Promise<string | null> => {
     if (!itemPhotoFile && !dropItemPhoto) return null;
@@ -2604,10 +2609,8 @@ function InventoryContent() {
                       editingItem?.photo_path && !dropItemPhoto ? itemPhotos[editingItem.photo_path] : undefined
                     }
                     file={itemPhotoFile}
-                    onPick={(f) => {
-                      setItemPhotoFile(f);
-                      setDropItemPhoto(false);
-                    }}
+                    searchQuery={formData.description}
+                    onPick={pickItemPhoto}
                     onRemove={() => {
                       setItemPhotoFile(null);
                       setDropItemPhoto(true);
